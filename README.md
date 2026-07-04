@@ -81,7 +81,7 @@ $JAC register-skill ./crystallized/foo_v1.jac osp # drop in a precompiled OSP mo
 MCP servers are `McpServer` nodes on the `Soul`; skills are `TaskGraph`s in the `Registry`.
 A crystallized agent's live-tool calls (`_live_tool`) dispatch to whichever registered
 server exposes the tool; the frontier binds those tool names when it crystallizes. A *new*
-capability an *old* skill should use = a `mutate`. In server mode (`jac serve`), the same
+capability an *old* skill should use = a `mutate`. In server mode (`jac start`), the same
 operations are `walker:pub` endpoints — swap to `:priv` and each user gets an isolated graph
 (their own soul, skills, and MCP servers) with auth, for free.
 

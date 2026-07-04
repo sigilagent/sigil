@@ -19,6 +19,7 @@ import from compiler.compiler { transpile_ir }
 import from prom_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
+import from views { VNode, VEdge, VGraph, VCall, VObs }
 
 # ---------------------------------------------------------------------------
 # The two-tier cascade. Frontier crystallizes (expensive, rare); small executes
@@ -403,7 +404,7 @@ def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     # time, as a context preamble on the task — never baked into the procedure.
     # The user's registered MCP servers are exposed to the run's live tools.
     run_input = (context + "\nTask: " + task) if context else task;
-    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json());
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400]);
@@ -548,7 +549,92 @@ def recollect(query: str, k: int = 8) -> list {
 }
 
 # ---------------------------------------------------------------------------
-# Server-mode endpoints (`jac serve main.jac`) — the OpenClaw-style drop-in: a
+# Live observability — a snapshot of the agent's own graph (for the visualizer)
+# and a tail of the token stream (every LLM call captured by prom_observe).
+# ---------------------------------------------------------------------------
+def _nid(prefix: str, n: int) -> str { return prefix + str(n); }
+
+def graph_snapshot() -> VGraph {
+    # Serialize the whole agent graph as typed nodes/edges for the visualizer.
+    soul = awaken();
+    g = VGraph();
+    g.nodes.append(VNode(id="soul", label=soul.name, group="soul", detail=soul.persona));
+    regs = [soul -->[?:Registry]];
+    reg = regs[0] if regs else None;
+    if reg is not None {
+        g.nodes.append(VNode(id="registry", label="registry", group="registry"));
+        g.edges.append(VEdge(src="soul", kind="owns", dst="registry"));
+    }
+    servers = [soul -->[?:McpServer]];
+    for s in servers {
+        sid = _nid("mcp:", len(g.nodes));
+        g.nodes.append(VNode(id=sid, label=s.name, group="mcp",
+                             detail=s.transport + (" " + s.command if s.command else " " + s.url)));
+        g.edges.append(VEdge(src="soul", kind="provides", dst=sid));
+    }
+    mi = 0;
+    for m in [soul -->[?:Memory]] {
+        mid = _nid("mem:", mi); mi += 1;
+        g.nodes.append(VNode(id=mid, label=m.content[:40], group="memory",
+                             detail=m.kind + " · used " + str(m.uses) + "x"));
+        g.edges.append(VEdge(src="soul", kind="remembers", dst=mid));
+    }
+    by_id: dict = {};
+    ti = 0;
+    if reg is not None {
+        for tg in [reg -->[?:TaskGraph]] {
+            tid = _nid("tg:", ti); ti += 1;
+            by_id[jid(tg)] = tid;
+            g.nodes.append(VNode(id=tid, label=tg.signature + " v" + str(tg.version), group="skill",
+                                 detail=tg.origin + " · " + str(tg.successes) + "/" + str(tg.runs) + " ok"));
+            g.edges.append(VEdge(src="registry", kind="crystallized", dst=tid));
+        }
+        for tg in [reg -->[?:TaskGraph]] {
+            tid = str(by_id[jid(tg)]);
+            for prev in [tg -->[?:TaskGraph]] {
+                if jid(prev) in by_id { g.edges.append(VEdge(src=tid, kind="mutated-from", dst=str(by_id[jid(prev)]))); }
+            }
+            ai = 0;
+            for a in [tg -->[?:Attempt]] {
+                if ai >= 3 { break; }
+                aid = tid + ":a" + str(ai); ai += 1;
+                g.nodes.append(VNode(id=aid, label=("ok" if a.ok else "fail"),
+                                     group=("attempt-ok" if a.ok else "attempt-fail"), detail=a.task[:60]));
+                g.edges.append(VEdge(src=tid, kind="ran", dst=aid));
+            }
+        }
+    }
+    g.skills = ti; g.memories = mi; g.mcp = len(servers);
+    return g;
+}
+
+def observability_tail(n: int = 120) -> VObs {
+    import from prom_observe { read_tail }
+    recs = read_tail(os.path.join(WORKDIR, "observability", "live.jsonl"), n);
+    o = VObs();
+    for r in recs {
+        c = VCall(
+            model=str(r.get("model", "?")),
+            signature=str(r.get("signature", "")),
+            prompt_tokens=int(r.get("prompt_tokens", 0) or 0),
+            completion_tokens=int(r.get("completion_tokens", 0) or 0),
+            reasoning_tokens=int(r.get("reasoning_tokens", 0) or 0),
+            cache_read_tokens=int(r.get("cache_read_tokens", 0) or 0),
+            cost_usd=float(str(r.get("cost_usd", 0) or 0)),
+            content=str(r.get("content", "") or ""),
+            reasoning=str(r.get("reasoning_content", "") or ""),
+            tools=", ".join([str(t) for t in (r.get("tool_calls", []) or [])])
+        );
+        o.calls.append(c);
+        o.tin += c.prompt_tokens; o.tout += c.completion_tokens; o.treason += c.reasoning_tokens;
+        o.cost += c.cost_usd;
+    }
+    o.n = len(o.calls);
+    return o;
+}
+
+# ---------------------------------------------------------------------------
+# Server-mode endpoints (`jac start observatory.jac`) — the OpenClaw-style drop-in: a
 # channel adapter POSTs to these. Swap `:pub` -> `:priv` and each user gets an
 # isolated root graph (their own soul, skills, MCP servers) with JWT auth, for
 # free. `has` fields are the request body; `report` is the response.
@@ -589,4 +675,13 @@ walker:pub api_library {
 
 walker:pub api_mcp {
     can run with `root entry { report mcp_status(); }
+}
+
+walker:pub api_graph {
+    can run with `root entry { report graph_snapshot(); }
+}
+
+walker:pub api_observability {
+    has n: int = 120;
+    can run with `root entry { report observability_tail(self.n); }
 }

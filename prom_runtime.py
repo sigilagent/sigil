@@ -79,9 +79,11 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
 
 _DRIVER = '''import from crystallized.{mod} {{ run }}
 import from byllm.lib {{ Model }}
+import prom_observe;
 import os;
 
 with entry:__main__ {{
+    prom_observe.install(os.getenv("PROM_OBS", ""), os.getenv("PROM_SIG", ""));
     m = Model(model_name=os.getenv("PROM_MODEL", "gpt-4o-mini"));
     task = os.getenv("PROM_TASK", "");
     skill = os.getenv("PROM_SKILL", "");
@@ -93,10 +95,12 @@ with entry:__main__ {{
 
 _MARKER = "<<<PROM_REPORT>>>"
 
+OBS_LOG = "observability/live.jsonl"
+
 
 def execute_module(module_path: str, task: str, model_name: str,
                    skill: str = "", workdir: str = ".", timeout: int = 1800,
-                   mcp_json: str = "") -> dict:
+                   mcp_json: str = "", signature: str = "") -> dict:
     """Run a crystallized module in an isolated ``jac run`` subprocess.
 
     Returns ``{ok, report, error}``. Never raises — a crash/timeout is a typed
@@ -109,6 +113,8 @@ def execute_module(module_path: str, task: str, model_name: str,
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER))
     env = dict(os.environ)
     env.update(PROM_MODEL=model_name, PROM_TASK=task, PROM_SKILL=skill)
+    env["PROM_OBS"] = str(pathlib.Path(workdir) / OBS_LOG)
+    env["PROM_SIG"] = signature
     if mcp_json:
         env["PROM_MCP"] = mcp_json
     jac = os.getenv("PROM_JAC", "jac")
