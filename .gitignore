@@ -224,3 +224,6 @@ crystallized/
 _driver_*.jac
 __pycache__/
 .jac/
+
+# native build artifacts (platform-specific)
+bin/
