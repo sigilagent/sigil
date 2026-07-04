@@ -33,6 +33,7 @@ glob router: Model   = Model(model_name=ROUTER_NAME);
 
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
+glob ETHOS: str    = "";   # the soul's operating principles, rebound from the graph at awaken()
 
 # ---------------------------------------------------------------------------
 # Cognition — the ONLY model calls in the system. Everything else is graph
@@ -60,30 +61,70 @@ typed slots over free prose, embodied/runnable tool bodies over prose pointers, 
 ordered operation pipelines over ad-hoc dispatch. Every tool must carry a runnable
 command or an explicit snippet; never leave a step as a bare description.
 
+Honor the agent's ETHOS (its operating principles) in how you shape the procedure.
+
 Return ONLY the AG-IR text (starting with the '---' frontmatter), no commentary.
 
+===== ETHOS =====
+{ethos}
 ===== AG-IR CONTRACT =====
 {contract}""";
-def author_agir(intent: str, task: str, contract: str) -> str by frontier();
+def author_agir(intent: str, task: str, ethos: str, contract: str) -> str by frontier();
 
 sem revise_agir = """Revise the PRIOR AG-IR so the compiled agent ALSO handles the new
 TASK it failed or under-covered, given the FAILURE signal. Preserve everything that
 works; extend types/tools/operations minimally and surgically. Keep the same top-level
 name/signature. Return ONLY the full revised AG-IR text.
 
+===== ETHOS =====
+{ethos}
 ===== AG-IR CONTRACT =====
 {contract}""";
-def revise_agir(prior_agir: str, task: str, failure: str, contract: str) -> str by frontier();
+def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: str) -> str by frontier();
 
 # ---------------------------------------------------------------------------
-# The persistent agent graph.
-#   root --Anchored--> Registry --Crystallized--> TaskGraph --Ran--> Attempt
-#                                        TaskGraph(new) --MutatedFrom--> TaskGraph(old)
+# The persistent agent graph. There are NO config files and NO markdown — the
+# agent's identity, its knowledge, its skills and its memory are all nodes.
+#
+#   root --Embodies--> Soul --Knows----> Spec        (the AG-IR contract, on the graph)
+#    |                  |   \--Remembers-> Memory     (semantic layer — durable facts)
+#    |                  \--Owns---------> Registry
+#   root --Anchored--> Registry --Crystallized--> TaskGraph   (procedural layer — skills)
+#                                        TaskGraph --Ran------> Attempt   (episodic layer)
+#                                        TaskGraph --MutatedFrom--> TaskGraph  (lineage)
 # ---------------------------------------------------------------------------
-edge Anchored {}       # root -> Registry  (the agent, hung off the persistent root)
+edge Embodies {}       # root -> Soul       (the agent's identity/config, on the graph)
+edge Knows {}          # Soul -> Spec       (the crystallizer's contract, on the graph)
+edge Remembers {}      # Soul -> Memory     (semantic memory)
+edge Owns {}           # Soul -> Registry
+edge Anchored {}       # root -> Registry   (the skill library, hung off the persistent root)
 edge Crystallized {}   # Registry -> TaskGraph
 edge Ran {}            # TaskGraph -> Attempt
 edge MutatedFrom {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
+
+# --- Identity / config (OpenClaw's SOUL, but a node — not a SOUL.md) --------
+node Soul {
+    has name: str = "prometheus";
+    has persona: str = "";        # voice / character
+    has ethos: list[str] = [];    # operating principles, woven into crystallization
+    has frontier_model: str = ""; # cognition config — lives on the graph, not env
+    has small_model: str = "";
+    has router_model: str = "";
+    has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
+}
+
+node Spec {
+    has kind: str = "agir-contract";
+    has body: str = "";           # the crystallizer's contract text, seeded onto the graph
+}
+
+# --- Semantic memory: durable facts the agent carries across tasks ----------
+node Memory {
+    has content: str;
+    has kind: str = "fact";       # fact | preference | observation
+    has salience: float = 1.0;
+    has uses: int = 0;
+}
 
 node Registry {
     has name: str = "prometheus";
@@ -120,10 +161,105 @@ def latest_by_sig(crystals: list) -> list {
     return list(best.values());
 }
 
+# ---------------------------------------------------------------------------
+# Soul / config — everything lives on the graph. awaken() get-or-creates the
+# Soul + seeds the contract onto the graph, then rebinds the cognition globals
+# from graph config (so the model tiers, ethos, and contract are all graph state,
+# not env or files). Mirrors how a compiled agent rebinds `llm` in run().
+# ---------------------------------------------------------------------------
+def model_for(name: str) -> Model {
+    return Model(model_name=name);
+}
+
+def awaken() -> Soul {
+    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS;
+    found = [root -->[?:Soul]];
+    if found {
+        soul = found[0];
+    } else {
+        soul = Soul(
+            name="prometheus",
+            persona="A pragmatic operator that crystallizes tasks into reliable, minimal procedures and runs them cheaply.",
+            ethos=[
+                "Prefer mechanized structure over prose.",
+                "Never leave a step unembodied.",
+                "Ground verification in the real artifact, not a proxy.",
+                "Reuse a crystallized procedure before authoring a new one."
+            ],
+            frontier_model=os.getenv("PROM_FRONTIER", "gpt-5"),
+            small_model=os.getenv("PROM_SMALL", "ollama_chat/qwen3:32b"),
+            router_model=os.getenv("PROM_ROUTER", ""),
+            channels=["cli"]
+        );
+        root +>:Embodies:+> soul;
+        reg = Registry();
+        root +>:Anchored:+> reg;
+        soul +>:Owns:+> reg;
+        soul +>:Knows:+> Spec(kind="agir-contract", body=default_contract());
+    }
+    # rebind cognition from the graph
+    frontier = model_for(soul.frontier_model);
+    small = model_for(soul.small_model);
+    SMALL_NAME = soul.small_model;
+    router = model_for(soul.router_model if soul.router_model else soul.small_model);
+    ETHOS = "\n".join(["- " + e for e in soul.ethos]);
+    specs = [soul -->[?:Spec]];
+    if specs { CONTRACT = specs[0].body; }
+    return soul;
+}
+
+# ---------------------------------------------------------------------------
+# Semantic memory — durable facts the agent carries across tasks. recall() is
+# deterministic (lexical overlap + salience), so retrieval needs no model.
+# ---------------------------------------------------------------------------
+def _tokens(s: str) -> set[str] {
+    out: set[str] = set();
+    for w in s.lower().replace(",", " ").replace(".", " ").split() {
+        if len(w) > 2 { out.add(w); }
+    }
+    return out;
+}
+
+def remember(soul: Soul, content: str, kind: str) -> Memory {
+    m = Memory(content=content, kind=kind);
+    soul +>:Remembers:+> m;
+    return m;
+}
+
+def recall(soul: Soul, query: str, k: int) -> list[Memory] {
+    q = _tokens(query);
+    # tuple = (-score, seq, memory); seq is a strict tie-breaker so nodes never compare
+    scored: list = [];
+    seq = 0;
+    for m in [soul -->[?:Memory]] {
+        overlap = len(q & _tokens(m.content));
+        if overlap > 0 {
+            scored.append((0.0 - (overlap * m.salience), seq, m));
+            seq += 1;
+        }
+    }
+    scored.sort();
+    picked: list[Memory] = [t[2] for t in scored[:k]];
+    for m in picked { m.uses += 1; }
+    return picked;
+}
+
+def memory_context(mems: list[Memory]) -> str {
+    if not mems { return ""; }
+    return "What the agent remembers:\n" + "\n".join(["- " + m.content for m in mems]) + "\n";
+}
+
+# The self-evolving hook: distill durable facts from a completed task.
+sem distill = """From a completed TASK and its RESULT, extract 0-3 DURABLE facts worth
+remembering for future tasks (stable preferences, environment facts, conventions the
+user relies on). Skip anything one-off or already obvious. Return a JSON list of short
+strings; return [] if nothing is worth keeping.""";
+def distill(task: str, result: str) -> list[str] by router();
+
 def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
     # Frontier builds an AG-IR for the task CLASS, compiler lowers it, we persist it.
     sig = name_signature(task);
-    agir = author_agir(intent, task, CONTRACT);
+    agir = author_agir(intent, task, ETHOS, CONTRACT);
     osp = transpile_ir(agir, sig);
     path = write_module(osp, sig, 1, WORKDIR);
     tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=path,
@@ -134,7 +270,7 @@ def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
 
 def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
     # Frontier revises an existing procedure into a new version node (lineage kept).
-    new_agir = revise_agir(tg.agir, task, failure, CONTRACT);
+    new_agir = revise_agir(tg.agir, task, failure, ETHOS, CONTRACT);
     v = tg.version + 1;
     osp = transpile_ir(new_agir, tg.signature);
     path = write_module(osp, tg.signature, v, WORKDIR);
@@ -145,9 +281,12 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
     return nt;
 }
 
-def run_crystal(tg: TaskGraph, task: str, skill: str) -> dict {
-    # Small model executes the crystallized OSP; record the attempt + stats on the graph.
-    res = execute_module(tg.module, task, SMALL_NAME, skill, WORKDIR);
+def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
+    # Small model executes the crystallized OSP. The crystallized PROCEDURE is
+    # class-general; instance-specific semantic memory is injected here, at run
+    # time, as a context preamble on the task — never baked into the procedure.
+    run_input = (context + "\nTask: " + task) if context else task;
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400]);
@@ -189,37 +328,41 @@ walker solve {
     has signature: str = "";
 
     can enter with `root entry {
-        reg = [-->][?:Registry];
-        if not reg {
-            r = Registry();
-            here +>:Anchored:+> r;
-            visit r;
-        } else {
-            visit reg[0];
-        }
-    }
+        soul = awaken();                       # identity + config + contract, all on the graph
+        reg = [-->][?:Registry][0];
 
-    can route with Registry entry {
-        crystals: list[TaskGraph] = latest_by_sig([-->][?:TaskGraph]);
+        # --- semantic memory: recall durable facts relevant to this task ----
+        mems = recall(soul, self.task, 5);
+        ctx = memory_context(mems);
+        if mems { self.trace += "recall -> " + str(len(mems)) + " memory\n"; }
+
+        # --- route through the procedural library ---------------------------
+        crystals: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
         known = [c.signature for c in crystals];
         verdict = classify(self.task, known) if known else "NONE";
         self.trace += "route -> " + verdict + "\n";
 
-        tg: TaskGraph = select_target(here, crystals, verdict, self.task);
+        tg: TaskGraph = select_target(reg, crystals, verdict, self.task);
         self.trace += route_note(verdict, tg);
         self.signature = tg.signature;
-        res = run_crystal(tg, self.task, self.skill);
+        res = run_crystal(tg, self.task, ctx, self.skill);
 
-        # Escalation safety-valve: if the cheap model fails on a crystallized
-        # procedure, the frontier mutates it once and we retry.
+        # --- escalation valve: cheap model fails -> frontier mutate + retry --
         if not res["ok"] {
             self.trace += "small-model FAIL -> frontier mutate + retry\n";
-            tg = mutate(here, tg, self.task, str(res["error"]));
-            res = run_crystal(tg, self.task, self.skill);
+            tg = mutate(reg, tg, self.task, str(res["error"]));
+            res = run_crystal(tg, self.task, ctx, self.skill);
             self.signature = tg.signature;
         }
 
         self.result = str(res["report"]);
+
+        # --- self-evolution: learn durable facts from the completed task ----
+        if res["ok"] {
+            facts = distill(self.task, self.result);
+            for f in facts { remember(soul, f, "fact"); }
+            if facts { self.trace += "learned -> " + str(len(facts)) + " memory\n"; }
+        }
         self.trace += ("DONE ok" if res["ok"] else "DONE fail") + "\n";
     }
 }
@@ -244,4 +387,45 @@ def library() -> list {
         });
     }
     return out;
+}
+
+def describe_soul() -> dict {
+    soul = awaken();
+    mems = [soul -->[?:Memory]];
+    regs = [soul -->[?:Registry]];
+    nskills = len(latest_by_sig([regs[0] -->[?:TaskGraph]])) if regs else 0;
+    return {
+        "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
+        "frontier_model": soul.frontier_model, "small_model": soul.small_model,
+        "router_model": (soul.router_model if soul.router_model else soul.small_model),
+        "channels": soul.channels,
+        "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
+        "skills": nskills
+    };
+}
+
+def configure(key: str, value: str) -> str {
+    # Mutate the soul (config) on the graph — no file is ever written.
+    soul = awaken();
+    if key == "persona" { soul.persona = value; }
+    elif key == "frontier_model" { soul.frontier_model = value; }
+    elif key == "small_model" { soul.small_model = value; }
+    elif key == "router_model" { soul.router_model = value; }
+    elif key == "name" { soul.name = value; }
+    elif key == "add_ethos" { soul.ethos = soul.ethos + [value]; }
+    elif key == "add_channel" { soul.channels = soul.channels + [value]; }
+    else { return "unknown key: " + key; }
+    return key + " = " + value;
+}
+
+def teach(fact: str, kind: str = "fact") -> str {
+    # Write a durable memory directly onto the graph.
+    soul = awaken();
+    remember(soul, fact, kind);
+    return "remembered (" + kind + "): " + fact;
+}
+
+def recollect(query: str, k: int = 8) -> list {
+    soul = awaken();
+    return [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in recall(soul, query, k)];
 }
