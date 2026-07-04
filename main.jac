@@ -17,6 +17,9 @@ import from prometheus {
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
+import from channels { channel_add, channel_list, channel_remove, message_send, inbound }
+import from hooks { hook_add, hook_list, hook_enable, hook_remove }
+import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -153,6 +156,30 @@ with entry:__main__ {
             r = register_skill(src, kind);
             print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
         }
+    } elif cmd == "channel" {
+        sub = _arg(argv, 1);
+        if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
+        elif sub == "list" { for c in channel_list() { print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  " + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])); } }
+        elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
+        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"])); }
+        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("reply: " + str(r["reply"])); }
+        else { print("usage: channel add|list|rm|send|inbound ..."); }
+    } elif cmd == "hook" {
+        sub = _arg(argv, 1);
+        if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }
+        elif sub == "list" { for h in hook_list() { print("  " + str(h["name"]) + "  @" + str(h["event"]) + "  [" + str(h["kind"]) + "]  " + ("on" if h["enabled"] else "off") + "  fired=" + str(h["fired"])); } }
+        elif sub == "enable" { print(hook_enable(_arg(argv, 2), True)); }
+        elif sub == "disable" { print(hook_enable(_arg(argv, 2), False)); }
+        elif sub == "rm" { print(hook_remove(_arg(argv, 2))); }
+        else { print("usage: hook add|list|enable|disable|rm ..."); }
+    } elif cmd == "approvals" {
+        sub = _arg(argv, 1);
+        if sub == "get" { g = approvals_get(); print("security=" + str(g["security"]) + " ask=" + str(g["ask"])); print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])])); print("pending: " + str(len(list(g["pending"])))); }
+        elif sub == "set" { print(approvals_set(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "allow" { print(allowlist_add(_arg(argv, 2))); }
+        elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
+        elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
+        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
     } else {
         print("Prometheus — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
