@@ -15,11 +15,22 @@ execution a fresh, disposable ``root`` — Prometheus keeps only the crystallize
 
 import os
 import re
+import sys
 import pathlib
 import subprocess
 
 CRYSTAL_DIR = "crystallized"
 _HERE = pathlib.Path(os.path.abspath(__file__)).parent
+
+
+def _jac_bin() -> str:
+    """The jac binary that matches THIS interpreter — never a bare `jac` from PATH,
+    which may resolve to a different (incompatible) jaclang install."""
+    env = os.getenv("PROM_JAC")
+    if env:
+        return env
+    cand = os.path.join(os.path.dirname(sys.executable), "jac")
+    return cand if os.path.exists(cand) else "jac"
 
 
 def repo_root() -> str:
@@ -87,13 +98,16 @@ import prom_observe;
 import os;
 
 with entry:__main__ {{
-    prom_observe.install(os.getenv("PROM_OBS", ""), os.getenv("PROM_SIG", ""));
-    m = Model(model_name=os.getenv("PROM_MODEL", "gpt-4o-mini"));
+    obs = os.getenv("PROM_OBS", "");
+    sig = os.getenv("PROM_SIG", "");
+    prom_observe.install(obs, sig);
+    model_name = os.getenv("PROM_MODEL", "gpt-4o-mini");
+    m = Model(model_name=model_name);
     task = os.getenv("PROM_TASK", "");
     skill = os.getenv("PROM_SKILL", "");
-    report = run(task, m, skill);
+    out = run(task, m, skill);
     print("{marker}");
-    print(report);
+    print(out);
 }}
 '''
 
@@ -121,7 +135,7 @@ def execute_module(module_path: str, task: str, model_name: str,
     env["PROM_SIG"] = signature
     if mcp_json:
         env["PROM_MCP"] = mcp_json
-    jac = os.getenv("PROM_JAC", "jac")
+    jac = _jac_bin()
     try:
         p = subprocess.run([jac, "run", str(driver)], cwd=workdir, env=env,
                            capture_output=True, text=True, timeout=timeout)
