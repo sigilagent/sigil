@@ -46,14 +46,14 @@ def:pub App() -> JsxElement {
     has status: str = "idle";
     has timer: any = 0;
 
-    def refresh() -> None {
+    async def refresh() -> None {
         rg = root spawn api_graph();
         if rg.reports { graph = rg.reports[0]; }
         ro = root spawn api_observability(n=150);
         if ro.reports { obs = ro.reports[0]; }
     }
 
-    def launch() -> None {
+    async def launch() -> None {
         if not task { return; }
         status = "solving…";
         root spawn api_solve(task=task, skill="");
