@@ -171,14 +171,18 @@ node Attempt {
 # ---------------------------------------------------------------------------
 # Graph operations (deterministic — no model calls except the byLLM defs above).
 # ---------------------------------------------------------------------------
-def latest_by_sig(crystals: list) -> list {
+def latest_by_sig(crystals: list[TaskGraph]) -> list[TaskGraph] {
     # Keep only the highest-version TaskGraph per signature.
     best: dict = {};
     for c in crystals {
         cur = best.get(c.signature);
         if (cur is None) or (c.version > cur.version) { best[c.signature] = c; }
     }
-    return list(best.values());
+    out: list[TaskGraph] = [];
+    for c in crystals {
+        if best.get(c.signature) is c { out.append(c); }
+    }
+    return out;
 }
 
 # ---------------------------------------------------------------------------
@@ -573,7 +577,10 @@ def graph_snapshot() -> VGraph {
         g.edges.append(VEdge(src="soul", kind="provides", dst=sid));
     }
     mi = 0;
+    seen_mem: dict = {};
     for m in [soul -->[?:Memory]] {
+        if m.content in seen_mem { continue; }
+        seen_mem[m.content] = True;
         mid = _nid("mem:", mi); mi += 1;
         g.nodes.append(VNode(id=mid, label=m.content[:40], group="memory",
                              detail=m.kind + " · used " + str(m.uses) + "x"));
@@ -582,14 +589,16 @@ def graph_snapshot() -> VGraph {
     by_id: dict = {};
     ti = 0;
     if reg is not None {
-        for tg in [reg -->[?:TaskGraph]] {
+        # latest version per signature (collapses duplicate registrations, like library())
+        skills = latest_by_sig([reg -->[?:TaskGraph]]);
+        for tg in skills {
             tid = _nid("tg:", ti); ti += 1;
             by_id[jid(tg)] = tid;
             g.nodes.append(VNode(id=tid, label=tg.signature + " v" + str(tg.version), group="skill",
                                  detail=tg.origin + " · " + str(tg.successes) + "/" + str(tg.runs) + " ok"));
             g.edges.append(VEdge(src="registry", kind="crystallized", dst=tid));
         }
-        for tg in [reg -->[?:TaskGraph]] {
+        for tg in skills {
             tid = str(by_id[jid(tg)]);
             for prev in [tg -->[?:TaskGraph]] {
                 if jid(prev) in by_id { g.edges.append(VEdge(src=tid, kind="mutated-from", dst=str(by_id[jid(prev)]))); }
