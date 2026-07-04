@@ -445,7 +445,7 @@ walker solve {
     has trace: str = "";
     has signature: str = "";
 
-    can enter with `root entry {
+    can enter with Root entry {
         soul = awaken();                       # identity + config + contract, all on the graph
         reg = [-->][?:Registry][0];
 
@@ -642,7 +642,7 @@ def observability_tail(n: int = 120) -> VObs {
 walker:pub api_solve {
     has task: str;
     has skill: str = "";
-    can run with `root entry { report solve_task(self.task, self.skill); }
+    can run with Root entry { report solve_task(self.task, self.skill); }
 }
 
 walker:pub api_add_mcp {
@@ -650,38 +650,38 @@ walker:pub api_add_mcp {
     has target: str;
     has transport: str = "stdio";
     has args: list[str] = [];
-    can run with `root entry { report add_mcp(self.name, self.transport, self.target, self.args); }
+    can run with Root entry { report add_mcp(self.name, self.transport, self.target, self.args); }
 }
 
 walker:pub api_register_skill {
     has source: str;          # SKILL.md text / AG-IR text / OSP module path
     has kind: str = "md";     # md | agir | osp
-    can run with `root entry { report register_skill(self.source, self.kind); }
+    can run with Root entry { report register_skill(self.source, self.kind); }
 }
 
 walker:pub api_teach {
     has fact: str;
     has kind: str = "fact";
-    can run with `root entry { report teach(self.fact, self.kind); }
+    can run with Root entry { report teach(self.fact, self.kind); }
 }
 
 walker:pub api_soul {
-    can run with `root entry { report describe_soul(); }
+    can run with Root entry { report describe_soul(); }
 }
 
 walker:pub api_library {
-    can run with `root entry { report library(); }
+    can run with Root entry { report library(); }
 }
 
 walker:pub api_mcp {
-    can run with `root entry { report mcp_status(); }
+    can run with Root entry { report mcp_status(); }
 }
 
 walker:pub api_graph {
-    can run with `root entry { report graph_snapshot(); }
+    can run with Root entry { report graph_snapshot(); }
 }
 
 walker:pub api_observability {
     has n: int = 120;
-    can run with `root entry { report observability_tail(self.n); }
+    can run with Root entry { report observability_tail(self.n); }
 }
