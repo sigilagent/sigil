@@ -20,6 +20,7 @@ import from cron {
 import from channels { channel_add, channel_list, channel_remove, message_send, inbound }
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
+import from agent { run_task }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -49,7 +50,7 @@ with entry:__main__ {
         if not task {
             print("usage: solve \"<task>\" [skill]");
         } else {
-            r = solve_task(task, skill);
+            r = run_task(task, skill);
             print("=== route trace ===");
             print(r["trace"]);
             print("=== signature: " + r["signature"] + " ===");

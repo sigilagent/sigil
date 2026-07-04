@@ -9,7 +9,9 @@ The due-time arithmetic is compiled NATIVE (`na def compute_next`) — a pure in
 hot path over timestamps, the kind of thing the native codespace is for.
 """
 
-import from prometheus { awaken, Soul, solve_task }
+import from prometheus { awaken, Soul }
+import from agent { run_task }
+import from hooks { fire_hooks }
 import from prom_cron { now_ms, parse_at, cron_next }
 
 edge Schedules {}   # Soul -> CronJob
@@ -143,7 +145,8 @@ def cron_tick() -> dict {
     fired: list = [];
     for j in _jobs(soul) {
         if (not j.enabled) or (j.next_run_ms <= 0) or (j.next_run_ms > t) { continue; }
-        res = solve_task(j.task, "");
+        fire_hooks("cron_fired", j.name);
+        res = run_task(j.task, "");
         ok = "DONE ok" in str(res["trace"]);
         run = CronRun(started_ms=t, ok=ok, summary=str(res["result"])[:400]);
         j +>:Fired:+> run;

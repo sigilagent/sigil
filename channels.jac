@@ -8,7 +8,9 @@ concrete adapter (a Discord bot, a webhook) just calls `inbound()` and delivers 
 the `api_inbound` HTTP endpoint IS a ready webhook channel.
 """
 
-import from prometheus { awaken, Soul, solve_task }
+import from prometheus { awaken, Soul }
+import from agent { run_task }
+import from hooks { fire_hooks }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message
@@ -81,7 +83,8 @@ def inbound(channel: str, peer: str, text: str) -> dict {
     ch = _get_channel(soul, channel);
     if not ch.enabled { return {"ok": False, "reply": "", "error": "channel disabled"}; }
     _record(ch, "in", peer, text);
-    res = solve_task(text, "");
+    fire_hooks("message_received", channel + ":" + peer + ": " + text);
+    res = run_task(text, "");
     reply = str(res["result"]);
     _record(ch, "out", peer, reply);
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
