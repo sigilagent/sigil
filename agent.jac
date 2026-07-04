@@ -16,3 +16,24 @@ def run_task(task: str, skill: str = "") -> dict {
     fire_hooks("after_solve" if ok else "solve_failed", str(r["result"]));
     return r;
 }
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible endpoint — any OpenClaw channel / OpenAI client can point at
+# Prometheus as a "model" (POST /walker/api_chat_completions). The last user
+# message becomes the task; the crystallize->execute reply comes back in the
+# OpenAI chat-completion shape.
+# ---------------------------------------------------------------------------
+walker:pub api_chat_completions {
+    has messages: list = [];
+    has model: str = "prometheus";
+    can run with Root entry {
+        text = "";
+        for m in self.messages { if str(m.get("role")) == "user" { text = str(m.get("content")); } }
+        r = run_task(text, "");
+        report {
+            "id": "prom-chatcmpl", "object": "chat.completion", "model": self.model,
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": str(r["result"])}}]
+        };
+    }
+}
