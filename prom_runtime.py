@@ -28,8 +28,12 @@ def repo_root() -> str:
 
 
 def default_contract() -> str:
-    """The AG-IR authoring contract handed to the frontier crystallizer."""
-    for name in ("agir-standard.md", "agir-primitives.md"):
+    """The AG-IR authoring contract handed to the frontier crystallizer.
+
+    Prefer the compiler-exact template (a concrete working AG-IR to mimic) over the
+    abstract primitive-standard — zero-shot authoring needs the exact schema.
+    """
+    for name in ("agir-template.md", "agir-standard.md", "agir-primitives.md"):
         p = _HERE / "contracts" / name
         if p.exists():
             return p.read_text()
