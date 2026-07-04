@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- prometheus runtime state (the agent's evolving graph lives here, not in git) ---
+crystallized/
+*.session
+*.session.*
+_driver_*.jac
+__pycache__/
+.jac/
