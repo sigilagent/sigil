@@ -70,25 +70,30 @@ If REGISTERED TOOLS are listed, bind the relevant ones as live-integration tools
 (embodiment rung-0) by their EXACT name — the runtime dispatches those names to the
 user's MCP servers. Do not script a tool the user has already provided.
 
-Return ONLY the AG-IR text (starting with the '---' frontmatter), no commentary.
+You are given the agent's ETHOS (operating principles to honor), any REGISTERED TOOLS
+(bind the relevant ones by their EXACT name — the runtime dispatches those names to the
+user's MCP servers; do not script a tool the user already provides), and the AG-IR
+CONTRACT (the exact schema to conform to).
 
-===== ETHOS =====
-{ethos}
-===== REGISTERED TOOLS (MCP) =====
-{tools}
-===== AG-IR CONTRACT =====
-{contract}""";
+CRITICAL: the output MUST be VALID YAML. Put every code snippet, command, or multi-line
+body in a YAML block scalar (`field: |` then indented lines) or a quoted string — NEVER
+emit a raw `::py::` block, and never leave an unescaped `:` inside an unquoted value.
+Prefer an embodied `command:` (a runnable shell command) over inline code.
+
+Return ONLY the AG-IR text (starting with the '---' frontmatter), no commentary.""";
 def author_agir(intent: str, task: str, ethos: str, tools: str, contract: str) -> str by frontier();
+
+sem fix_agir = """The PRIOR AG-IR failed to compile with the given ERROR. Return a CORRECTED
+AG-IR that is VALID YAML and conforms to the CONTRACT — fix only what the error indicates
+(commonly: a code body that must become a `field: |` block scalar or a quoted string, an
+unescaped colon, or a bad indent). Return ONLY the AG-IR text.""";
+def fix_agir(prior_agir: str, error: str, contract: str) -> str by frontier();
 
 sem revise_agir = """Revise the PRIOR AG-IR so the compiled agent ALSO handles the new
 TASK it failed or under-covered, given the FAILURE signal. Preserve everything that
 works; extend types/tools/operations minimally and surgically. Keep the same top-level
-name/signature. Return ONLY the full revised AG-IR text.
-
-===== ETHOS =====
-{ethos}
-===== AG-IR CONTRACT =====
-{contract}""";
+name/signature. Honor the given ETHOS and conform to the given AG-IR CONTRACT. Return
+ONLY the full revised AG-IR text.""";
 def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: str) -> str by frontier();
 
 # ---------------------------------------------------------------------------
@@ -287,24 +292,40 @@ def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origi
     return tg;
 }
 
+def _lower(agir: str, sig: str) -> dict {
+    # Compile the AG-IR; on a compile/parse failure, let the frontier REPAIR it and
+    # retry (self-healing crystallization). Returns {ok, osp, agir}.
+    cur = agir;
+    err = "";
+    for i in range(3) {
+        try {
+            osp = transpile_ir(cur, sig);
+            if "def run(" in osp { return {"ok": True, "osp": osp, "agir": cur}; }
+            err = "compiled module has no run() entrypoint";
+        } except Exception as e { err = str(e)[:400]; }
+        cur = fix_agir(cur, err, CONTRACT);
+    }
+    return {"ok": False, "osp": "", "agir": cur, "error": err};
+}
+
 def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
     # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
-    # compiler lowers it, we persist it.
+    # compiler lowers it (repairing on failure), we persist it.
     sig = name_signature(task);
     tools = prom_mcp.digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
-    osp = transpile_ir(agir, sig);
-    path = write_module(osp, sig, 1, WORKDIR);
-    return _persist(reg, sig, intent, agir, path, "frontier", 1);
+    low = _lower(agir, sig);
+    path = write_module(str(low["osp"]), sig, 1, WORKDIR);
+    return _persist(reg, sig, intent, str(low["agir"]), path, "frontier", 1);
 }
 
 def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
     # Frontier revises an existing procedure into a new version node (lineage kept).
     new_agir = revise_agir(tg.agir, task, failure, ETHOS, CONTRACT);
     v = tg.version + 1;
-    osp = transpile_ir(new_agir, tg.signature);
-    path = write_module(osp, tg.signature, v, WORKDIR);
-    nt = _persist(reg, tg.signature, tg.intent, new_agir, path, "mutation", v);
+    low = _lower(new_agir, tg.signature);
+    path = write_module(str(low["osp"]), tg.signature, v, WORKDIR);
+    nt = _persist(reg, tg.signature, tg.intent, str(low["agir"]), path, "mutation", v);
     nt +>:MutatedFrom:+> tg;
     return nt;
 }
@@ -364,17 +385,10 @@ def mcp_status() -> list {
 #   SKILL.md (frontier lifts) | AG-IR (compile only) | OSP module (drop-in).
 # Each becomes a TaskGraph on the graph, routable on the next task.
 # ---------------------------------------------------------------------------
-sem lift_skill = """Lift this SKILL.md (or prose skill description) into a COMPLETE AG-IR
-per the CONTRACT: a typed graph a compiler lowers to a runnable OSP agent covering the
-skill's whole task CLASS. Maximize mechanizable structure; bind any REGISTERED TOOLS by
-exact name. Return ONLY the AG-IR text.
-
-===== ETHOS =====
-{ethos}
-===== REGISTERED TOOLS (MCP) =====
-{tools}
-===== AG-IR CONTRACT =====
-{contract}""";
+sem lift_skill = """Lift this SKILL.md (or prose skill description) into a COMPLETE AG-IR:
+a typed graph a compiler lowers to a runnable OSP agent covering the skill's whole task
+CLASS. Maximize mechanizable structure; bind any given REGISTERED TOOLS by exact name;
+honor the given ETHOS and conform to the given AG-IR CONTRACT. Return ONLY the AG-IR text.""";
 def lift_skill(skill_md: str, ethos: str, tools: str, contract: str) -> str by frontier();
 
 def register_skill(source: str, kind: str) -> dict {
