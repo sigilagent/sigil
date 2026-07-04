@@ -45,6 +45,27 @@ def module_name(signature: str, version: int) -> str:
     return f"{_slug(signature)}_v{int(version)}"
 
 
+def agir_name(text: str) -> str:
+    """Best-effort skill signature from an AG-IR: the frontmatter `name:` field, else a slug."""
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s.startswith("name:"):
+            return _slug(s.split(":", 1)[1].strip().strip('"').strip("'"))
+        if s and not s.startswith("#") and not s.startswith("---") and ":" not in s:
+            break
+    return _slug((text or "")[:48])
+
+
+def install_osp(src_path: str, signature: str, workdir: str = ".") -> str:
+    """Drop a precompiled OSP module into crystallized/ and return its new path."""
+    d = pathlib.Path(workdir) / CRYSTAL_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "__init__.jac").touch(exist_ok=True)
+    dst = d / f"{module_name(signature, 1)}.jac"
+    dst.write_text(pathlib.Path(src_path).read_text())
+    return str(dst)
+
+
 def write_module(osp_source: str, signature: str, version: int, workdir: str = ".") -> str:
     """Persist a lowered OSP agent as ``crystallized/<sig>_v<n>.jac`` and return its path."""
     d = pathlib.Path(workdir) / CRYSTAL_DIR
@@ -74,17 +95,22 @@ _MARKER = "<<<PROM_REPORT>>>"
 
 
 def execute_module(module_path: str, task: str, model_name: str,
-                   skill: str = "", workdir: str = ".", timeout: int = 1800) -> dict:
+                   skill: str = "", workdir: str = ".", timeout: int = 1800,
+                   mcp_json: str = "") -> dict:
     """Run a crystallized module in an isolated ``jac run`` subprocess.
 
     Returns ``{ok, report, error}``. Never raises — a crash/timeout is a typed
     failure the walker escalates (mutate + retry), never a walker abort.
+    ``mcp_json`` is the user's registered MCP servers (JSON), exposed to the
+    crystallized agent's ``_live_tool`` via ``PROM_MCP``.
     """
     mod = pathlib.Path(module_path).stem
     driver = pathlib.Path(workdir) / f"_driver_{mod}.jac"
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER))
     env = dict(os.environ)
     env.update(PROM_MODEL=model_name, PROM_TASK=task, PROM_SKILL=skill)
+    if mcp_json:
+        env["PROM_MCP"] = mcp_json
     jac = os.getenv("PROM_JAC", "jac")
     try:
         p = subprocess.run([jac, "run", str(driver)], cwd=workdir, env=env,

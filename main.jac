@@ -11,7 +11,8 @@ all live on the graph; persist that graph across invocations with a session file
 
 import sys;
 import from prometheus {
-    solve_task, library, describe_soul, configure, teach, recollect
+    solve_task, library, describe_soul, configure, teach, recollect,
+    add_mcp, remove_mcp, mcp_status, register_skill
 }
 
 def cli_args(raw: list) -> list {
@@ -88,6 +89,41 @@ with entry:__main__ {
     } elif cmd == "recall" {
         q = _arg(argv, 1);
         for m in recollect(q, 8) { print("  (" + m["kind"] + ") " + m["content"]); }
+    } elif cmd == "add-mcp" {
+        # add-mcp <name> <stdio|http|sse> <command-or-url> [args...]
+        name = _arg(argv, 1); transport = _arg(argv, 2); target = _arg(argv, 3);
+        rest = [str(x) for x in argv[4:]] if len(argv) > 4 else [];
+        if not name or not transport or not target { print("usage: add-mcp <name> <stdio|http|sse> <command-or-url> [args...]"); }
+        else { print(add_mcp(name, transport, target, rest)); }
+    } elif cmd == "remove-mcp" {
+        name = _arg(argv, 1);
+        if not name { print("usage: remove-mcp <name>"); }
+        else { print(remove_mcp(name)); }
+    } elif cmd == "mcp" {
+        st = mcp_status();
+        if not st { print("(no MCP servers registered)"); }
+        else {
+            for s in st {
+                tl = list(s["tools"]);
+                print("  " + str(s["name"]) + "  [" + str(s["transport"]) + "]  tools: "
+                      + (", ".join([str(t) for t in tl]) if tl else "(none)"));
+            }
+        }
+    } elif cmd == "register-skill" {
+        # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
+        path = _arg(argv, 1); kind = _arg(argv, 2);
+        if not path { print("usage: register-skill <path> [md|agir|osp]"); }
+        else {
+            if not kind {
+                low = path.lower();
+                if low.endswith(".jac") { kind = "osp"; }
+                elif low.endswith(".ir") or low.endswith(".agir") or low.endswith(".yaml") or low.endswith(".yml") { kind = "agir"; }
+                else { kind = "md"; }
+            }
+            src = path if kind == "osp" else open(path).read();
+            r = register_skill(src, kind);
+            print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
+        }
     } else {
         print("Prometheus — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
@@ -96,6 +132,10 @@ with entry:__main__ {
         print("  configure <key> <value>     mutate config on the graph (persona|*_model|add_ethos|add_channel)");
         print("  teach \"<fact>\"              write a durable memory onto the graph");
         print("  recall \"<query>\"            retrieve relevant memories");
+        print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");
+        print("  remove-mcp <name>           unregister an MCP server");
+        print("  mcp                         list registered MCP servers + their tools");
+        print("  register-skill <path> [md|agir|osp]   add a skill (SKILL.md lifted / AG-IR / OSP)");
         print("  (add  -s prometheus.session  to persist the graph across runs)");
     }
 }
