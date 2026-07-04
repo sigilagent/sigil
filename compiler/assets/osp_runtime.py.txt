@@ -1,0 +1,289 @@
+
+# ---- bundle on path: the skill's owned modules (core/, scripts/, …) are copied
+# into the run dir; make `from core.x import y` resolve for in-process tools and
+# the authored scripts they exec. Runs once at agent import. ----
+def _ensure_path():
+    import os, sys, shutil
+    here = ""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = ""
+    for d in (os.getcwd(), here):
+        if d and d not in sys.path:
+            sys.path.insert(0, d)
+    # Stage the skill's owned bundle resources (templates/, core/, scripts/, *.md,
+    # requirements.txt, …) from the agent dir into cwd, so the agent's relative file
+    # reads (open("templates/viewer.html")) and module imports (from core import x)
+    # resolve when it runs in a fresh bench workdir rather than inside the skill bundle.
+    cwd = os.getcwd()
+    if here and here != cwd and os.path.isdir(here):
+        _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
+                 "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
+        for _name in os.listdir(here):
+            if _name in _skip or _name.endswith((".jir", ".pyc", ".bak")):
+                continue
+            _src = os.path.join(here, _name); _dst = os.path.join(cwd, _name)
+            if os.path.exists(_dst):
+                continue
+            try:
+                if os.path.isdir(_src):
+                    shutil.copytree(_src, _dst)
+                else:
+                    shutil.copy2(_src, _dst)
+            except Exception:
+                pass
+
+_ensure_path()
+
+# ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
+def _progress(node):
+    import os, json, time
+    p = os.environ.get("AGIR_PROGRESS", "")
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            f.write(json.dumps({"node": node, "t": time.time()}))
+            f.write("\n")
+            f.flush()
+    except Exception:
+        pass
+
+# ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
+def _strip_fences(code):
+    c = str(code).strip()
+    if c.startswith("```"):
+        lines = c.splitlines()[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        c = "\n".join(lines)
+    return c
+
+def _exec_script(script, args=None):
+    # The GEN-RAW author writes a self-contained script that creates its own
+    # output file; we just run it. `args` (if present) only supplies a nicer
+    # return path — the real artifact is whatever the script wrote to cwd.
+    with open("op.py", "w") as f:
+        f.write(_strip_fences(script))
+    # use THIS interpreter (sys.executable), not whatever `python3` is on PATH,
+    # so the script sees the same installed libs (openpyxl, reportlab, …).
+    r = _subprocess.run([sys.executable, "op.py"], capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise RuntimeError(f"script failed: {r.stderr[:800]}")
+    try:
+        return args.output_spec.path
+    except Exception:
+        return "op.py"
+
+# Side-channel for tool-produced data: a tools-ReAct slot returns a final TEXT
+# message (often not the script), but the real product was built inside a tool
+# call. Tools stash their product here; the author node retrieves it. Per-run
+# process, so it starts empty (no cross-run leakage).
+def _stash(key, value):
+    globals().setdefault("_OSP_PRODUCT", {})[key] = value
+    return value
+
+def _unstash(key):
+    v = globals().get("_OSP_PRODUCT", {}).get(key)
+    return v if v else []
+
+def _exec_var(script, varname):
+    # Execute an authored script and return the named product (e.g. `frames`) to
+    # thread into downstream OSP nodes. Accept either a bare `<varname>` list, a
+    # build_<varname>() factory, OR an object that accumulated it as an attribute
+    # (e.g. a GIFBuilder's `.frames`). Tolerate a mid-script error (the model may
+    # save to a bad path AFTER building) — keep whatever was produced first.
+    # Bundle modules resolve via cwd on sys.path.
+    ns = {}
+    code = _strip_fences(script)
+    try:
+        exec(code, ns)
+    except Exception:
+        pass  # partial ns retained: vars set before the failing line survive
+    val = ns.get(varname)
+    if not val and ("build_" + varname) in ns:
+        try:
+            val = ns["build_" + varname]()
+        except Exception:
+            val = None
+    if not val:
+        for v in ns.values():
+            attr = getattr(v, varname, None)
+            if isinstance(attr, list) and attr:
+                val = attr
+                break
+    return val if val else []
+
+def _exec_script_try(script, args=None):
+    # Run the authored script but DON'T raise — return {ok, error, path} so the
+    # node can hand a failure back to the model (repair_script) and retry, instead
+    # of crashing the whole agent. The error text is the model's repair signal.
+    try:
+        p = _exec_script(script, args)
+        return {"ok": True, "error": "", "path": p}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "path": ""}
+
+def _run_program(runner, target_file, content):
+    # CHANGE 3 author-run atom: an authoring tool whose command is `<runner> <bare-file>`
+    # (e.g. `node program.js`) receives the program CONTENT, not a path. Write the content
+    # to the target, run it, non-raising. Returns {ok, error, out} so an author-loop can
+    # re-author on failure (the discarded-output / node-content bugs from hand-tuning).
+    try:
+        with open(target_file, "w") as f:
+            f.write(_strip_fences(str(content)))
+    except Exception as e:
+        return {"ok": False, "error": "write failed: " + str(e)[:200], "out": ""}
+    try:
+        r = _subprocess.run([str(runner), str(target_file)], capture_output=True, text=True, timeout=180)
+        return {"ok": r.returncode == 0, "error": (r.stderr or "")[:800], "out": (r.stdout or "")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:400], "out": ""}
+
+def _run_cmd(prefix, args):
+    # EMBODIMENT LADDER rung 2: the tool's IR carried a `command` (a bundle-script/CLI
+    # invocation) but no inline body. Run it deterministically (owner=code) — prefix is the
+    # fixed executable+script, args are the tool's params threaded in order. Non-raising;
+    # returns combined stdout+stderr so a downstream verify can read it.
+    argv = list(prefix) + [str(a) for a in args if a is not None]
+    try:
+        r = _subprocess.run(argv, capture_output=True, text=True, timeout=180)
+        return ((r.stdout or "") + (r.stderr or "")).strip()
+    except Exception as e:
+        return "[cmd %s failed: %s]" % (" ".join(str(x) for x in prefix), str(e)[:200])
+
+def _live_tool(name, args):
+    # EMBODIMENT LADDER rung 0: a live-integration tool (reads the outside world) has no
+    # scriptable body. If it's a web/HTTP fetch, do a REAL GET; otherwise it needs external
+    # access this batch harness lacks -> an honest sentinel (never a hallucinated script,
+    # so a grounded verify can tell it wasn't real).
+    a0 = str(args[0]) if args else ""
+    is_web = a0.startswith("http") or any(k in name for k in ("fetch", "_api", "_get", "web_", "search"))
+    if is_web:
+        url = a0 if a0.startswith("http") else ""
+        if not url:
+            return "[live tool %s: no URL argument provided]" % name
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=30) as r:
+                return r.read().decode("utf-8", "replace")[:100000]
+        except Exception as e:
+            return "[live fetch %s failed: %s]" % (name, str(e)[:200])
+    return "[live source '%s' unavailable in the batch harness]" % name
+
+def _scoped_author_run(context, out_path=None, tries=3):
+    # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
+    # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
+    # job, run it, verify the artifact appeared, and re-author on failure. Non-raising.
+    # The author is the module-level `_gen_scoped` by-llm slot (emitted whenever the
+    # compiler falls back at least one tool); scoped = it sees only this job's context.
+    import os
+    gen = globals().get("_gen_scoped")
+    if gen is None:
+        return out_path or ""
+    err = ""
+    for _ in range(max(1, int(tries))):
+        ctx = context if not err else (
+            context + "\n\nThe previous script failed with:\n" + err +
+            "\nReturn a corrected, COMPLETE, self-contained script.")
+        try:
+            script = _strip_fences(str(gen(ctx)))
+        except Exception as e:
+            err = "author error: " + str(e)[:300]
+            continue
+        res = _exec_script_try(script, None)
+        ok = res.get("ok") and ((not out_path) or (os.path.exists(out_path) and os.path.getsize(out_path) > 0))
+        if ok:
+            return out_path or res.get("path") or "op.py"
+        err = (res.get("error") or "the script produced no output file")[-500:]
+    return out_path if (out_path and os.path.exists(out_path)) else ""
+
+def _clean_path(p):
+    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
+    # verbatim writes the artifact to a garbage filename and the deliverable is lost.
+    # Strip trailing structural junk and cut at the first filename-illegal char after
+    # a recognizable extension, so 'out.txt},...' -> 'out.txt'.
+    import re
+    s = str(p or "").strip().strip('`"\' ')
+    s = re.sub(r'[}\]\)>,"\'`\s]+$', '', s)              # trailing }, ] ) , " ' ` ws
+    m = re.match(r'^(.*?\.[A-Za-z0-9]{1,6})(?:[^A-Za-z0-9._/\\-].*)?$', s)
+    if m:
+        s = m.group(1)                                   # keep up to the extension
+    return s
+
+def _emit(data, args):
+    spec = args.output_spec
+    if getattr(spec, "destination", "") == "stdout":
+        print(data)
+        return "stdout"
+    path = _clean_path(spec.path)
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    fmt = (ext or getattr(spec, "format", "") or "txt").lower()
+    if fmt == "json":
+        with open(path, "w") as f:
+            _json.dump(data, f, default=str)
+    elif fmt == "xlsx":
+        import pandas as pd
+        frames = [pd.DataFrame(t[1:], columns=t[0]) for t in data if t]
+        (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()).to_excel(path, index=False)
+    elif fmt == "csv":
+        import csv as _csv
+        tables = data if isinstance(data, list) else [data]
+        table = next((t for t in tables if t), [])
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            for row in table:
+                w.writerow([(c if c is not None else "") for c in row])
+    else:
+        with open(path, "w") as f:
+            f.write(data if isinstance(data, str) else str(data))
+    return path
+
+def _outname(task, fallback="output.txt"):
+    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
+    # filename that follows a save/output/write verb; else the first bare filename; else fallback.
+    import re
+    t = task or ""
+    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
+    if m:
+        return m.group(1)
+    return fallback
+
+def _write_artifact(content, path):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content if isinstance(content, str) else str(content))
+    return path
+
+def _emit_surface(content, spec):
+    # An ACT·artifact surface (sig only, no IR body) must still WRITE the deliverable
+    # to an app-controlled path — a bodyless surface lowered to `pass` silently drops
+    # the output (the internal-comms/etc. 0% bug). `spec` may be an ArtifactSpec (has
+    # .path/.destination/.format), a carrier that holds one (OpArgs.output_spec), or a dict.
+    if spec is not None and hasattr(spec, "output_spec"):
+        spec = spec.output_spec
+    def _g(o, k, d=None):
+        if o is None: return d
+        if isinstance(o, dict): return o.get(k, d)
+        return getattr(o, k, d)
+    text = content if isinstance(content, str) else ("" if content is None else str(content))
+    if (_g(spec, "destination", "") or "") == "stdout":
+        print(text); return "stdout"
+    path = _clean_path(_g(spec, "path", "") or "")
+    if not path:
+        path = "output." + str(_g(spec, "format", "") or "txt").lstrip(".")
+    return _write_artifact(text, path)
+
+def _read_module(relpath):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (relpath, os.path.join(here, relpath)):
+        if os.path.exists(cand):
+            with open(cand) as f:
+                return f.read()
+    return ""
