@@ -14,6 +14,9 @@ import from prometheus {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill
 }
+import from cron {
+    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
+}
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -109,6 +112,32 @@ with entry:__main__ {
                       + (", ".join([str(t) for t in tl]) if tl else "(none)"));
             }
         }
+    } elif cmd == "cron" {
+        # cron add <name> <at|every|cron> <spec> "<task>" [tz] [channel] | list | show <name> | runs <name> | rm <name> | enable/disable <name> | tick
+        sub = _arg(argv, 1);
+        if sub == "add" {
+            r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
+                         _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
+            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next=" + str(r["next_run_ms"]));
+        } elif sub == "list" {
+            js = cron_list();
+            if not js { print("(no cron jobs)"); }
+            for j in js {
+                print("  " + str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
+                      + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
+                      + " err=" + str(j["errors"]) + "  " + str(j["last_status"]));
+            }
+        } elif sub == "show" { print(cron_show(_arg(argv, 2))); }
+        elif sub == "runs" {
+            for r in cron_runs(_arg(argv, 2)) { print("  " + ("ok " if r["ok"] else "err") + "  " + str(r["summary"])); }
+        } elif sub == "rm" { print(cron_remove(_arg(argv, 2))); }
+        elif sub == "enable" { print(cron_enable(_arg(argv, 2), True)); }
+        elif sub == "disable" { print(cron_enable(_arg(argv, 2), False)); }
+        elif sub == "tick" {
+            t = cron_tick();
+            print("tick: fired " + str(t["count"]) + " job(s)");
+            for f in list(t["fired"]) { print("  " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err")); }
+        } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick ..."); }
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);
