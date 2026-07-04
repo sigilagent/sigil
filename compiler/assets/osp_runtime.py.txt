@@ -155,9 +155,16 @@ def _run_cmd(prefix, args):
 
 def _live_tool(name, args):
     # EMBODIMENT LADDER rung 0: a live-integration tool (reads the outside world) has no
-    # scriptable body. If it's a web/HTTP fetch, do a REAL GET; otherwise it needs external
-    # access this batch harness lacks -> an honest sentinel (never a hallucinated script,
-    # so a grounded verify can tell it wasn't real).
+    # scriptable body. First try a REGISTERED MCP server (Prometheus wires PROM_MCP with the
+    # user's servers); then a REAL web GET; otherwise an honest sentinel (never a hallucinated
+    # script, so a grounded verify can tell it wasn't real).
+    try:
+        import prom_mcp
+        _m = prom_mcp.dispatch(name, list(args) if args else [])
+        if _m is not None:
+            return _m["text"] if _m.get("ok") else "[mcp tool %s failed: %s]" % (name, _m.get("error", ""))
+    except Exception:
+        pass
     a0 = str(args[0]) if args else ""
     is_web = a0.startswith("http") or any(k in name for k in ("fetch", "_api", "_get", "web_", "search"))
     if is_web:

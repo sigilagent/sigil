@@ -61,12 +61,37 @@ root ──Anchored──▶ Registry ──Crystallized──▶ TaskGraph     
 The crystallized procedure is **class-general**; instance-specific memory is
 injected only at *execution* time, never baked into the procedure.
 
+## Bring your own tools & skills — at runtime, no restart
+
+Because config and skills are graph state, adding either is just a graph mutation that
+takes effect on the **next** `solve` (more dynamic than editing files + restarting):
+
+```bash
+# BYO MCP server (drop-in tools) — via byLLM's native McpClient (stdio / sse / http)
+$JAC add-mcp github stdio gh-mcp                 # or: add-mcp search http http://localhost:9000/mcp
+$JAC mcp                                          # list registered servers + their discovered tools
+# its tools are now available to the crystallizer (bound by name) and to live runs (_live_tool)
+
+# BYO skills — three ingress forms, cheapest-effort to most-control
+$JAC register-skill ./my-skill/SKILL.md          # frontier lifts SKILL.md -> AG-IR -> compile
+$JAC register-skill ./procedure.agir  agir        # compile a hand-authored AG-IR (no model call)
+$JAC register-skill ./crystallized/foo_v1.jac osp # drop in a precompiled OSP module
+```
+
+MCP servers are `McpServer` nodes on the `Soul`; skills are `TaskGraph`s in the `Registry`.
+A crystallized agent's live-tool calls (`_live_tool`) dispatch to whichever registered
+server exposes the tool; the frontier binds those tool names when it crystallizes. A *new*
+capability an *old* skill should use = a `mutate`. In server mode (`jac serve`), the same
+operations are `walker:pub` endpoints — swap to `:priv` and each user gets an isolated graph
+(their own soul, skills, and MCP servers) with auth, for free.
+
 ## Layout
 
 ```
 prometheus.jac        the agent: graph model + walkers + the two-tier cognition
-main.jac              CLI (solve / library / soul / configure / teach / recall)
+main.jac              CLI (solve / library / soul / configure / teach / recall / add-mcp / register-skill)
 prom_runtime.py       disk + OS glue: persist a lowered module, run it isolated
+prom_mcp.py           adapter over byLLM's native McpClient — discovery + rung-0 dispatch
 compiler/             vendored AG-IR → OSP compiler (the LOWER engine) + runtime asset
 contracts/            the AG-IR authoring contract (seed for the on-graph Spec node)
 crystallized/         (runtime) lowered OSP modules — the agent's learned skills

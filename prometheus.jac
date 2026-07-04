@@ -12,10 +12,12 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 """
 
 import os;
+import json;
+import prom_mcp;
 import from byllm.lib { Model }
 import from compiler.compiler { transpile_ir }
 import from prom_runtime {
-    write_module, execute_module, default_contract, repo_root
+    write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
 
 # ---------------------------------------------------------------------------
@@ -63,13 +65,19 @@ command or an explicit snippet; never leave a step as a bare description.
 
 Honor the agent's ETHOS (its operating principles) in how you shape the procedure.
 
+If REGISTERED TOOLS are listed, bind the relevant ones as live-integration tools
+(embodiment rung-0) by their EXACT name — the runtime dispatches those names to the
+user's MCP servers. Do not script a tool the user has already provided.
+
 Return ONLY the AG-IR text (starting with the '---' frontmatter), no commentary.
 
 ===== ETHOS =====
 {ethos}
+===== REGISTERED TOOLS (MCP) =====
+{tools}
 ===== AG-IR CONTRACT =====
 {contract}""";
-def author_agir(intent: str, task: str, ethos: str, contract: str) -> str by frontier();
+def author_agir(intent: str, task: str, ethos: str, tools: str, contract: str) -> str by frontier();
 
 sem revise_agir = """Revise the PRIOR AG-IR so the compiled agent ALSO handles the new
 TASK it failed or under-covered, given the FAILURE signal. Preserve everything that
@@ -95,6 +103,7 @@ def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: 
 # ---------------------------------------------------------------------------
 edge Embodies {}       # root -> Soul       (the agent's identity/config, on the graph)
 edge Knows {}          # Soul -> Spec       (the crystallizer's contract, on the graph)
+edge Provides {}       # Soul -> McpServer  (registered external tool servers)
 edge Remembers {}      # Soul -> Memory     (semantic memory)
 edge Owns {}           # Soul -> Registry
 edge Anchored {}       # root -> Registry   (the skill library, hung off the persistent root)
@@ -116,6 +125,16 @@ node Soul {
 node Spec {
     has kind: str = "agir-contract";
     has body: str = "";           # the crystallizer's contract text, seeded onto the graph
+}
+
+# --- External MCP servers the user registers (BYO tools), config on the graph
+node McpServer {
+    has name: str;
+    has transport: str = "stdio"; # stdio | http | sse | streamable-http
+    has command: str = "";        # stdio: executable
+    has args: list[str] = [];
+    has url: str = "";            # http/sse: endpoint
+    has enabled: bool = True;
 }
 
 # --- Semantic memory: durable facts the agent carries across tasks ----------
@@ -256,16 +275,22 @@ user relies on). Skip anything one-off or already obvious. Return a JSON list of
 strings; return [] if nothing is worth keeping.""";
 def distill(task: str, result: str) -> list[str] by router();
 
-def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
-    # Frontier builds an AG-IR for the task CLASS, compiler lowers it, we persist it.
-    sig = name_signature(task);
-    agir = author_agir(intent, task, ETHOS, CONTRACT);
-    osp = transpile_ir(agir, sig);
-    path = write_module(osp, sig, 1, WORKDIR);
-    tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=path,
-                   version=1, origin="frontier");
+def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origin: str, version: int) -> TaskGraph {
+    tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=module,
+                   version=version, origin=origin);
     reg +>:Crystallized:+> tg;
     return tg;
+}
+
+def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
+    # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
+    # compiler lowers it, we persist it.
+    sig = name_signature(task);
+    tools = prom_mcp.digest(mcp_servers());
+    agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
+    osp = transpile_ir(agir, sig);
+    path = write_module(osp, sig, 1, WORKDIR);
+    return _persist(reg, sig, intent, agir, path, "frontier", 1);
 }
 
 def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
@@ -274,19 +299,111 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
     v = tg.version + 1;
     osp = transpile_ir(new_agir, tg.signature);
     path = write_module(osp, tg.signature, v, WORKDIR);
-    nt = TaskGraph(signature=tg.signature, intent=tg.intent, agir=new_agir,
-                   module=path, version=v, origin="mutation");
-    reg +>:Crystallized:+> nt;
+    nt = _persist(reg, tg.signature, tg.intent, new_agir, path, "mutation", v);
     nt +>:MutatedFrom:+> tg;
     return nt;
+}
+
+# ---------------------------------------------------------------------------
+# BYO MCP servers — registered on the graph (config), exposed to crystallized
+# agents via byLLM's native McpClient. Adding one takes effect on the next run.
+# ---------------------------------------------------------------------------
+def mcp_servers() -> list {
+    soul = awaken();
+    out: list = [];
+    for s in [soul -->[?:McpServer]] {
+        d: dict = {"name": s.name, "transport": s.transport, "enabled": s.enabled};
+        if s.transport == "stdio" { d["command"] = s.command; d["args"] = s.args; }
+        else { d["url"] = s.url; }
+        out.append(d);
+    }
+    return out;
+}
+
+def mcp_json() -> str {
+    return json.dumps(mcp_servers());
+}
+
+def add_mcp(name: str, transport: str, target: str, args: list[str]) -> str {
+    # target = executable (stdio) or url (http/sse). Mutates the graph; no file written.
+    soul = awaken();
+    srv = None;
+    for s in [soul -->[?:McpServer]] { if s.name == name { srv = s; } }
+    if srv is None { srv = McpServer(name=name); soul +>:Provides:+> srv; }
+    srv.transport = transport;
+    srv.enabled = True;
+    if transport == "stdio" { srv.command = target; srv.args = args; }
+    else { srv.url = target; }
+    return "registered mcp server '" + name + "' (" + transport + ")";
+}
+
+def remove_mcp(name: str) -> str {
+    soul = awaken();
+    for s in [soul -->[?:McpServer]] { if s.name == name { del s; return "removed mcp server '" + name + "'"; } }
+    return "no such mcp server: " + name;
+}
+
+def mcp_status() -> list {
+    servers = mcp_servers();
+    out: list = [];
+    for srv in servers {
+        tools = [];
+        try { tools = [t.name for t in prom_mcp.tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
+        out.append({"name": srv["name"], "transport": srv["transport"], "tools": tools});
+    }
+    return out;
+}
+
+# ---------------------------------------------------------------------------
+# Skill registration — three ingress forms, cheapest-effort to most-control:
+#   SKILL.md (frontier lifts) | AG-IR (compile only) | OSP module (drop-in).
+# Each becomes a TaskGraph on the graph, routable on the next task.
+# ---------------------------------------------------------------------------
+sem lift_skill = """Lift this SKILL.md (or prose skill description) into a COMPLETE AG-IR
+per the CONTRACT: a typed graph a compiler lowers to a runnable OSP agent covering the
+skill's whole task CLASS. Maximize mechanizable structure; bind any REGISTERED TOOLS by
+exact name. Return ONLY the AG-IR text.
+
+===== ETHOS =====
+{ethos}
+===== REGISTERED TOOLS (MCP) =====
+{tools}
+===== AG-IR CONTRACT =====
+{contract}""";
+def lift_skill(skill_md: str, ethos: str, tools: str, contract: str) -> str by frontier();
+
+def register_skill(source: str, kind: str) -> dict {
+    soul = awaken();
+    reg = [soul -->[?:Registry]][0];
+    if kind == "agir" {
+        # source is raw AG-IR text — compile only, no model call.
+        sig = agir_name(source);
+        osp = transpile_ir(source, sig);
+        path = write_module(osp, sig, 1, WORKDIR);
+        tg = _persist(reg, sig, "registered AG-IR", source, path, "registered-agir", 1);
+    } elif kind == "osp" {
+        # source is a path to a precompiled OSP .jac module — drop it in.
+        sig = agir_name(source);
+        path = install_osp(source, sig, WORKDIR);
+        tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
+    } else {
+        # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
+        agir = lift_skill(source, ETHOS, prom_mcp.digest(mcp_servers()), CONTRACT);
+        sig = agir_name(agir);
+        osp = transpile_ir(agir, sig);
+        path = write_module(osp, sig, 1, WORKDIR);
+        tg = _persist(reg, sig, "lifted from SKILL.md", agir, path, "lifted-skill", 1);
+    }
+    return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
 
 def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     # Small model executes the crystallized OSP. The crystallized PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run
     # time, as a context preamble on the task — never baked into the procedure.
+    # The user's registered MCP servers are exposed to the run's live tools.
     run_input = (context + "\nTask: " + task) if context else task;
-    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR);
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json());
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400]);
@@ -428,4 +545,48 @@ def teach(fact: str, kind: str = "fact") -> str {
 def recollect(query: str, k: int = 8) -> list {
     soul = awaken();
     return [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in recall(soul, query, k)];
+}
+
+# ---------------------------------------------------------------------------
+# Server-mode endpoints (`jac serve main.jac`) — the OpenClaw-style drop-in: a
+# channel adapter POSTs to these. Swap `:pub` -> `:priv` and each user gets an
+# isolated root graph (their own soul, skills, MCP servers) with JWT auth, for
+# free. `has` fields are the request body; `report` is the response.
+# ---------------------------------------------------------------------------
+walker:pub api_solve {
+    has task: str;
+    has skill: str = "";
+    can run with `root entry { report solve_task(self.task, self.skill); }
+}
+
+walker:pub api_add_mcp {
+    has name: str;
+    has target: str;
+    has transport: str = "stdio";
+    has args: list[str] = [];
+    can run with `root entry { report add_mcp(self.name, self.transport, self.target, self.args); }
+}
+
+walker:pub api_register_skill {
+    has source: str;          # SKILL.md text / AG-IR text / OSP module path
+    has kind: str = "md";     # md | agir | osp
+    can run with `root entry { report register_skill(self.source, self.kind); }
+}
+
+walker:pub api_teach {
+    has fact: str;
+    has kind: str = "fact";
+    can run with `root entry { report teach(self.fact, self.kind); }
+}
+
+walker:pub api_soul {
+    can run with `root entry { report describe_soul(); }
+}
+
+walker:pub api_library {
+    can run with `root entry { report library(); }
+}
+
+walker:pub api_mcp {
+    can run with `root entry { report mcp_status(); }
 }
