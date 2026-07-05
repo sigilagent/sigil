@@ -1,0 +1,11 @@
+.git
+.jac
+__pycache__
+crystallized
+observability
+*.session
+*.session.*
+bin
+web/node_modules
+.jac/client
+sandbox/out
