@@ -8,7 +8,7 @@ walkers as HTTP endpoints; the `cl` block mounts the browser app.
 
 import from prometheus {
     api_solve, api_graph, api_observability, api_add_mcp, api_register_skill,
-    api_teach, api_soul, api_library, api_mcp
+    api_teach, api_soul, api_library, api_mcp, api_configure, api_recall
 }
 import from agent { api_chat_completions }
 
