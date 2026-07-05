@@ -692,6 +692,18 @@ walker:pub api_soul {
     can run with Root entry { report describe_soul(); }
 }
 
+walker:pub api_configure {
+    has key: str;
+    has value: str;
+    can run with Root entry { report configure(self.key, self.value); }
+}
+
+walker:pub api_recall {
+    has query: str;
+    has k: int = 8;
+    can run with Root entry { report recollect(self.query, self.k); }
+}
+
 walker:pub api_library {
     can run with Root entry { report library(); }
 }

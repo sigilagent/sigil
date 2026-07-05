@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# prometheus — HTTP client for a running Prometheus agent (the Observatory gateway).
+#
+#   prometheus serve                       # start the gateway (jac start observatory.jac)
+#   prometheus solve "extract tables from report.pdf as csv"
+#   prometheus chat  "say hello"           # OpenAI-shaped reply
+#   prometheus soul | library | graph | tokens | mcp
+#   prometheus teach "the user prefers CSV with headers"
+#   prometheus add-mcp github stdio gh-mcp
+#   prometheus register-skill ./skill.agir agir
+#
+# Config via env:  PROM_URL (default http://localhost:8199)   PROM_TOKEN (bearer, if set)
+set -euo pipefail
+
+URL="${PROM_URL:-http://localhost:8199}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+JAC="${PROM_JAC:-$(command -v jac || echo /Users/jayanaka-98/miniconda3/envs/voodoo-pypi/bin/jac)}"
+AUTH=(); [ -n "${PROM_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $PROM_TOKEN")
+
+# POST a JSON body to /walker/<name>, return the walker's first report (unwrapped).
+call() {
+  local walker="$1" body="${2:-{}}"
+  curl -sS -X POST "$URL/walker/$walker" \
+       -H "Content-Type: application/json" "${AUTH[@]}" \
+       --max-time "${PROM_TIMEOUT:-600}" -d "$body" \
+  | python3 -c '
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception as e: print("bad response:", e); sys.exit(1)
+if not d.get("ok", True):
+    print("ERROR:", (d.get("error") or {}).get("message", d)); sys.exit(1)
+reps = (((d.get("data") or {}).get("result") or {}).get("reports")) or [d]
+r = reps[0] if reps else {}
+print(json.dumps(r, indent=2, ensure_ascii=False) if isinstance(r,(dict,list)) else r)
+'
+}
+
+# JSON-escape a shell string
+esc() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  serve)
+    exec "$JAC" start --dev "$HERE/observatory.jac" --port "${PROM_PORT:-8199}" -a "${PROM_API_PORT:-8198}" ;;
+  solve)      call api_solve         "{\"task\": $(esc "${1:?usage: prometheus solve \"<task>\"}")}" ;;
+  chat)       call api_chat_completions "{\"messages\":[{\"role\":\"user\",\"content\": $(esc "${1:?usage: prometheus chat \"<msg>\"}")}]}" ;;
+  soul)       call api_soul ;;
+  configure)  call api_configure "{\"key\": $(esc "${1:?key}"), \"value\": $(esc "${2:?value}")}" ;;
+  recall)     call api_recall    "{\"query\": $(esc "${1:?usage: prometheus recall \"<query>\"}")}" ;;
+  library)    call api_library ;;
+  graph)      call api_graph ;;
+  tokens)     call api_observability "{\"n\": ${1:-100}}" ;;
+  mcp)        call api_mcp ;;
+  teach)      call api_teach         "{\"fact\": $(esc "${1:?usage: prometheus teach \"<fact>\"}")}" ;;
+  add-mcp)    call api_add_mcp       "{\"name\": $(esc "${1:?name}"), \"transport\": $(esc "${2:-stdio}"), \"target\": $(esc "${3:?cmd-or-url}")}" ;;
+  register-skill)
+              src="${1:?usage: prometheus register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
+              payload="${src}"; [ "$kind" != "osp" ] && payload="$(cat "$src")"
+              call api_register_skill "{\"source\": $(esc "$payload"), \"kind\": $(esc "$kind")}" ;;
+  help|*)
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac
