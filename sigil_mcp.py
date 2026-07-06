@@ -6,10 +6,10 @@ byLLM ships `McpClient`/`McpTool` (byllm.lib): a client connects to an MCP serve
 of speaking JSON-RPC ourselves — the crystallized agent gets the same MCP stack
 byLLM uses everywhere.
 
-This module does two jobs for Prometheus:
+This module does two jobs for Sigil:
   - `dispatch(name, args)` — deterministic embodiment: a crystallized agent's
     `_live_tool(name, ...)` routes a bare tool name to whichever registered server
-    exposes it (servers come from the `PROM_MCP` env Prometheus sets per run).
+    exposes it (servers come from the `SIGIL_MCP` env Sigil sets per run).
   - `digest(servers)` / `tools_for(servers)` — discovery: list the tools a set of
     servers expose, so the frontier can bind real tool names when it crystallizes,
     and so the ReAct/scoped-author slots can be handed the live `McpTool`s.
@@ -88,7 +88,7 @@ def _safe_tools(srv: dict) -> list:
 
 
 def _servers_from_env() -> list:
-    raw = os.getenv("PROM_MCP", "")
+    raw = os.getenv("SIGIL_MCP", "")
     if not raw:
         return []
     try:

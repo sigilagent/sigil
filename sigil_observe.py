@@ -12,7 +12,7 @@ wire. We capture as much as each provider exposes and record what it hides:
   - the completion content + any tool_calls
   - dollar cost (litellm.completion_cost, best-effort)
 
-Each call is appended as one JSON line to ``PROM_OBS`` the instant it returns
+Each call is appended as one JSON line to ``SIGIL_OBS`` the instant it returns
 (flushed) — live-observable and crash-resilient. Streaming responses are tapped so
 their tokens are captured too. Everything is best-effort and never raises into the
 model call.

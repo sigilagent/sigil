@@ -1,4 +1,4 @@
-"""Prometheus — a self-evolving agent that IS an object-spatial graph.
+"""Sigil — a self-evolving agent that IS an object-spatial graph.
 
     frontier model  --crystallize-->  AG-IR  --compile-->  OSP  --persist-->  a node
     small model     --execute-->      the crystallized node's OSP
@@ -13,10 +13,10 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 
 import os;
 import json;
-import prom_mcp;
+import sigil_mcp;
 import from byllm.lib { Model }
 import from compiler.compiler { transpile_ir }
-import from prom_runtime {
+import from sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
 import from views { VNode, VEdge, VGraph, VCall, VObs }
@@ -26,9 +26,9 @@ import from views { VNode, VEdge, VGraph, VCall, VObs }
 # (cheap, hot); router classifies (cheap). Names are env-overridable so the same
 # graph runs against gpt-5 + qwen3 locally or any pair.
 # ---------------------------------------------------------------------------
-glob FRONTIER_NAME: str = os.getenv("PROM_FRONTIER", "gpt-5");
-glob SMALL_NAME: str    = os.getenv("PROM_SMALL", "ollama_chat/qwen3:32b");
-glob ROUTER_NAME: str   = os.getenv("PROM_ROUTER", os.getenv("PROM_SMALL", "ollama_chat/qwen3:32b"));
+glob FRONTIER_NAME: str = os.getenv("SIGIL_FRONTIER", "gpt-5");
+glob SMALL_NAME: str    = os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b");
+glob ROUTER_NAME: str   = os.getenv("SIGIL_ROUTER", os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"));
 
 glob frontier: Model = Model(model_name=FRONTIER_NAME);
 glob small: Model    = Model(model_name=SMALL_NAME);
@@ -119,7 +119,7 @@ edge MutatedFrom {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
 
 # --- Identity / config (OpenClaw's SOUL, but a node — not a SOUL.md) --------
 node Soul {
-    has name: str = "prometheus";
+    has name: str = "sigil";
     has persona: str = "";        # voice / character
     has ethos: list[str] = [];    # operating principles, woven into crystallization
     has frontier_model: str = ""; # cognition config — lives on the graph, not env
@@ -152,7 +152,7 @@ node Memory {
 }
 
 node Registry {
-    has name: str = "prometheus";
+    has name: str = "sigil";
 }
 
 node TaskGraph {
@@ -207,7 +207,7 @@ def awaken() -> Soul {
         soul = found[0];
     } else {
         soul = Soul(
-            name="prometheus",
+            name="sigil",
             persona="A pragmatic operator that crystallizes tasks into reliable, minimal procedures and runs them cheaply.",
             ethos=[
                 "Prefer mechanized structure over prose.",
@@ -215,9 +215,9 @@ def awaken() -> Soul {
                 "Ground verification in the real artifact, not a proxy.",
                 "Reuse a crystallized procedure before authoring a new one."
             ],
-            frontier_model=os.getenv("PROM_FRONTIER", "gpt-5"),
-            small_model=os.getenv("PROM_SMALL", "ollama_chat/qwen3:32b"),
-            router_model=os.getenv("PROM_ROUTER", ""),
+            frontier_model=os.getenv("SIGIL_FRONTIER", "gpt-5"),
+            small_model=os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"),
+            router_model=os.getenv("SIGIL_ROUTER", ""),
             channels=["cli"]
         );
         root +>:Embodies:+> soul;
@@ -312,7 +312,7 @@ def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
     # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
     # compiler lowers it (repairing on failure), we persist it.
     sig = name_signature(task);
-    tools = prom_mcp.digest(mcp_servers());
+    tools = sigil_mcp.digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
     low = _lower(agir, sig);
     path = write_module(str(low["osp"]), sig, 1, WORKDIR);
@@ -374,7 +374,7 @@ def mcp_status() -> list {
     out: list = [];
     for srv in servers {
         tools = [];
-        try { tools = [t.name for t in prom_mcp.tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
+        try { tools = [t.name for t in sigil_mcp.tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
         out.append({"name": srv["name"], "transport": srv["transport"], "tools": tools});
     }
     return out;
@@ -407,7 +407,7 @@ def register_skill(source: str, kind: str) -> dict {
         tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
     } else {
         # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
-        agir = lift_skill(source, ETHOS, prom_mcp.digest(mcp_servers()), CONTRACT);
+        agir = lift_skill(source, ETHOS, sigil_mcp.digest(mcp_servers()), CONTRACT);
         sig = agir_name(agir);
         osp = transpile_ir(agir, sig);
         path = write_module(osp, sig, 1, WORKDIR);
@@ -568,7 +568,7 @@ def recollect(query: str, k: int = 8) -> list {
 
 # ---------------------------------------------------------------------------
 # Live observability — a snapshot of the agent's own graph (for the visualizer)
-# and a tail of the token stream (every LLM call captured by prom_observe).
+# and a tail of the token stream (every LLM call captured by sigil_observe).
 # ---------------------------------------------------------------------------
 def _nid(prefix: str, n: int) -> str { return prefix + str(n); }
 
@@ -632,7 +632,7 @@ def graph_snapshot() -> VGraph {
 }
 
 def observability_tail(n: int = 120) -> VObs {
-    import from prom_observe { read_tail }
+    import from sigil_observe { read_tail }
     recs = read_tail(os.path.join(WORKDIR, "observability", "live.jsonl"), n);
     o = VObs();
     for r in recs {

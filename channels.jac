@@ -2,13 +2,13 @@
 
 OpenClaw ships ~27 channel plugins (discord/slack/telegram/whatsapp/matrix/imessage/…);
 they all reduce to one contract: an inbound message routes to the agent, the agent's
-reply goes back out. Prometheus models that contract on the graph — a Channel node is
+reply goes back out. Sigil models that contract on the graph — a Channel node is
 config (like OpenClaw's channel plugin registration), and `inbound()` is the loop. A
 concrete adapter (a Discord bot, a webhook) just calls `inbound()` and delivers `outbound`;
 the `api_inbound` HTTP endpoint IS a ready webhook channel.
 """
 
-import from prometheus { awaken, Soul }
+import from sigil { awaken, Soul }
 import from agent { run_task }
 import from hooks { fire_hooks }
 

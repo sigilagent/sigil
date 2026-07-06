@@ -1,4 +1,4 @@
-"""Prometheus agent-graph canvas — same mechanism as the AG-IR studio: vis-network
+"""Sigil agent-graph canvas — same mechanism as the AG-IR studio: vis-network
 free-floating, draggable, physics-laid-out nodes (forceAtlas2Based), zoom/pan.
 
 The network is built ONCE on mount; every poll UPSERTS nodes/edges into the live

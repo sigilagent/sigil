@@ -3,11 +3,11 @@
 OpenClaw's model: effective policy is the STRICTER of `tools.exec.security`
 (deny | allowlist | full) and `tools.exec.ask` (off | on-miss | always), plus a
 per-agent allowlist and a pending-approval flow (allow-once/allow-always/deny).
-Prometheus models the policy + allowlist + pending approvals on the graph; any
+Sigil models the policy + allowlist + pending approvals on the graph; any
 exec-capable tool consults `check_exec(cmd)` before running.
 """
 
-import from prometheus { awaken, Soul }
+import from sigil { awaken, Soul }
 
 edge Governs {}    # Soul -> ExecPolicy
 edge Allows {}     # ExecPolicy -> AllowRule

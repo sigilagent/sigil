@@ -1,4 +1,4 @@
-"""Prometheus runtime glue — the parts that touch the disk and the OS.
+"""Sigil runtime glue — the parts that touch the disk and the OS.
 
 The AG-IR -> OSP *compile* itself lives in Jac (``compiler/compiler.jac``'s
 ``transpile_ir``); this module only
@@ -8,8 +8,8 @@ The AG-IR -> OSP *compile* itself lives in Jac (``compiler/compiler.jac``'s
 
 The isolation matters: a compiled OSP agent builds its own task-graph off
 ``root`` when it runs. If we ran it in-process it would splice its throwaway
-task-graph into Prometheus's *persistent* agent graph. A subprocess gives each
-execution a fresh, disposable ``root`` — Prometheus keeps only the crystallized
+task-graph into Sigil's *persistent* agent graph. A subprocess gives each
+execution a fresh, disposable ``root`` — Sigil keeps only the crystallized
 *procedure* (source + AG-IR + stats) on its own graph, never the run artifacts.
 """
 
@@ -26,7 +26,7 @@ _HERE = pathlib.Path(os.path.abspath(__file__)).parent
 def _jac_bin() -> str:
     """The jac binary that matches THIS interpreter — never a bare `jac` from PATH,
     which may resolve to a different (incompatible) jaclang install."""
-    env = os.getenv("PROM_JAC")
+    env = os.getenv("SIGIL_JAC")
     if env:
         return env
     cand = os.path.join(os.path.dirname(sys.executable), "jac")
@@ -34,7 +34,7 @@ def _jac_bin() -> str:
 
 
 def repo_root() -> str:
-    """Directory that owns this runtime — the Prometheus project root."""
+    """Directory that owns this runtime — the Sigil project root."""
     return str(_HERE)
 
 
@@ -94,24 +94,24 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
 
 _DRIVER = '''import from crystallized.{mod} {{ run }}
 import from byllm.lib {{ Model }}
-import prom_observe;
+import sigil_observe;
 import os;
 
 with entry:__main__ {{
-    obs = os.getenv("PROM_OBS", "");
-    sig = os.getenv("PROM_SIG", "");
-    prom_observe.install(obs, sig);
-    model_name = os.getenv("PROM_MODEL", "gpt-4o-mini");
+    obs = os.getenv("SIGIL_OBS", "");
+    sig = os.getenv("SIGIL_SIG", "");
+    sigil_observe.install(obs, sig);
+    model_name = os.getenv("SIGIL_MODEL", "gpt-4o-mini");
     m = Model(model_name=model_name);
-    task = os.getenv("PROM_TASK", "");
-    skill = os.getenv("PROM_SKILL", "");
+    task = os.getenv("SIGIL_TASK", "");
+    skill = os.getenv("SIGIL_SKILL", "");
     out = run(task, m, skill);
     print("{marker}");
     print(out);
 }}
 '''
 
-_MARKER = "<<<PROM_REPORT>>>"
+_MARKER = "<<<SIGIL_REPORT>>>"
 
 OBS_LOG = "observability/live.jsonl"
 
@@ -124,17 +124,17 @@ def execute_module(module_path: str, task: str, model_name: str,
     Returns ``{ok, report, error}``. Never raises — a crash/timeout is a typed
     failure the walker escalates (mutate + retry), never a walker abort.
     ``mcp_json`` is the user's registered MCP servers (JSON), exposed to the
-    crystallized agent's ``_live_tool`` via ``PROM_MCP``.
+    crystallized agent's ``_live_tool`` via ``SIGIL_MCP``.
     """
     mod = pathlib.Path(module_path).stem
     driver = pathlib.Path(workdir) / f"_driver_{mod}.jac"
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER))
     env = dict(os.environ)
-    env.update(PROM_MODEL=model_name, PROM_TASK=task, PROM_SKILL=skill)
-    env["PROM_OBS"] = str(pathlib.Path(workdir) / OBS_LOG)
-    env["PROM_SIG"] = signature
+    env.update(SIGIL_MODEL=model_name, SIGIL_TASK=task, SIGIL_SKILL=skill)
+    env["SIGIL_OBS"] = str(pathlib.Path(workdir) / OBS_LOG)
+    env["SIGIL_SIG"] = signature
     if mcp_json:
-        env["PROM_MCP"] = mcp_json
+        env["SIGIL_MCP"] = mcp_json
     jac = _jac_bin()
     try:
         p = subprocess.run([jac, "run", str(driver)], cwd=workdir, env=env,

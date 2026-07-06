@@ -9,10 +9,10 @@ Q() { jac run main.jac -s "$S" -- "$@" 2>&1 | grep -vE "plugin 'jac-desktop|^ *[
 
 TASK="${1:-write a haiku about the ocean and save it to haiku.txt}"
 
-echo "==> configuring models (frontier=${PROM_FRONTIER:-gpt-5} small=${PROM_SMALL:-gpt-4o-mini})"
-Q configure frontier_model "${PROM_FRONTIER:-gpt-5}"   >/dev/null
-Q configure small_model    "${PROM_SMALL:-gpt-4o-mini}" >/dev/null
-Q configure router_model   "${PROM_ROUTER:-gpt-4o-mini}" >/dev/null
+echo "==> configuring models (frontier=${SIGIL_FRONTIER:-gpt-5} small=${SIGIL_SMALL:-gpt-4o-mini})"
+Q configure frontier_model "${SIGIL_FRONTIER:-gpt-5}"   >/dev/null
+Q configure small_model    "${SIGIL_SMALL:-gpt-4o-mini}" >/dev/null
+Q configure router_model   "${SIGIL_ROUTER:-gpt-4o-mini}" >/dev/null
 
 echo "==> solve: $TASK"
 Q solve "$TASK"

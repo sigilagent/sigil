@@ -1,3 +1,14 @@
+"""OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.
+
+Skill: file-writer
+Shape: ?
+Mechanical lowering of the IR as written (not the hand-tuned production agent).
+"""
+
+import from byllm.lib { Model }
+
+::py::
+import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile
 
 # ---- bundle on path: the skill's owned modules (core/, scripts/, …) are copied
 # into the run dir; make `from core.x import y` resolve for in-process tools and
@@ -294,3 +305,94 @@ def _read_module(relpath):
             with open(cand) as f:
                 return f.read()
     return ""
+
+::py::
+
+glob llm: Model = Model(model_name="gpt-4o-mini");
+
+# ===== TYPES =====
+obj Args {
+    has out: str = "";
+}
+sem Args.out = "output file path parsed from the task";
+
+# ===== COGNITIVE SLOTS (GEN-*) =====
+def extract_args(task: str) -> Args by llm;
+sem extract_args = "Parse the output file path from the task.";
+def write_code(task: str, args: Args) -> str by llm;
+sem write_code = "Emit a self-contained Python script that produces the requested artifact and writes it to args.out.";
+def repair_script(script: str, error: str) -> str by llm;
+sem repair_script = "The authored script failed at runtime with the given error. Return a COMPLETE, corrected, self-contained replacement script that fixes the error (and only what the error requires) — output runnable code only, no prose, no markdown fences.";
+
+# ===== NODES =====
+node Activate {}
+node ExtractArgs {}
+node WriteCode {}
+node Execute {}
+node Finish {}
+
+# ===== WALKER =====
+walker FileWriterAgent {
+    has task: str;
+    has args: Args = Args();
+    has script: str = "";
+    has artifact: str = "";
+    has report: str = "";
+
+    can n_activate with Activate entry {
+        _progress("activate");
+        visit [-->];
+    }
+
+    can n_extract_args with ExtractArgs entry {
+        _progress("extract_args");
+        self.args = extract_args(self.task);
+        visit [-->][?:WriteCode];
+    }
+
+    can n_write_code with WriteCode entry {
+        _progress("write_code");
+        self.script = str(_strip_fences(write_code(self.task, self.args)));
+        visit [-->][?:Execute];
+    }
+
+    can n_execute with Execute entry {
+        _progress("execute");
+        _att = 0; _ok = False;
+        while (_att <= 2) and (not _ok) {
+            _r = _exec_script_try(self.script, self.args);
+            if _r["ok"] { self.artifact = str(_r["path"]); _ok = True; }
+            elif _att < 2 { self.script = str(_strip_fences(repair_script(self.script, str(_r["error"])))); }
+            _att += 1;
+        }
+        visit [-->][?:Finish];
+    }
+
+    can n_finish with Finish entry {
+        _progress("finish");
+        self.report = f"FileWriterAgent artifact={self.artifact}";
+        disengage;
+    }
+
+}
+
+# ===== ENTRYPOINT =====
+def run(task: str, model: Model, skill: str) -> str {
+    global llm;
+    llm = model;
+
+    n_activate = Activate();
+    n_extract_args = ExtractArgs();
+    n_write_code = WriteCode();
+    n_execute = Execute();
+    n_finish = Finish();
+
+    root ++> n_activate;
+    n_activate ++> n_extract_args;
+    n_extract_args ++> n_write_code;
+    n_write_code ++> n_execute;
+    n_execute ++> n_finish;
+
+    agent = n_activate spawn FileWriterAgent(task=task);
+    return agent.report;
+}

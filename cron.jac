@@ -9,10 +9,10 @@ The due-time arithmetic is compiled NATIVE (`na def compute_next`) — a pure in
 hot path over timestamps, the kind of thing the native codespace is for.
 """
 
-import from prometheus { awaken, Soul }
+import from sigil { awaken, Soul }
 import from agent { run_task }
 import from hooks { fire_hooks }
-import from prom_cron { now_ms, parse_at, cron_next }
+import from sigil_cron { now_ms, parse_at, cron_next }
 
 edge Schedules {}   # Soul -> CronJob
 edge Fired {}       # CronJob -> CronRun

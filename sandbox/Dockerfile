@@ -1,4 +1,4 @@
-# Prometheus core — sandboxed test image.
+# Sigil core — sandboxed test image.
 # The crystallized agents AUTHOR AND RUN arbitrary model-written Python. Running that
 # inside this container (not on the host) is the point: the only thing it can touch is
 # the container filesystem, and the only network it needs is the model API.
