@@ -1,12 +1,12 @@
-"""Prometheus Observatory — the browser app.
+"""Sigil Observatory — the browser app.
 
 Left: the agent's own graph, drawn live with vis-network (same mechanism as the
 AG-IR studio) from `api_graph` — soul · registry · skills · memory · MCP servers ·
 run lineage — re-polled and upserted in place so you watch it evolve as tasks are
-solved. Right: 100% token observability — every LLM call captured by prom_observe.
+solved. Right: 100% token observability — every LLM call captured by sigil_observe.
 """
 
-sv import from prometheus { api_graph, api_observability, api_solve }
+sv import from sigil { api_graph, api_observability, api_solve }
 import from .graph_canvas { GraphCanvas }
 
 def:pub App() -> JsxElement {
@@ -55,7 +55,7 @@ def:pub App() -> JsxElement {
                         "background": "#0b1220", "color": "#e2e8f0"}}>
         <div style={{"flex": "1.4", "borderRight": "1px solid #1e293b", "display": "flex", "flexDirection": "column"}}>
             <div style={{"padding": "14px 18px", "borderBottom": "1px solid #1e293b"}}>
-                <div style={{"fontSize": "18px", "fontWeight": "700"}}>🔥 Prometheus Observatory</div>
+                <div style={{"fontSize": "18px", "fontWeight": "700"}}>🔥 Sigil Observatory</div>
                 <div style={{"fontSize": "12px", "color": "#94a3b8"}}>
                     {"skills " + sk + " · memories " + mm + " · mcp " + mc + " · " + status}
                 </div>

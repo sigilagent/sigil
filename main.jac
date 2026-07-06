@@ -1,16 +1,16 @@
-"""Prometheus CLI — the agent has no config files. Its soul, skills and memory
+"""Sigil CLI — the agent has no config files. Its soul, skills and memory
 all live on the graph; persist that graph across invocations with a session file:
 
-    jac run main.jac -s prometheus.session -- solve "extract tables from report.pdf as csv"
-    jac run main.jac -s prometheus.session -- solve "..."     # reuses / evolves the graph
-    jac run main.jac -s prometheus.session -- soul
-    jac run main.jac -s prometheus.session -- configure small_model ollama_chat/qwen3:8b
-    jac run main.jac -s prometheus.session -- teach "the user always wants CSV with a header row"
-    jac run main.jac -s prometheus.session -- library
+    jac run main.jac -s sigil.session -- solve "extract tables from report.pdf as csv"
+    jac run main.jac -s sigil.session -- solve "..."     # reuses / evolves the graph
+    jac run main.jac -s sigil.session -- soul
+    jac run main.jac -s sigil.session -- configure small_model ollama_chat/qwen3:8b
+    jac run main.jac -s sigil.session -- teach "the user always wants CSV with a header row"
+    jac run main.jac -s sigil.session -- library
 """
 
 import sys;
-import from prometheus {
+import from sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill
 }
@@ -182,7 +182,7 @@ with entry:__main__ {
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
     } else {
-        print("Prometheus — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
+        print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
@@ -193,6 +193,6 @@ with entry:__main__ {
         print("  remove-mcp <name>           unregister an MCP server");
         print("  mcp                         list registered MCP servers + their tools");
         print("  register-skill <path> [md|agir|osp]   add a skill (SKILL.md lifted / AG-IR / OSP)");
-        print("  (add  -s prometheus.session  to persist the graph across runs)");
+        print("  (add  -s sigil.session  to persist the graph across runs)");
     }
 }

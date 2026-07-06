@@ -1,4 +1,4 @@
-# Prometheus
+# Sigil
 
 **A self-evolving agent that *is* an object-spatial graph.** A frontier model
 crystallizes each task into a typed procedure; a small model runs it; the
@@ -10,7 +10,7 @@ files — the agent's identity, skills and memory are all nodes on one graph.
 ## The idea
 
 Most "self-evolving" agents evolve *fuzzily*: they accumulate prompt/memory
-snippets and hope a big model reuses them. Prometheus evolves *by construction*.
+snippets and hope a big model reuses them. Sigil evolves *by construction*.
 The first time it sees a class of task, a **frontier model authors an AG-IR** —
 a typed graph contract for that task — which a **compiler lowers to a runnable
 OSP agent**. That compiled procedure is **persisted on the graph** and, from then
@@ -88,10 +88,10 @@ operations are `walker:pub` endpoints — swap to `:priv` and each user gets an 
 ## Layout
 
 ```
-prometheus.jac        the agent: graph model + walkers + the two-tier cognition
+sigil.jac        the agent: graph model + walkers + the two-tier cognition
 main.jac              CLI (solve / library / soul / configure / teach / recall / add-mcp / register-skill)
-prom_runtime.py       disk + OS glue: persist a lowered module, run it isolated
-prom_mcp.py           adapter over byLLM's native McpClient — discovery + rung-0 dispatch
+sigil_runtime.py       disk + OS glue: persist a lowered module, run it isolated
+sigil_mcp.py           adapter over byLLM's native McpClient — discovery + rung-0 dispatch
 compiler/             vendored AG-IR → OSP compiler (the LOWER engine) + runtime asset
 contracts/            the AG-IR authoring contract (seed for the on-graph Spec node)
 crystallized/         (runtime) lowered OSP modules — the agent's learned skills
@@ -99,14 +99,14 @@ crystallized/         (runtime) lowered OSP modules — the agent's learned skil
 ```
 
 Execution isolation: a compiled OSP agent builds its *own* task-graph off `root`
-when it runs, so Prometheus runs each crystallized module in a **separate
-subprocess** — the run's throwaway graph never touches Prometheus's own.
+when it runs, so Sigil runs each crystallized module in a **separate
+subprocess** — the run's throwaway graph never touches Sigil's own.
 
 ## Use
 
 ```bash
 # the graph persists in a session file across every invocation
-JAC="jac run main.jac -s prometheus.session --"
+JAC="jac run main.jac -s sigil.session --"
 
 $JAC soul                                        # identity, config, skills & memory (all graph state)
 $JAC teach "the user always wants CSV with a header row"
@@ -117,8 +117,8 @@ $JAC library                                     # the crystallized skills, with
 ```
 
 Cognition is configured on the graph (or seeded from env on first boot):
-`PROM_FRONTIER` (default `gpt-5`), `PROM_SMALL` (default `ollama_chat/qwen3:32b`),
-`PROM_ROUTER`. The frontier needs its provider key; the small model can be local.
+`SIGIL_FRONTIER` (default `gpt-5`), `SIGIL_SMALL` (default `ollama_chat/qwen3:32b`),
+`SIGIL_ROUTER`. The frontier needs its provider key; the small model can be local.
 
 ## Status
 

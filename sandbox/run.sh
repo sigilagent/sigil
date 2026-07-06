@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test the Prometheus core loop in a locked-down container. The crystallized agents
+# Test the Sigil core loop in a locked-down container. The crystallized agents
 # author AND RUN arbitrary model-written Python — this keeps that off your host.
 #
 #   ./sandbox/run.sh                                  # default haiku task
@@ -13,8 +13,8 @@ cd "$(dirname "$0")/.."
 TASK="${1:-write a haiku about the ocean and save it to haiku.txt}"
 : "${OPENAI_API_KEY:?set OPENAI_API_KEY in your env first}"
 
-echo "==> building prometheus-core (first run only)"
-docker build -f sandbox/Dockerfile -t prometheus-core . >/dev/null
+echo "==> building sigil-core (first run only)"
+docker build -f sandbox/Dockerfile -t sigil-core . >/dev/null
 mkdir -p sandbox/out
 
 # One container runs the whole sequence (configure -> solve -> library), so the graph
@@ -24,13 +24,13 @@ mkdir -p sandbox/out
 # stricter test.
 docker run --rm \
   -e "OPENAI_API_KEY=$OPENAI_API_KEY" \
-  -e "PROM_FRONTIER=${FRONTIER:-gpt-5}" \
-  -e "PROM_SMALL=${SMALL:-gpt-4o-mini}" \
-  -e "PROM_ROUTER=${SMALL:-gpt-4o-mini}" \
+  -e "SIGIL_FRONTIER=${FRONTIER:-gpt-5}" \
+  -e "SIGIL_SMALL=${SMALL:-gpt-4o-mini}" \
+  -e "SIGIL_ROUTER=${SMALL:-gpt-4o-mini}" \
   -v "$PWD/sandbox/out:/app/out" \
   --pids-limit 256 --memory 2g \
   --cap-drop ALL --security-opt no-new-privileges \
-  prometheus-core "$TASK"
+  sigil-core "$TASK"
 
 echo
 echo "==> artifacts the crystallized agent produced (host ./sandbox/out/):"

@@ -1,7 +1,7 @@
 """Hooks — OpenClaw parity: event-driven automation on lifecycle events.
 
 OpenClaw has a 34-name lifecycle hook bus (before_agent_start, before_tool_call,
-message_received, session_start, gateway_start, …). Prometheus models the same:
+message_received, session_start, gateway_start, …). Sigil models the same:
 Hook nodes on the Soul, fired by `fire_hooks(event, payload)` at lifecycle points.
 Actions: note (observe), shell (run a command), memory (write a durable fact),
 webhook (POST out). Decision hooks (block/override) are a straightforward extension
@@ -10,7 +10,7 @@ of the return contract.
 
 import subprocess;
 import from urllib.request { Request, urlopen }
-import from prometheus { awaken, Soul, teach }
+import from sigil { awaken, Soul, teach }
 
 edge Observes {}   # Soul -> Hook
 

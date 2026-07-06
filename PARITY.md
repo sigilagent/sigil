@@ -1,7 +1,7 @@
-# Prometheus ↔ OpenClaw feature parity
+# Sigil ↔ OpenClaw feature parity
 
 OpenClaw is a ~14,000-file, ~125-plugin TypeScript product built over years. This maps
-every OpenClaw **feature category** to its Prometheus status. The guiding principle is
+every OpenClaw **feature category** to its Sigil status. The guiding principle is
 OpenClaw's own: *"core stays lean; capability ships as plugins."* So parity means
 implementing the **core categories** as graph-native Jac + the **extension mechanisms**,
 and letting the long tail (52 providers, 27 channel adapters, native apps) ride those
@@ -15,7 +15,7 @@ noted, not built).
 
 ## Core runtime & agent loop
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | Agent turn (intake→context→infer→tools→reply→persist) | `solve` walker: awaken→recall→route→execute→learn | ✅ |
 | Config model: `SOUL.md`/persona/rules (file-based) | **`Soul` node** — persona, ethos, model tiers, channels, all on the graph (no files) | ✅ |
@@ -28,7 +28,7 @@ noted, not built).
 
 ## Automation / Cron  ✅ (explicit ask — fully built)
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | `cron add --at/--every/--cron --tz` | `cron add <name> <at\|every\|cron> <spec> "<task>" [tz] [channel]` | ✅ |
 | One-shot `at` auto-deletes after success | `delete_after_run` (default true for `at`) | ✅ |
@@ -43,7 +43,7 @@ noted, not built).
 
 ## Channels  ✅ mechanism + loop built
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | Channel plugin registration (`registerChannel`) | **`Channel` node** + `channel_add/list/rm` | ✅ |
 | Inbound message → agent → reply | **`inbound(channel, peer, text)`** → `solve` → outbound record | ✅ |
@@ -55,7 +55,7 @@ noted, not built).
 
 ## Tools / "superpowers"
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | Tool registration (`registerTool`) | AG-IR tool nodes + byLLM `tools=[…]` slots | ✅ |
 | MCP tools (bundle plugins) | **byLLM `McpClient`** + `add-mcp` + rung-0 dispatch | ✅ |
@@ -67,7 +67,7 @@ noted, not built).
 
 ## Security
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | exec-approvals (`deny`/`allowlist`/`full` × `off`/`on-miss`/`always`) | **`approvals.jac`** — `ExecPolicy` + allowlist + pending-approval flow | ✅ |
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
@@ -79,7 +79,7 @@ noted, not built).
 
 ## Memory
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | `memory-core` (SQLite FTS+vector, per-agent) | **three-layer graph memory** — procedural (`TaskGraph`), episodic (`Attempt`), semantic (`Memory`) | ✅ |
 | `memory_search` / `memory_get` | `recall()` (lexical) + `teach()`; `recall` endpoint | ✅ |
@@ -89,7 +89,7 @@ noted, not built).
 
 ## Providers  🔶 (byLLM/litellm already covers all 52)
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | ~52 provider plugins (anthropic/openai/google/deepseek/groq/mistral/…) | **byLLM→litellm** covers every one of them out of the box | 🔶 |
 | Local models (ollama/lmstudio/vllm/sglang) | byLLM `Model("ollama_chat/…")` etc. — already the default small tier | ✅ |
@@ -99,7 +99,7 @@ noted, not built).
 
 ## Plugins / Extensions
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | Bundle plugins = skills + MCP + config | **`register_skill`** (SKILL.md/AG-IR/OSP) + **`add-mcp`** | ✅ |
 | Code plugins (`register*` API, ~40 slots) | Jac modules imported by the entry (cron/channels/hooks/approvals are exactly this) | 🔶 |
@@ -109,7 +109,7 @@ noted, not built).
 
 ## Gateway / frontends
 
-| OpenClaw | Prometheus | Status |
+| OpenClaw | Sigil | Status |
 |---|---|---|
 | Gateway process (one per host, WS + HTTP) | `jac start observatory.jac` (jac-cloud) — API + client on one port | ✅ |
 | CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) | 🔶 |
@@ -133,6 +133,6 @@ noted, not built).
   SSRF proxy, ClawHub, native companion apps, device pairing, OpenAI-compat HTTP shape.
   None are architectural blockers — each is a bounded addition on the existing graph model.
 
-The Prometheus difference throughout: OpenClaw keeps this state in `~/.openclaw/*.json`
-files; Prometheus keeps **all of it on one persistent object-spatial graph** — soul,
+The Sigil difference throughout: OpenClaw keeps this state in `~/.openclaw/*.json`
+files; Sigil keeps **all of it on one persistent object-spatial graph** — soul,
 skills, memory, channels, cron jobs, hooks, approvals — visible live in the Observatory.

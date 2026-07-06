@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# prometheus — HTTP client for a running Prometheus agent (the Observatory gateway).
+# sigil — HTTP client for a running Sigil agent (the Observatory gateway).
 #
-#   prometheus serve                       # start the gateway (jac start observatory.jac)
-#   prometheus login                       # register+login, cache a JWT (run once)
-#   prometheus solve "extract tables from report.pdf as csv"
-#   prometheus chat  "say hello"           # OpenAI-shaped reply
-#   prometheus soul | library | graph | tokens | mcp
-#   prometheus configure small_model gpt-4o-mini
-#   prometheus teach "the user prefers CSV with headers"  |  prometheus recall "csv"
-#   prometheus add-mcp github stdio gh-mcp
-#   prometheus register-skill ./skill.agir agir
+#   sigil serve                       # start the gateway (jac start observatory.jac)
+#   sigil login                       # register+login, cache a JWT (run once)
+#   sigil solve "extract tables from report.pdf as csv"
+#   sigil chat  "say hello"           # OpenAI-shaped reply
+#   sigil soul | library | graph | tokens | mcp
+#   sigil configure small_model gpt-4o-mini
+#   sigil teach "the user prefers CSV with headers"  |  sigil recall "csv"
+#   sigil add-mcp github stdio gh-mcp
+#   sigil register-skill ./skill.agir agir
 #
-# Config via env:  PROM_URL (http://localhost:8199)  PROM_USER (owner)  PROM_PASS
+# Config via env:  SIGIL_URL (http://localhost:8199)  SIGIL_USER (owner)  SIGIL_PASS
 set -euo pipefail
 
-URL="${PROM_URL:-http://localhost:8199}"
+URL="${SIGIL_URL:-http://localhost:8199}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-JAC="${PROM_JAC:-$(command -v jac || echo /Users/jayanaka-98/miniconda3/envs/voodoo-pypi/bin/jac)}"
-TOKFILE="${PROM_TOKENFILE:-$HOME/.prometheus/token}"
-TOKEN="${PROM_TOKEN:-$(cat "$TOKFILE" 2>/dev/null || true)}"
+JAC="${SIGIL_JAC:-$(command -v jac || echo /Users/jayanaka-98/miniconda3/envs/voodoo-pypi/bin/jac)}"
+TOKFILE="${SIGIL_TOKENFILE:-$HOME/.sigil/token}"
+TOKEN="${SIGIL_TOKEN:-$(cat "$TOKFILE" 2>/dev/null || true)}"
 
 esc() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
 
@@ -29,14 +29,14 @@ call() {
   [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
   curl -sS -X POST "$URL/walker/$walker" \
        -H "Content-Type: application/json" "${auth[@]}" \
-       --max-time "${PROM_TIMEOUT:-600}" -d "$body" \
+       --max-time "${SIGIL_TIMEOUT:-600}" -d "$body" \
   | python3 -c '
 import sys, json
 try: d = json.load(sys.stdin)
 except Exception as e: print("bad response:", e); sys.exit(1)
 if not d.get("ok", True):
     msg = (d.get("error") or {}).get("message", d)
-    if str(msg) == "Unauthorized": msg = "Unauthorized — run: prometheus login"
+    if str(msg) == "Unauthorized": msg = "Unauthorized — run: sigil login"
     print("ERROR:", msg); sys.exit(1)
 reps = (((d.get("data") or {}).get("result") or {}).get("reports")) or [d]
 r = reps[0] if reps else {}
@@ -45,7 +45,7 @@ print(json.dumps(r, indent=2, ensure_ascii=False) if isinstance(r,(dict,list)) e
 }
 
 login() {
-  local user="${PROM_USER:-owner}" pass="${PROM_PASS:-prometheus-dev}"
+  local user="${SIGIL_USER:-owner}" pass="${SIGIL_PASS:-sigil-dev}"
   # register is idempotent for our purposes (ignore "already exists")
   curl -sS -X POST "$URL/user/register" -H "Content-Type: application/json" -d \
     "{\"identities\":[{\"type\":\"username\",\"value\":$(esc "$user")}],\"credential\":{\"type\":\"password\",\"password\":$(esc "$pass")}}" \
@@ -60,21 +60,21 @@ login() {
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${PROM_PORT:-8199}" -a "${PROM_API_PORT:-8198}" ;;
+  serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${SIGIL_PORT:-8199}" -a "${SIGIL_API_PORT:-8198}" ;;
   login)      login ;;
-  solve)      call api_solve         "{\"task\": $(esc "${1:?usage: prometheus solve \"<task>\"}")}" ;;
-  chat)       call api_chat_completions "{\"messages\":[{\"role\":\"user\",\"content\": $(esc "${1:?usage: prometheus chat \"<msg>\"}")}]}" ;;
+  solve)      call api_solve         "{\"task\": $(esc "${1:?usage: sigil solve \"<task>\"}")}" ;;
+  chat)       call api_chat_completions "{\"messages\":[{\"role\":\"user\",\"content\": $(esc "${1:?usage: sigil chat \"<msg>\"}")}]}" ;;
   soul)       call api_soul ;;
   configure)  call api_configure     "{\"key\": $(esc "${1:?key}"), \"value\": $(esc "${2:?value}")}" ;;
-  recall)     call api_recall        "{\"query\": $(esc "${1:?usage: prometheus recall \"<query>\"}")}" ;;
+  recall)     call api_recall        "{\"query\": $(esc "${1:?usage: sigil recall \"<query>\"}")}" ;;
   library)    call api_library ;;
   graph)      call api_graph ;;
   tokens)     call api_observability "{\"n\": ${1:-100}}" ;;
   mcp)        call api_mcp ;;
-  teach)      call api_teach         "{\"fact\": $(esc "${1:?usage: prometheus teach \"<fact>\"}")}" ;;
+  teach)      call api_teach         "{\"fact\": $(esc "${1:?usage: sigil teach \"<fact>\"}")}" ;;
   add-mcp)    call api_add_mcp       "{\"name\": $(esc "${1:?name}"), \"transport\": $(esc "${2:-stdio}"), \"target\": $(esc "${3:?cmd-or-url}")}" ;;
   register-skill)
-              src="${1:?usage: prometheus register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
+              src="${1:?usage: sigil register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
               payload="${src}"; [ "$kind" != "osp" ] && payload="$(cat "$src")"
               call api_register_skill "{\"source\": $(esc "$payload"), \"kind\": $(esc "$kind")}" ;;
   help|*)     sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;

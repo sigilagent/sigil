@@ -1,5 +1,5 @@
 [project]
-name = "prometheus-agent"
+name = "sigil"
 version = "0.1.0"
 description = "A self-evolving object-spatial agent: the frontier model crystallizes tasks into AG-IR graphs that a small model executes, and the task-graphs persist as the agent itself."
 entry-point = "observatory.jac"
