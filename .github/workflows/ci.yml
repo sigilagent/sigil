@@ -1,0 +1,43 @@
+name: CI
+
+# Run the Jac test suite on every PR into main (and on main itself).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run per ref; a new push cancels the previous in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: jac test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The native `jac` is a self-contained binary that bundles its own Python +
+      # jaclang + byllm runtime, so there is nothing to `pip install`. The install
+      # script drops it in $HOME/.local/bin; we add that to PATH for later steps.
+      - name: Install native jac
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show jac version
+        run: jac --version
+
+      # `*.test.jac` picks up every annex test (present and future) automatically;
+      # report_fix_tests.jac is a standalone regression suite (non-annex name), so
+      # it is named explicitly.
+      - name: Run test suite
+        run: jac test *.test.jac report_fix_tests.jac
