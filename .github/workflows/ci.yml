@@ -36,6 +36,11 @@ jobs:
       - name: Show jac version
         run: jac --version
 
+      # byLLM is bundled in the native binary, but the AG-IR compiler parses YAML
+      # via PyYAML, which is not bundled. Provision it into the project venv.
+      - name: Provision compiler dependency (PyYAML)
+        run: jac install pyyaml
+
       # `*.test.jac` picks up every annex test (present and future) automatically;
       # report_fix_tests.jac is a standalone regression suite (non-annex name), so
       # it is named explicitly.

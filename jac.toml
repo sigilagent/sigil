@@ -5,9 +5,15 @@ description = "A self-evolving object-spatial agent: the frontier model crystall
 entry-point = "observatory.jac"
 
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
-# plugin, so there is NO `pip install byllm` and NO [dependencies] entry. Import it
-# as `import from jaclang.byllm.lib { Model }`, and the ambient `by llm()` uses the
+# plugin, so there is NO `pip install byllm`. Import it as
+# `import from jaclang.byllm.lib { Model }`, and the ambient `by llm()` uses the
 # default model configured in [plugins.byllm.model] below.
+
+# The AG-IR compiler parses the crystallizer's YAML output via PyYAML — the one
+# Python dependency the native binary does NOT bundle. `jac install` provisions it
+# into the project venv.
+[dependencies]
+pyyaml = "latest"
 
 # Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
 # keeps its live model tiers on the graph (Soul), so this is only a seed default.
