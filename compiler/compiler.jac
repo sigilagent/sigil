@@ -1338,7 +1338,7 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     sk = fm.get("name", name);
     shape = ir.get("shape", "?");
     parts.append(f"\"\"\"OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.\n\nSkill: {sk}\nShape: {shape}\nMechanical lowering of the IR as written (not the hand-tuned production agent).\n\"\"\"");
-    parts.append("import from byllm.lib { Model }");
+    parts.append("import from jaclang.byllm.lib { Model }");
     parts.append(tools_block);
     kn = _emit_knowledge(ir);
     if kn { parts.append("# ===== KNOWLEDGE (static globs) =====\n" + kn); }

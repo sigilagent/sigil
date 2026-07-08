@@ -14,7 +14,7 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 import os;
 import json;
 import sigil_mcp;
-import from byllm.lib { Model }
+import from jaclang.byllm.lib { Model }
 import from compiler.compiler { transpile_ir }
 import from sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp

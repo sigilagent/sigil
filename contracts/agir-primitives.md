@@ -314,7 +314,7 @@ calls during LOWER, the IR was underspecified; fix the IR, not the Jac.
 
 - **Model via `glob llm` rebound by `run()`, never as a parameter** — parameter-threading leaks the `Model` spec into the prompt.
 - **The IR text never enters a prompt** — it was lowered at build time; runtime sees only slot signatures + `sem` + the task.
-- **`by llm()` with parens**; `import from byllm.lib { Model }`.
+- **`by llm()` with parens**; `import from jaclang.byllm.lib { Model }` (byLLM is core to jac).
 - **Keep `by llm()` slots at arity ≤3** — byLLM's MTIR mis-extracts params for a complex-first-arg slot at arity 4 (`IndexError` in `mtir.impl.jac:factory`); fold extra inputs into one context string. *(Distinct from the stale-cache `IndexError`, which `jac purge` fixes — if it survives purge, it's the arity bug.)*
 - **An enum-return slot must not also carry `tools=[…]`** — the final-turn coercion is fragile.
 - **A file-writing tool must `mkdir -p` its parent** — a bare `open()` throws inside a `tools=` loop → silent retry thrash.

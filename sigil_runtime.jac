@@ -28,7 +28,7 @@ glob OBS_LOG: str = "observability/live.jsonl";
 # `run`, binds the small model, installs the token observer, and prints the report
 # behind a marker. Kept as a `.format()` template — `{{`/`}}` are literal braces.
 glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
-    "import from byllm.lib {{ Model }}\n"
+    "import from jaclang.byllm.lib {{ Model }}\n"
     "import sigil_observe;\n"
     "import os;\n"
     "\n"

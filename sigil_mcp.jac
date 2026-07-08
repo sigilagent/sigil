@@ -1,6 +1,6 @@
 """MCP integration — a thin adapter over byLLM's *native* MCP client.
 
-byLLM ships `McpClient`/`McpTool` (byllm.lib): a client connects to an MCP server
+byLLM ships `McpClient`/`McpTool` (jaclang.byllm.lib): a client connects to an MCP server
 (stdio / sse / streamable-http via the `mcp` package) and `get_tools()` returns
 `McpTool`s that are drop-in tools for `by llm(tools=[...])`. We reuse that instead
 of speaking JSON-RPC ourselves — the crystallized agent gets the same MCP stack
@@ -33,7 +33,7 @@ def _client_for(srv: any) -> any {
     if name in _CLIENTS {
         return _CLIENTS[name];
     }
-    import from byllm.lib { McpClient }
+    import from jaclang.byllm.lib { McpClient }
     hdrs: dict[str, str] = dict(srv.get("headers", {}) or {});
     envd: dict[str, str] = dict(srv.get("env", {}) or {});
     c = McpClient(

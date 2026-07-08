@@ -4,11 +4,10 @@ version = "0.1.0"
 description = "A self-evolving object-spatial agent: the frontier model crystallizes tasks into AG-IR graphs that a small model executes, and the task-graphs persist as the agent itself."
 entry-point = "observatory.jac"
 
-# byLLM comes from the single `jac` binary's runtime (a jac plugin), NOT a
-# separate `pip install byllm`. Declared here + `jac install` provisions it into
-# the project runtime; `import from byllm.lib { Model }` then resolves under jac.
-[dependencies]
-byllm = "latest"
+# byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
+# plugin, so there is NO `pip install byllm` and NO [dependencies] entry. Import it
+# as `import from jaclang.byllm.lib { Model }`, and the ambient `by llm()` uses the
+# default model configured in [plugins.byllm.model] below.
 
 # Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
 # keeps its live model tiers on the graph (Soul), so this is only a seed default.

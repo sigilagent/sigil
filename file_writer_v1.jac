@@ -5,7 +5,7 @@ Shape: ?
 Mechanical lowering of the IR as written (not the hand-tuned production agent).
 """
 
-import from byllm.lib { Model }
+import from jaclang.byllm.lib { Model }
 
 ::py::
 import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile
