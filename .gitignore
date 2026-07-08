@@ -217,13 +217,21 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# --- prometheus runtime state (the agent's evolving graph lives here, not in git) ---
+# --- sigil runtime state (the agent's evolving graph lives here, not in git) ---
 crystallized/
 *.session
 *.session.*
 _driver_*.jac
 __pycache__/
 .jac/
+observability/
+
+# crystallized-run debris leaked into the repo root (the isolated run writes its
+# authored script + captured output to cwd): the script, its stdout, verifier files
+op.py
+output.txt
+verifier.out
+task.out
 
 # native build artifacts (platform-specific)
 bin/

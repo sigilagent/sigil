@@ -61,9 +61,8 @@ def _strip_fences(code):
     return c
 
 def _exec_script(script, args=None):
-    # The GEN-RAW author writes a self-contained script that creates its own
-    # output file; we just run it. `args` (if present) only supplies a nicer
-    # return path — the real artifact is whatever the script wrote to cwd.
+    # The author writes a self-contained script that either writes an output file OR
+    # prints the answer to stdout. We run it and return the PATH of the deliverable.
     with open("op.py", "w") as f:
         f.write(_strip_fences(script))
     # use THIS interpreter (sys.executable), not whatever `python3` is on PATH,
@@ -71,6 +70,22 @@ def _exec_script(script, args=None):
     r = _subprocess.run([sys.executable, "op.py"], capture_output=True, text=True, timeout=180)
     if r.returncode != 0:
         raise RuntimeError(f"script failed: {r.stderr[:800]}")
+    # 1) An explicit output file the script was asked to write.
+    try:
+        p = args.output_spec.path
+        if p and os.path.isfile(p):
+            return p
+    except Exception:
+        pass
+    # 2) Else the deliverable is whatever the script PRINTED — DON'T discard stdout
+    #    (that dropped every print-based answer). Persist it to a real file so the
+    #    verifier and the terminal report (_artifact_text) can read the actual answer.
+    out = (r.stdout or "").strip()
+    if out:
+        with open("output.txt", "w") as f:
+            f.write(out)
+        return "output.txt"
+    # 3) Nothing printed and no file — fall back to any spec path, else the script.
     try:
         return args.output_spec.path
     except Exception:
@@ -267,6 +282,26 @@ def _write_artifact(content, path):
     with open(path, "w") as f:
         f.write(content if isinstance(content, str) else str(content))
     return path
+
+def _artifact_text(v, limit=8000):
+    # Surface the DELIVERED CONTENT, not just a path. Delivery ops return the path
+    # of the file the authored script wrote/printed; the caller wants the ANSWER, not
+    # the filename. If v names a TEXT file, return its (stripped, truncated) content;
+    # a BINARY file (pdf/img/xlsx/…) is surfaced as "path (N bytes)" not raw bytes;
+    # anything that isn't a file is returned as-is. Never raises.
+    try:
+        s = v if isinstance(v, str) else str(v)
+        if s and os.path.isfile(s):
+            _bin = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".xlsx", ".docx",
+                    ".pptx", ".zip", ".mp4", ".mp3", ".bin", ".parquet")
+            if s.lower().endswith(_bin):
+                return "%s (%d bytes)" % (s, os.path.getsize(s))
+            with open(s, "r", errors="replace") as f:
+                data = f.read().strip()
+            return data[:limit] + ("…[truncated]" if len(data) > limit else "")
+        return s
+    except Exception:
+        return str(v)
 
 def _emit_surface(content, spec):
     # An ACT·artifact surface (sig only, no IR body) must still WRITE the deliverable

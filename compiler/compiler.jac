@@ -294,7 +294,9 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
     }
     head = str(name) + (("[{self." + _safe(enumc) + "}]") if enumc else "");
     parts: list = [head];
-    for d in deliv[:4] { parts.append(str(d) + "={self." + _safe(str(d)) + "}"); }
+    # Surface each delivered carry's CONTENT (via _artifact_text), not its file path —
+    # delivery ops return the path of what the script wrote; the caller wants the answer.
+    for d in deliv[:4] { parts.append(str(d) + "={_artifact_text(self." + _safe(str(d)) + ")}"); }
     if (not enumc) and (not deliv) { return "f\"" + str(name) + " done\""; }
     return "f\"" + _j(" ", parts) + "\"";
 }

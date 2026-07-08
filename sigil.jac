@@ -126,6 +126,8 @@ node Soul {
     has small_model: str = "";
     has router_model: str = "";
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
+    has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
+    has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
 }
 
 node Spec {
@@ -161,9 +163,11 @@ node TaskGraph {
     has agir: str;         # the frontier-authored AG-IR (the contract)
     has module: str;       # path to the lowered OSP on disk
     has version: int = 1;
-    has origin: str = "frontier";   # 'frontier' | 'mutation'
+    has origin: str = "frontier";   # 'frontier' | 'mutation' | 'relearn'
     has runs: int = 0;
     has successes: int = 0;
+    has last_score: int = -1;       # last grounded-eval score (0-100); -1 = never evaluated
+    has last_eval: str = "";        # last eval verdict (one-line reason)
 }
 
 node Attempt {
@@ -285,6 +289,23 @@ user relies on). Skip anything one-off or already obvious. Return a JSON list of
 strings; return [] if nothing is worth keeping.""";
 def distill(task: str, result: str) -> list[str] by router();
 
+# Grounded verification — the quality gate the bare ok/success counter cannot give.
+# A crystallized run can EXIT ok yet be WRONG (empty, echoed input, off-task). The
+# grader judges the actual artifact against the task and scores it.
+obj EvalVerdict {
+    has score: int = 0;        # 0-100: how well RESULT accomplishes TASK
+    has passed: bool = False;  # did it satisfy the task at all
+    has reason: str = "";      # one concise sentence
+}
+
+sem judge_result = """You are a STRICT grader. Given a TASK and the RESULT a procedure
+produced, decide whether the result correctly and completely accomplishes the task.
+Be harsh: score LOW (<40) if the result is empty, merely echoes/repeats the task or its
+input, ignores the instruction, is truncated, or is only partially right. Score HIGH
+(>80) only when it fully and correctly satisfies the task. Judge the ARTIFACT, not the
+intent.""";
+def judge_result(task: str, result: str) -> EvalVerdict by router();
+
 def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origin: str, version: int) -> TaskGraph {
     tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=module,
                    version=version, origin=origin);
@@ -308,15 +329,22 @@ def _lower(agir: str, sig: str) -> dict {
     return {"ok": False, "osp": "", "agir": cur, "error": err};
 }
 
-def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
-    # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
-    # compiler lowers it (repairing on failure), we persist it.
-    sig = name_signature(task);
+def _crystallize_fresh(reg: Registry, sig: str, intent: str, task: str, version: int, origin: str) -> TaskGraph {
+    # Author a FRESH AG-IR with the frontier for a KNOWN signature/version — the reusable
+    # core behind first crystallization AND relearn (which discards a degraded procedure
+    # and re-authors from scratch, rather than revising it like mutate does).
     tools = sigil_mcp.digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
     low = _lower(agir, sig);
-    path = write_module(str(low["osp"]), sig, 1, WORKDIR);
-    return _persist(reg, sig, intent, str(low["agir"]), path, "frontier", 1);
+    path = write_module(str(low["osp"]), sig, version, WORKDIR);
+    return _persist(reg, sig, intent, str(low["agir"]), path, origin, version);
+}
+
+def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
+    # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
+    # compiler lowers it (repairing on failure), we persist it as v1.
+    sig = name_signature(task);
+    return _crystallize_fresh(reg, sig, intent, task, 1, "frontier");
 }
 
 def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
@@ -491,13 +519,42 @@ walker solve {
             self.signature = tg.signature;
         }
 
+        # --- grounded-eval valve: a run can EXIT ok yet be WRONG (empty / echoed /
+        # off-task). Judge the artifact; if it fails and auto_eval is on, RELEARN the
+        # procedure from scratch (frontier) and retry once. This is the automatic
+        # relearn trigger — the quality gate the bare ok/success counter cannot give.
+        if res["ok"] and soul.auto_eval {
+            try {
+                ev = judge_result(self.task, str(res["report"]));
+                tg.last_score = ev.score;
+                tg.last_eval = ev.reason;
+                self.trace += "eval -> " + str(ev.score) + "/100 (" + ev.reason + ")\n";
+                if ev.score < soul.eval_threshold {
+                    self.trace += "eval FAIL -> relearn (frontier) + retry\n";
+                    prev = tg;
+                    tg = _crystallize_fresh(reg, prev.signature, prev.intent, self.task, prev.version + 1, "relearn");
+                    tg +>:MutatedFrom:+> prev;
+                    self.signature = tg.signature;
+                    res = run_crystal(tg, self.task, ctx, self.skill);
+                }
+            } except Exception as e {
+                self.trace += "eval skipped (" + str(e)[:80] + ")\n";
+            }
+        }
+
         self.result = str(res["report"]);
 
         # --- self-evolution: learn durable facts from the completed task ----
+        # Best-effort: a failure in the (optional) learn step must never discard a
+        # completed task's result. Distillation is enrichment, not part of the task.
         if res["ok"] {
-            facts = distill(self.task, self.result);
-            for f in facts { remember(soul, f, "fact"); }
-            if facts { self.trace += "learned -> " + str(len(facts)) + " memory\n"; }
+            try {
+                facts = distill(self.task, self.result);
+                for f in facts { remember(soul, f, "fact"); }
+                if facts { self.trace += "learned -> " + str(len(facts)) + " memory\n"; }
+            } except Exception as e {
+                self.trace += "learn skipped (" + str(e)[:80] + ")\n";
+            }
         }
         self.trace += ("DONE ok" if res["ok"] else "DONE fail") + "\n";
     }
@@ -550,8 +607,71 @@ def configure(key: str, value: str) -> str {
     elif key == "name" { soul.name = value; }
     elif key == "add_ethos" { soul.ethos = soul.ethos + [value]; }
     elif key == "add_channel" { soul.channels = soul.channels + [value]; }
+    elif key == "auto_eval" { soul.auto_eval = value.lower() in ["1", "true", "yes", "on"]; }
+    elif key == "eval_threshold" { soul.eval_threshold = int(value); }
     else { return "unknown key: " + key; }
     return key + " = " + value;
+}
+
+# ---------------------------------------------------------------------------
+# Eval / relearn / forget — grounded quality management of the skill library.
+#   eval    : run a skill on a probe task, judge the artifact, record the score.
+#   relearn : discard a degraded procedure and re-author it FRESH (frontier).
+#   forget  : remove a skill entirely (all versions, attempts, module files).
+# ---------------------------------------------------------------------------
+def _find_skill(reg: Registry, signature: str) -> TaskGraph | None {
+    # Latest version of the skill with this signature, or None.
+    matches = [c for c in latest_by_sig([reg -->][?:TaskGraph]) if c.signature == signature];
+    return matches[0] if matches else None;
+}
+
+def eval_skill(signature: str, probe: str = "") -> dict {
+    # Grounded verification: run the current skill on a probe task (defaults to the
+    # skill's own intent) and score whether the output truly accomplishes it.
+    awaken();
+    reg = [root -->][?:Registry][0];
+    tg = _find_skill(reg, signature);
+    if tg is None { return {"ok": False, "error": "no such skill: " + signature}; }
+    task = probe if probe else tg.intent;
+    res = run_crystal(tg, task, "", "");
+    ev = judge_result(task, str(res["report"]));
+    tg.last_score = ev.score;
+    tg.last_eval = ev.reason;
+    return {
+        "ok": True, "signature": signature, "version": tg.version,
+        "score": ev.score, "passed": ev.passed, "reason": ev.reason,
+        "result": str(res["report"])[:400]
+    };
+}
+
+def relearn(signature: str, hint: str = "") -> dict {
+    # Discard the current (degraded) procedure and re-crystallize it FROM SCRATCH with
+    # the frontier — same signature, bumped version, lineage kept. Manual counterpart
+    # to the solve loop's automatic eval-triggered relearn.
+    awaken();
+    reg = [root -->][?:Registry][0];
+    tg = _find_skill(reg, signature);
+    if tg is None { return {"ok": False, "error": "no such skill: " + signature}; }
+    intent = (tg.intent + "\nExtra guidance: " + hint) if hint else tg.intent;
+    nt = _crystallize_fresh(reg, signature, intent, tg.intent, tg.version + 1, "relearn");
+    nt +>:MutatedFrom:+> tg;
+    return {"ok": True, "signature": signature, "version": nt.version, "origin": "relearn", "module": nt.module};
+}
+
+def forget(signature: str) -> dict {
+    # Remove a crystallized skill entirely — every version, its attempts, and the
+    # lowered module files on disk. Clears a stale/degenerate procedure.
+    reg = [root -->][?:Registry][0];
+    removed = 0;
+    for tg in [reg -->][?:TaskGraph] {
+        if tg.signature == signature {
+            for a in [tg -->][?:Attempt] { del a; }
+            if tg.module and os.path.exists(tg.module) { os.remove(tg.module); }
+            del tg;
+            removed += 1;
+        }
+    }
+    return {"signature": signature, "removed": removed};
 }
 
 def teach(fact: str, kind: str = "fact") -> str {
@@ -635,7 +755,8 @@ def observability_tail(n: int = 120) -> VObs {
     import from sigil_observe { read_tail }
     recs = read_tail(os.path.join(WORKDIR, "observability", "live.jsonl"), n);
     o = VObs();
-    for r in recs {
+    for raw in recs {
+        r: dict = dict(raw);
         c = VCall(
             model=str(r.get("model", "?")),
             signature=str(r.get("signature", "")),
@@ -706,6 +827,23 @@ walker:pub api_recall {
 
 walker:pub api_library {
     can run with Root entry { report library(); }
+}
+
+walker:pub api_eval {
+    has signature: str;
+    has probe: str = "";
+    can run with Root entry { report eval_skill(self.signature, self.probe); }
+}
+
+walker:pub api_relearn {
+    has signature: str;
+    has hint: str = "";
+    can run with Root entry { report relearn(self.signature, self.hint); }
+}
+
+walker:pub api_forget {
+    has signature: str;
+    can run with Root entry { report forget(self.signature); }
 }
 
 walker:pub api_mcp {
