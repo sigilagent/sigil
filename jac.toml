@@ -4,6 +4,21 @@ version = "0.1.0"
 description = "A self-evolving object-spatial agent: the frontier model crystallizes tasks into AG-IR graphs that a small model executes, and the task-graphs persist as the agent itself."
 entry-point = "observatory.jac"
 
+# byLLM comes from the single `jac` binary's runtime (a jac plugin), NOT a
+# separate `pip install byllm`. Declared here + `jac install` provisions it into
+# the project runtime; `import from byllm.lib { Model }` then resolves under jac.
+[dependencies]
+byllm = "latest"
+
+# Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
+# keeps its live model tiers on the graph (Soul), so this is only a seed default.
+# Builtin `llm` default. Sigil keeps its live tiers on the graph (Soul:
+# frontier=gpt-5, small=gpt-4o-mini), so this only seeds any bare `by llm()`.
+# API keys are NOT stored here (jac.toml is git-tracked) — OPENAI_API_KEY /
+# ZAI_API_KEY come from the environment / gitignored `.env`, read by litellm.
+[plugins.byllm.model]
+default_model = "gpt-4o-mini"
+
 [dependencies.npm]
 react = "^18.2.0"
 react-dom = "^18.2.0"
@@ -18,3 +33,5 @@ vis-data = "^7.1.9"
 [dependencies.npm.dev]
 vite = "^6.4.1"
 "@vitejs/plugin-react" = "^4.2.1"
+
+
