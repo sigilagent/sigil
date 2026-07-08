@@ -12,7 +12,8 @@ all live on the graph; persist that graph across invocations with a session file
 import sys;
 import from sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
-    add_mcp, remove_mcp, mcp_status, register_skill
+    add_mcp, remove_mcp, mcp_status, register_skill,
+    eval_skill, relearn, forget
 }
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
@@ -96,6 +97,37 @@ with entry:__main__ {
     } elif cmd == "recall" {
         q = _arg(argv, 1);
         for m in recollect(q, 8) { print("  (" + m["kind"] + ") " + m["content"]); }
+    } elif cmd == "eval" {
+        # eval <signature> [probe-task]  — grounded verification of a crystallized skill
+        sig = _arg(argv, 1); probe = _arg(argv, 2);
+        if not sig { print("usage: eval <signature> [probe-task]"); }
+        else {
+            r = eval_skill(sig, probe);
+            if not r["ok"] { print(str(r["error"])); }
+            else {
+                print("eval " + str(r["signature"]) + " v" + str(r["version"]) + " -> "
+                      + str(r["score"]) + "/100  " + ("PASS" if r["passed"] else "FAIL"));
+                print("  reason: " + str(r["reason"]));
+                print("  result: " + str(r["result"]));
+            }
+        }
+    } elif cmd == "relearn" {
+        # relearn <signature> [hint]  — discard + re-crystallize a skill fresh (frontier)
+        sig = _arg(argv, 1); hint = _arg(argv, 2);
+        if not sig { print("usage: relearn <signature> [hint]"); }
+        else {
+            r = relearn(sig, hint);
+            if not r["ok"] { print(str(r["error"])); }
+            else { print("relearned " + str(r["signature"]) + " -> v" + str(r["version"]) + " [" + str(r["origin"]) + "]"); }
+        }
+    } elif cmd == "forget" {
+        # forget <signature>  — remove a skill entirely (all versions + module files)
+        sig = _arg(argv, 1);
+        if not sig { print("usage: forget <signature>"); }
+        else {
+            r = forget(sig);
+            print("forgot '" + str(r["signature"]) + "' (" + str(r["removed"]) + " version(s) removed)");
+        }
     } elif cmd == "add-mcp" {
         # add-mcp <name> <stdio|http|sse> <command-or-url> [args...]
         name = _arg(argv, 1); transport = _arg(argv, 2); target = _arg(argv, 3);
@@ -185,8 +217,11 @@ with entry:__main__ {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");
+        print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
+        print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
+        print("  forget <sig>                remove a skill entirely (all versions + files)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
-        print("  configure <key> <value>     mutate config on the graph (persona|*_model|add_ethos|add_channel)");
+        print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold)");
         print("  teach \"<fact>\"              write a durable memory onto the graph");
         print("  recall \"<query>\"            retrieve relevant memories");
         print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");

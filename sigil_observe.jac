@@ -1,23 +1,22 @@
 """Total token observability — monkeypatch litellm to capture EVERY LLM call.
 
-Drawn from voodoo-bench's patcher: byLLM routes all cognition through litellm, so
-wrapping ``litellm.completion`` / ``acompletion`` sees every token that crosses the
-wire. We capture as much as each provider exposes and record what it hides:
-
-  - model, role of the call, message count, duration
-  - prompt / completion / total tokens (response.usage)
-  - cache_creation / cache_read tokens (Anthropic prompt caching)
-  - reasoning_tokens (o-series / gpt-5 bill hidden CoT here — count without text)
-  - reasoning_content TEXT where the provider returns it (qwen, deepseek, …)
-  - the completion content + any tool_calls
-  - dollar cost (litellm.completion_cost, best-effort)
+byLLM routes all cognition through litellm, so wrapping ``litellm.completion`` /
+``acompletion`` sees every token that crosses the wire. We capture as much as each
+provider exposes and record what it hides (reasoning tokens, cache tokens, cost).
 
 Each call is appended as one JSON line to ``SIGIL_OBS`` the instant it returns
 (flushed) — live-observable and crash-resilient. Streaming responses are tapped so
 their tokens are captured too. Everything is best-effort and never raises into the
 model call.
+
+This module is pure Python-runtime manipulation — it patches a third-party
+library's functions with ``functools.wraps`` + async closures and reassigns module
+attributes. That is exactly what Jac's inline-Python (``::py::``) block is for, so
+the body lives in one below; ``install`` / ``read_tail`` are still ordinary module
+symbols importable from Jac (``import from sigil_observe { read_tail }``).
 """
 
+::py::
 import functools
 import json
 import os
@@ -150,7 +149,7 @@ def install(stream_path: str = "", sig: str = "") -> bool:
     return True
 
 
-def read_tail(stream_path: str, n: int = 200) -> list:
+def read_tail(stream_path: str, n: int = 200) -> list[dict]:
     """Return the last n observability records (for the server endpoint)."""
     try:
         with open(stream_path) as f:
@@ -167,3 +166,4 @@ def read_tail(stream_path: str, n: int = 200) -> list:
         except Exception:
             continue
     return out
+::py::
