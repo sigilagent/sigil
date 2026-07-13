@@ -1,0 +1,97 @@
+name: Release
+
+# Publish a GitHub Release for a version tag, attaching the curl|bash installer
+# so https://github.com/<repo>/releases/latest/download/install.sh always serves
+# the newest install.sh. Cut a release two ways:
+#   • push a tag:      git tag v0.2.0 && git push origin v0.2.0
+#   • run it by hand:  Actions → Release → Run workflow → tag = v0.2.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to create & release (e.g. v0.2.0)"
+        required: true
+
+# Creating releases and tags needs write access to repo contents.
+permissions:
+  contents: write
+
+# Never release the same tag twice concurrently.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          case "$tag" in
+            v*) : ;;
+            *)  echo "::error::tag '$tag' must start with 'v' (e.g. v0.2.0)"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # Never ship a broken pipe-to-bash installer: fail the release if it won't parse.
+      - name: Validate installer
+        run: |
+          test -f install.sh || { echo "::error::install.sh not found"; exit 1; }
+          bash -n install.sh
+          shasum -a 256 install.sh | awk '{print $1"  install.sh"}' > install.sh.sha256
+          echo "checksum: $(cat install.sh.sha256)"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          cat > "$notes" <<EOF
+          Release **Sigil $TAG** — a self-evolving object-spatial agent.
+
+          ## Install
+
+          \`\`\`bash
+          curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash
+          \`\`\`
+
+          The installer pulls the native \`jac\` runtime, fetches Sigil into \`~/.sigil/app\`,
+          provisions the compiler's one dependency (PyYAML), and drops a \`sigil\` launcher on
+          your PATH. No root; safe to re-run. Verify the download against \`install.sh.sha256\`.
+
+          Then:
+
+          \`\`\`bash
+          export OPENAI_API_KEY=sk-...     # your frontier provider key
+          sigil serve                      # start the Observatory gateway
+          sigil login                      # once — caches a JWT
+          sigil solve "extract the tables from report.pdf as csv"
+          \`\`\`
+
+          Docs: https://sigilagent.com · https://github.com/$GITHUB_REPOSITORY#readme
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — refreshing assets."
+            gh release upload "$TAG" install.sh install.sh.sha256 --clobber
+          else
+            echo "Creating release $TAG at $GITHUB_SHA."
+            gh release create "$TAG" install.sh install.sh.sha256 \
+              --target "$GITHUB_SHA" \
+              --title "Sigil $TAG" \
+              --notes-file "$notes"
+          fi
