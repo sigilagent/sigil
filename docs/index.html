@@ -236,6 +236,30 @@
   .step .body p{font-size:13.8px;color:var(--muted);margin:0}
   .step .body p code{color:var(--cyan);background:rgba(34,211,238,.09);padding:1px 5px;border-radius:4px}
 
+  /* ---------- install one-liner ---------- */
+  .oneliner{
+    display:flex;align-items:center;gap:16px;
+    border:1px solid rgba(139,92,246,.42);border-radius:14px;
+    background:linear-gradient(180deg,rgba(139,92,246,.1),rgba(10,10,18,.85));
+    padding:18px 20px;box-shadow:0 14px 50px -16px rgba(139,92,246,.5);
+    overflow-x:auto;
+  }
+  .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px}
+  .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:nowrap}
+  .oneliner .copy-btn{margin-left:auto;flex:0 0 auto;font-size:12px;padding:6px 12px}
+  .oneliner-note{font-size:13px;color:var(--faint);margin:12px 2px 0;font-family:var(--mono)}
+  .what-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
+  .what{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 15px}
+  .what .k{font-family:var(--mono);font-size:11px;color:var(--violet)}
+  .what h4{font-size:14.5px;margin:7px 0 4px;font-weight:600}
+  .what p{font-size:12.6px;color:var(--muted);margin:0;line-height:1.5}
+  details.manual{margin-top:26px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2)}
+  details.manual summary{cursor:pointer;padding:15px 18px;font-weight:600;font-size:14.5px;list-style:none;display:flex;align-items:center;gap:10px;color:var(--text)}
+  details.manual summary::-webkit-details-marker{display:none}
+  details.manual summary::before{content:"▸";color:var(--violet);transition:transform .15s ease}
+  details.manual[open] summary::before{transform:rotate(90deg)}
+  details.manual .manual-body{padding:2px 18px 20px}
+
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   .stack{display:flex;flex-direction:column;gap:18px}
   .lead{font-size:16px;color:var(--muted);margin:0 0 22px;max-width:640px}
@@ -267,6 +291,7 @@
     .sigil-wrap{order:-1}
     .sigil{max-width:250px}
     .two-col{grid-template-columns:1fr}
+    .what-grid{grid-template-columns:repeat(2,1fr)}
     .feat-grid{grid-template-columns:repeat(2,1fr)}
     .mem-grid{grid-template-columns:1fr}
     .loop-note{grid-template-columns:1fr}
@@ -630,40 +655,46 @@
   <div class="wrap">
     <div class="section-head">
       <div class="kicker">Download &amp; install</div>
-      <h2 class="section-title">One native binary bundles the whole runtime.</h2>
-      <p>The native <code>jac</code> is a self-contained binary that bundles its own Python, jaclang and byLLM — there's nothing to <code>pip install</code>. Get it, clone Sigil, provision the one compiler dependency, and you're running.</p>
+      <h2 class="section-title">One command. The whole agent.</h2>
+      <p>The installer pulls the self-contained <code>jac</code> runtime, fetches Sigil, provisions its one compiler dependency, and drops a <code>sigil</code> launcher on your PATH. No root, no <code>pip install</code>, safe to re-run.</p>
     </div>
 
-    <div class="two-col">
-      <div class="steps">
-        <div class="step"><div class="num">1</div><div class="body"><h4>Install the native <code>jac</code> binary</h4><p>The install script drops it into <code>~/.local/bin</code> — make sure that's on your <code>PATH</code>.</p></div></div>
-        <div class="step"><div class="num">2</div><div class="body"><h4>Clone Sigil</h4><p>The whole agent is a handful of <code>.jac</code> files plus the vendored compiler.</p></div></div>
-        <div class="step"><div class="num">3</div><div class="body"><h4>Provision PyYAML</h4><p>The AG-IR compiler parses YAML — the one dependency the binary doesn't bundle.</p></div></div>
-        <div class="step"><div class="num">4</div><div class="body"><h4>Point cognition at your models</h4><p>The frontier tier needs a provider key; the small tier can be a local Ollama model.</p></div></div>
-      </div>
+    <div class="oneliner" data-code>
+      <span class="pr">$</span>
+      <pre style="margin:0;padding:0;background:none;border:0;overflow:visible"><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre>
+      <button class="copy-btn">Copy</button>
+    </div>
+    <p class="oneliner-note">macOS &amp; Linux · installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
 
-      <div class="code" data-code>
-        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">install.sh</span><button class="copy-btn">Copy</button></div>
+    <div class="what-grid">
+      <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs the <code>jac</code> binary — its own Python, jaclang &amp; byLLM bundled in.</p></div>
+      <div class="what"><div class="k">02</div><h4>Fetches Sigil</h4><p>Clones the source into <code>~/.sigil/app</code> (or a tarball if you have no git).</p></div>
+      <div class="what"><div class="k">03</div><h4>Provisions PyYAML</h4><p>The one dependency the compiler needs and the binary doesn't bundle.</p></div>
+      <div class="what"><div class="k">04</div><h4>Puts <code>sigil</code> on PATH</h4><p>A launcher so <code>sigil serve</code> / <code>sigil solve</code> work from anywhere.</p></div>
+    </div>
+
+    <details class="manual">
+      <summary>Prefer to install by hand?</summary>
+      <div class="manual-body">
+        <div class="code" data-code>
+          <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">manual install</span><button class="copy-btn">Copy</button></div>
 <pre><code><span class="c"># 1 · install the native jac binary (bundles Python + byLLM)</span>
 curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
 <span class="k">export</span> <span class="v">PATH</span>=<span class="s">"$HOME/.local/bin:$PATH"</span>
-jac --version
 
-<span class="c"># 2 · clone Sigil</span>
-git clone https://github.com/sigilagent/sigil.git
-<span class="k">cd</span> sigil
-
-<span class="c"># 3 · provision the one compiler dependency</span>
+<span class="c"># 2 · clone Sigil &amp; provision the compiler dependency</span>
+git clone https://github.com/sigilagent/sigil.git &amp;&amp; <span class="k">cd</span> sigil
 jac install pyyaml
 
-<span class="c"># 4 · configure cognition (frontier needs a provider key)</span>
+<span class="c"># 3 · configure cognition (frontier needs a provider key)</span>
 <span class="k">export</span> <span class="v">OPENAI_API_KEY</span>=sk-...
 <span class="k">export</span> <span class="v">SIGIL_FRONTIER</span>=gpt-5                 <span class="c"># default</span>
 <span class="k">export</span> <span class="v">SIGIL_SMALL</span>=ollama_chat/qwen3:32b     <span class="c"># can be local</span></code></pre>
+        </div>
       </div>
-    </div>
+    </details>
 
-    <p class="lead" style="margin:4px 0 0">
+    <p class="lead" style="margin:26px 0 0">
       Verify the build with the test suite — <code>jac test *.test.jac report_fix_tests.jac</code> — or launch the live Observatory Control-UI with <code>jac start observatory.jac</code>. Then run the agent:
     </p>
   </div>
