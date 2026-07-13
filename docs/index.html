@@ -248,6 +248,12 @@
   .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:nowrap}
   .oneliner .copy-btn{margin-left:auto;flex:0 0 auto;font-size:12px;padding:6px 12px}
   .oneliner-note{font-size:13px;color:var(--faint);margin:12px 2px 0;font-family:var(--mono)}
+  /* hero variant of the install one-liner */
+  .hero-install{margin:0 0 30px;max-width:600px}
+  .hero-install-label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  .hero-install .oneliner{padding:14px 16px;gap:12px}
+  .hero-install .oneliner code{font-size:13px}
+  .hero-install .oneliner .pr{font-size:13px}
   .what-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
   .what{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 15px}
   .what .k{font-family:var(--mono);font-size:11px;color:var(--violet)}
@@ -355,6 +361,14 @@
         <h1 class="hero-title">A self-evolving agent that <span class="em">is</span> a graph.</h1>
         <p class="hero-sub">A frontier model crystallizes each task into a <strong>typed, compiled procedure</strong>. A small model runs it. The procedures persist as the agent itself — <strong>no <code>SOUL.md</code>, no <code>SKILL.md</code>, no config files.</strong></p>
         <p class="hero-tag">identity · skills · memory · channels · cron · hooks — all nodes on one object-spatial graph</p>
+        <div class="hero-install">
+          <span class="hero-install-label">Install — macOS &amp; Linux</span>
+          <div class="oneliner" data-code>
+            <span class="pr">$</span>
+            <pre style="margin:0;padding:0;background:none;border:0;overflow:visible"><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre>
+            <button class="copy-btn">Copy</button>
+          </div>
+        </div>
         <div class="btns">
           <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
