@@ -32,7 +32,7 @@
     --maxw:1080px;
   }
   *{box-sizing:border-box}
-  html{scroll-behavior:smooth}
+  html{scroll-behavior:smooth;scroll-padding-top:76px;-webkit-text-size-adjust:100%}
   body{
     margin:0;
     background:var(--bg);
@@ -86,6 +86,7 @@
   }
   .hero .wrap{position:relative;z-index:1}
   .hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:52px;align-items:center}
+  .hero-grid>div{min-width:0}   /* let grid tracks shrink so the install bar scrolls instead of clipping */
   .eyebrow{
     display:inline-flex;align-items:center;gap:9px;
     font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;
@@ -238,15 +239,17 @@
 
   /* ---------- install one-liner ---------- */
   .oneliner{
-    display:flex;align-items:center;gap:16px;
+    display:flex;align-items:center;gap:14px;
     border:1px solid rgba(139,92,246,.42);border-radius:14px;
     background:linear-gradient(180deg,rgba(139,92,246,.1),rgba(10,10,18,.85));
-    padding:18px 20px;box-shadow:0 14px 50px -16px rgba(139,92,246,.5);
-    overflow-x:auto;
+    padding:16px 18px;box-shadow:0 14px 50px -16px rgba(139,92,246,.5);
+    overflow:hidden;
   }
-  .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px}
+  .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px;flex:0 0 auto}
+  .oneliner .ol-scroll{flex:1 1 auto;min-width:0;overflow-x:auto}
+  .oneliner .ol-scroll pre{margin:0;padding:0;background:none;border:0}
   .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:nowrap}
-  .oneliner .copy-btn{margin-left:auto;flex:0 0 auto;font-size:12px;padding:6px 12px}
+  .oneliner .copy-btn{flex:0 0 auto;font-size:12px;padding:6px 12px}
   .oneliner-note{font-size:13px;color:var(--faint);margin:12px 2px 0;font-family:var(--mono)}
   /* hero variant of the install one-liner */
   .hero-install{margin:0 0 30px;max-width:600px}
@@ -301,6 +304,8 @@
     .feat-grid{grid-template-columns:repeat(2,1fr)}
     .mem-grid{grid-template-columns:1fr}
     .loop-note{grid-template-columns:1fr}
+    .loop-panel{padding:26px 22px}
+    .status-panel{padding:26px 22px}
     .nav-links{
       display:none;position:absolute;top:62px;left:0;right:0;flex-direction:column;
       gap:0;background:var(--bg-2);border-bottom:1px solid var(--line);padding:8px 0;
@@ -311,10 +316,28 @@
     .nav-toggle{display:flex;margin-left:auto;background:none;border:1px solid var(--line-strong);border-radius:8px;width:38px;height:38px;align-items:center;justify-content:center;cursor:pointer}
     .nav-toggle svg{width:20px;height:20px;stroke:var(--text)}
   }
+  @media (max-width:640px){
+    /* stack the crystallization loop vertically; point the arrows downward */
+    .loop-row{flex-direction:column;align-items:stretch}
+    .stage{max-width:none;width:100%}
+    .arrow{transform:rotate(90deg);justify-content:center;padding:2px 0}
+  }
   @media (max-width:520px){
+    .wrap{padding:0 18px}
     .feat-grid{grid-template-columns:1fr}
-    .hero{padding:60px 0 50px}
-    section{padding:56px 0}
+    .what-grid{grid-template-columns:1fr}
+    .hero{padding:56px 0 46px}
+    section{padding:52px 0}
+    .loop-panel{padding:20px 16px}
+    .code pre{font-size:12.4px;padding:15px 14px}
+    .oneliner{padding:13px 14px;gap:10px}
+    .hero-install .oneliner code,.hero-install .oneliner .pr{font-size:12.2px}
+    .btns{gap:10px;width:100%}
+    .btn{padding:11px 18px;font-size:14.5px;flex:1 1 auto;justify-content:center}
+    h2.section-title{font-size:25px}
+    .section-head p{font-size:15.5px}
+    .hero-sub{font-size:17px}
+    .foot-inner{flex-direction:column;align-items:flex-start;gap:16px}
   }
 </style>
 </head>
@@ -365,7 +388,7 @@
           <span class="hero-install-label">Install — macOS &amp; Linux</span>
           <div class="oneliner" data-code>
             <span class="pr">$</span>
-            <pre style="margin:0;padding:0;background:none;border:0;overflow:visible"><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre>
+            <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
             <button class="copy-btn">Copy</button>
           </div>
         </div>
@@ -675,7 +698,7 @@
 
     <div class="oneliner" data-code>
       <span class="pr">$</span>
-      <pre style="margin:0;padding:0;background:none;border:0;overflow:visible"><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre>
+      <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
       <button class="copy-btn">Copy</button>
     </div>
     <p class="oneliner-note">macOS &amp; Linux · installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
