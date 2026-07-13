@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sigil — a self-evolving agent that is a graph</title>
+<meta name="description" content="Sigil is a self-evolving agent that is an object-spatial graph. A frontier model crystallizes each task into a typed, compiled procedure; a cheap model runs it; the procedures persist as the agent itself. OpenClaw-inspired, with nothing on disk." />
+<meta property="og:title" content="Sigil — a self-evolving agent that is a graph" />
+<meta property="og:description" content="A frontier model crystallizes each task into a typed procedure; a small model runs it forever; every skill, memory and config lives on one persistent graph." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23a78bfa' stroke-width='1.6'%3E%3Cpolygon points='16,3 28,10 28,22 16,29 4,22 4,10' /%3E%3Cpath d='M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.6' fill='%2322d3ee'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#08080d;
+    --bg-2:#0d0d16;
+    --panel:#12121d;
+    --panel-2:#161624;
+    --line:rgba(255,255,255,.08);
+    --line-strong:rgba(255,255,255,.14);
+    --text:#e9e7f3;
+    --muted:#9d9ab4;
+    --faint:#6f6c86;
+    --violet:#a78bfa;
+    --violet-strong:#8b5cf6;
+    --cyan:#22d3ee;
+    --gold:#f5c451;
+    --green:#4ade80;
+    --amber:#fbbf24;
+    --red:#f87171;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:var(--violet);text-decoration:none}
+  a:hover{color:var(--cyan)}
+  h1,h2,h3{line-height:1.2;letter-spacing:-.02em;margin:0}
+  code{font-family:var(--mono);font-size:.9em}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .accent{color:var(--violet)}
+  .cyan{color:var(--cyan)}
+  .gold{color:var(--gold)}
+  .muted{color:var(--muted)}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(14px);
+    background:rgba(8,8,13,.72);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-inner{display:flex;align-items:center;gap:28px;height:62px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:650;letter-spacing:-.02em;font-size:18px;color:var(--text)}
+  .brand svg{width:26px;height:26px;display:block}
+  .nav-links{display:flex;gap:26px;margin-left:auto;align-items:center}
+  .nav-links a{color:var(--muted);font-size:14.5px;font-weight:500}
+  .nav-links a:hover{color:var(--text)}
+  .nav-cta{
+    display:inline-flex;align-items:center;gap:7px;
+    padding:8px 15px;border-radius:9px;
+    border:1px solid var(--line-strong);
+    color:var(--text) !important;font-size:14px;font-weight:550;
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+  }
+  .nav-cta:hover{border-color:var(--violet);background:rgba(139,92,246,.12)}
+  .nav-toggle{display:none}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;padding:96px 0 72px;overflow:hidden}
+  .hero-glow{
+    position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(680px 460px at 78% 8%, rgba(139,92,246,.22), transparent 60%),
+      radial-gradient(560px 420px at 12% 30%, rgba(34,211,238,.13), transparent 62%);
+  }
+  .hero .wrap{position:relative;z-index:1}
+  .hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:52px;align-items:center}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;
+    color:var(--violet);
+    border:1px solid rgba(139,92,246,.32);
+    background:rgba(139,92,246,.09);
+    padding:6px 12px;border-radius:100px;margin-bottom:26px;
+  }
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  h1.hero-title{
+    font-size:clamp(38px,5.6vw,60px);font-weight:700;letter-spacing:-.035em;
+  }
+  h1.hero-title .em{
+    background:linear-gradient(100deg,var(--violet) 10%,var(--cyan) 90%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    font-style:italic;
+  }
+  .hero-sub{font-size:19px;color:var(--muted);margin:24px 0 8px;max-width:560px}
+  .hero-sub strong{color:var(--text);font-weight:600}
+  .hero-tag{font-family:var(--mono);font-size:13.5px;color:var(--faint);margin-bottom:32px}
+  .btns{display:flex;gap:14px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    padding:12px 22px;border-radius:11px;font-weight:600;font-size:15px;
+    border:1px solid transparent;cursor:pointer;transition:transform .12s ease;
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn-primary{
+    background:linear-gradient(180deg,var(--violet-strong),#7c3aed);
+    color:#fff !important;box-shadow:0 8px 30px -8px rgba(139,92,246,.6);
+  }
+  .btn-primary:hover{color:#fff !important}
+  .btn-ghost{border-color:var(--line-strong);color:var(--text) !important;background:rgba(255,255,255,.03)}
+  .btn-ghost:hover{border-color:var(--violet)}
+  .btn svg{width:17px;height:17px}
+
+  /* sigil mark */
+  .sigil-wrap{display:flex;justify-content:center;align-items:center}
+  .sigil{width:100%;max-width:340px;height:auto;filter:drop-shadow(0 0 40px rgba(139,92,246,.35))}
+  .sigil .ring{animation:spin 60s linear infinite;transform-origin:center}
+  .sigil .ring-2{animation:spin 44s linear infinite reverse;transform-origin:center}
+  .sigil .pulse{animation:pulse 3.4s ease-in-out infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){.sigil *{animation:none !important}}
+
+  /* ---------- generic section ---------- */
+  section{padding:74px 0;position:relative}
+  .section-head{max-width:680px;margin-bottom:44px}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--violet);margin-bottom:14px}
+  h2.section-title{font-size:clamp(27px,3.6vw,38px);font-weight:700;letter-spacing:-.03em}
+  .section-head p{color:var(--muted);font-size:17.5px;margin:16px 0 0}
+  .divider{border:0;border-top:1px solid var(--line);margin:0}
+
+  /* ---------- crystallization loop ---------- */
+  .loop-panel{
+    border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,var(--panel),var(--bg-2));
+    padding:34px;overflow:hidden;position:relative;
+  }
+  .loop-row{display:flex;align-items:stretch;gap:14px;flex-wrap:wrap;justify-content:center}
+  .stage{
+    flex:1 1 150px;min-width:140px;max-width:220px;
+    border:1px solid var(--line);border-radius:13px;background:var(--panel-2);
+    padding:16px 15px;text-align:center;
+  }
+  .stage .n{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em}
+  .stage h4{font-size:15.5px;margin:6px 0 6px;font-weight:650}
+  .stage p{font-size:12.8px;color:var(--muted);margin:0;line-height:1.5}
+  .stage.frontier{border-color:rgba(245,196,81,.4);box-shadow:inset 0 0 0 1px rgba(245,196,81,.06)}
+  .stage.frontier h4{color:var(--gold)}
+  .stage.small{border-color:rgba(74,222,128,.35)}
+  .stage.small h4{color:var(--green)}
+  .arrow{display:flex;align-items:center;color:var(--faint);font-size:20px;flex:0 0 auto}
+  .loop-note{
+    margin-top:22px;padding-top:20px;border-top:1px dashed var(--line);
+    display:grid;grid-template-columns:repeat(3,1fr);gap:16px;
+  }
+  .route{font-size:13.5px;color:var(--muted)}
+  .route b{display:block;font-family:var(--mono);font-size:12px;letter-spacing:.05em;margin-bottom:3px}
+  .route.hit b{color:var(--green)} .route.miss b{color:var(--gold)} .route.partial b{color:var(--cyan)}
+
+  /* ---------- graph model ---------- */
+  .graph-layout{display:grid;grid-template-columns:1fr;gap:34px}
+  .graph-card{
+    border:1px solid var(--line);border-radius:18px;background:var(--bg-2);padding:8px;overflow-x:auto;
+  }
+  .graph-svg{display:block;min-width:640px;width:100%;height:auto}
+  .mem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .mem-card{border:1px solid var(--line);border-radius:15px;background:var(--panel);padding:22px 20px}
+  .mem-card .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:11px}
+  .mem-card h3{font-size:18px;margin-bottom:9px}
+  .mem-card p{font-size:14px;color:var(--muted);margin:0}
+  .mem-card.proc .tag{color:var(--violet)}
+  .mem-card.epis .tag{color:var(--cyan)}
+  .mem-card.sem .tag{color:var(--gold)}
+  .node-name{font-family:var(--mono);color:var(--text);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:5px;font-size:.86em}
+
+  /* ---------- features ---------- */
+  .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .feat{
+    border:1px solid var(--line);border-radius:15px;background:var(--panel);padding:22px 20px;
+    transition:border-color .15s ease,transform .15s ease;position:relative;
+  }
+  .feat:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .feat .ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.25)}
+  .feat .ic svg{width:18px;height:18px;stroke:var(--violet)}
+  .feat h3{font-size:16.5px;margin-bottom:7px}
+  .feat p{font-size:13.8px;color:var(--muted);margin:0}
+  .badge{position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:5px;letter-spacing:.05em}
+  .badge.done{color:var(--green);background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.25)}
+
+  /* ---------- code ---------- */
+  .code{
+    position:relative;border:1px solid var(--line);border-radius:13px;
+    background:#0a0a12;margin:0;overflow:hidden;
+  }
+  .code-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+  .code-head .lbl{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.03em}
+  .code-head .dots{display:flex;gap:6px;margin-right:4px}
+  .code-head .dots i{width:11px;height:11px;border-radius:50%;display:block}
+  .code-head .dots i:nth-child(1){background:#ff5f57}
+  .code-head .dots i:nth-child(2){background:#febc2e}
+  .code-head .dots i:nth-child(3){background:#28c840}
+  .copy-btn{
+    margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:7px;
+    padding:4px 10px;cursor:pointer;transition:.15s;
+  }
+  .copy-btn:hover{color:var(--text);border-color:var(--violet)}
+  .code pre{margin:0;padding:18px 18px;overflow-x:auto;font-family:var(--mono);font-size:13.3px;line-height:1.75;color:#d7d4e8}
+  .code pre .c{color:var(--faint)}       /* comment */
+  .code pre .k{color:var(--violet)}      /* keyword / cmd */
+  .code pre .s{color:var(--green)}       /* string */
+  .code pre .v{color:var(--cyan)}        /* var */
+  .code pre .p{color:var(--gold)}        /* prompt/flag */
+
+  /* ---------- install steps ---------- */
+  .steps{display:flex;flex-direction:column;gap:14px;margin:0 0 26px}
+  .step{display:flex;gap:16px;align-items:flex-start}
+  .step .num{
+    flex:0 0 auto;width:30px;height:30px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:13px;font-weight:600;color:var(--violet);
+    background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.3);margin-top:2px;
+  }
+  .step .body{flex:1}
+  .step .body h4{font-size:15.5px;font-weight:600;margin:2px 0 3px}
+  .step .body p{font-size:13.8px;color:var(--muted);margin:0}
+  .step .body p code{color:var(--cyan);background:rgba(34,211,238,.09);padding:1px 5px;border-radius:4px}
+
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+  .stack{display:flex;flex-direction:column;gap:18px}
+  .lead{font-size:16px;color:var(--muted);margin:0 0 22px;max-width:640px}
+  .lead code{color:var(--cyan);background:rgba(34,211,238,.09);padding:1px 6px;border-radius:5px}
+
+  /* ---------- layout tree ---------- */
+  .tree{border:1px solid var(--line);border-radius:13px;background:#0a0a12;padding:22px 20px;font-family:var(--mono);font-size:13px;line-height:1.9;overflow-x:auto}
+  .tree .f{color:var(--cyan)}
+  .tree .d{color:var(--muted)}
+
+  /* ---------- status ---------- */
+  .status-panel{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,var(--panel),var(--bg-2));padding:34px 32px}
+  .status-panel h3{font-size:20px;margin-bottom:14px}
+  .status-panel p{color:var(--muted);font-size:15.5px;margin:0 0 10px}
+  .status-panel .legend{display:flex;gap:22px;flex-wrap:wrap;margin-top:22px;font-size:13px}
+  .status-panel .legend span{display:flex;align-items:center;gap:8px;color:var(--muted)}
+  .status-panel .legend b{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);padding:44px 0 56px;margin-top:24px}
+  .foot-inner{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+  .foot-inner .muted{font-size:14px}
+  .foot-links{display:flex;gap:22px;font-size:14px}
+  .foot-links a{color:var(--muted)}
+  .foot-links a:hover{color:var(--text)}
+
+  @media (max-width:860px){
+    .hero-grid{grid-template-columns:1fr;gap:40px}
+    .sigil-wrap{order:-1}
+    .sigil{max-width:250px}
+    .two-col{grid-template-columns:1fr}
+    .feat-grid{grid-template-columns:repeat(2,1fr)}
+    .mem-grid{grid-template-columns:1fr}
+    .loop-note{grid-template-columns:1fr}
+    .nav-links{
+      display:none;position:absolute;top:62px;left:0;right:0;flex-direction:column;
+      gap:0;background:var(--bg-2);border-bottom:1px solid var(--line);padding:8px 0;
+    }
+    .nav-links.open{display:flex}
+    .nav-links a{padding:12px 24px}
+    .nav-links .nav-cta{margin:8px 24px}
+    .nav-toggle{display:flex;margin-left:auto;background:none;border:1px solid var(--line-strong);border-radius:8px;width:38px;height:38px;align-items:center;justify-content:center;cursor:pointer}
+    .nav-toggle svg{width:20px;height:20px;stroke:var(--text)}
+  }
+  @media (max-width:520px){
+    .feat-grid{grid-template-columns:1fr}
+    .hero{padding:60px 0 50px}
+    section{padding:56px 0}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav>
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <g fill="none" stroke="#a78bfa" stroke-width="1.5">
+          <polygon points="16,3 28,10 28,22 16,29 4,22 4,10"/>
+          <path d="M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16"/>
+        </g>
+        <circle cx="16" cy="16" r="2.4" fill="#22d3ee"/>
+      </svg>
+      Sigil
+    </a>
+    <button class="nav-toggle" aria-label="Menu" onclick="document.getElementById('navlinks').classList.toggle('open')">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <div class="nav-links" id="navlinks">
+      <a href="#idea">The idea</a>
+      <a href="#graph">The graph</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a class="nav-cta" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<a id="top"></a>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="hero-glow"></div>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span>OpenClaw-like · but it compiles its own skills</span>
+        <h1 class="hero-title">A self-evolving agent that <span class="em">is</span> a graph.</h1>
+        <p class="hero-sub">A frontier model crystallizes each task into a <strong>typed, compiled procedure</strong>. A small model runs it. The procedures persist as the agent itself — <strong>no <code>SOUL.md</code>, no <code>SKILL.md</code>, no config files.</strong></p>
+        <p class="hero-tag">identity · skills · memory · channels · cron · hooks — all nodes on one object-spatial graph</p>
+        <div class="btns">
+          <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn btn-ghost" href="#idea">How it works</a>
+        </div>
+      </div>
+      <div class="sigil-wrap">
+        <!-- animated sigil mark -->
+        <svg class="sigil" viewBox="0 0 260 260" aria-hidden="true">
+          <defs>
+            <radialGradient id="core" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#22d3ee"/>
+              <stop offset="100%" stop-color="#8b5cf6"/>
+            </radialGradient>
+          </defs>
+          <g class="ring" stroke="rgba(139,92,246,.35)" fill="none" stroke-width="1">
+            <circle cx="130" cy="130" r="118" stroke-dasharray="3 7"/>
+          </g>
+          <g class="ring-2" stroke="rgba(34,211,238,.28)" fill="none" stroke-width="1">
+            <circle cx="130" cy="130" r="96" stroke-dasharray="1 9"/>
+          </g>
+          <!-- hexagon + spokes -->
+          <g stroke="#a78bfa" stroke-width="1.4" fill="none" opacity=".85">
+            <polygon points="130,28 218,79 218,181 130,232 42,181 42,79"/>
+            <path d="M130 28 L130 130 M218 79 L130 130 M218 181 L130 130 M130 232 L130 130 M42 181 L130 130 M42 79 L130 130"/>
+            <!-- inner triangle sigil -->
+            <path d="M130 66 L186 162 L74 162 Z" stroke="#22d3ee" stroke-width="1.1" opacity=".7"/>
+          </g>
+          <!-- outer nodes -->
+          <g fill="#8b5cf6">
+            <circle class="pulse" cx="130" cy="28" r="5"/>
+            <circle class="pulse" cx="218" cy="79" r="5" style="animation-delay:.4s"/>
+            <circle class="pulse" cx="218" cy="181" r="5" style="animation-delay:.8s"/>
+            <circle class="pulse" cx="130" cy="232" r="5" style="animation-delay:1.2s"/>
+            <circle class="pulse" cx="42" cy="181" r="5" style="animation-delay:1.6s"/>
+            <circle class="pulse" cx="42" cy="79" r="5" style="animation-delay:2s"/>
+          </g>
+          <!-- core -->
+          <circle cx="130" cy="130" r="11" fill="url(#core)"/>
+          <circle cx="130" cy="130" r="11" fill="none" stroke="#22d3ee" stroke-width="1" opacity=".6"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</header>
+
+<hr class="divider"/>
+
+<!-- ============ THE IDEA ============ -->
+<section id="idea">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">The idea</div>
+      <h2 class="section-title">Most agents evolve fuzzily. Sigil evolves by construction.</h2>
+      <p>The first time Sigil meets a class of task, a frontier model authors an <strong>AG-IR</strong> — a typed graph contract — which a compiler lowers into a runnable object-spatial procedure. That procedure is persisted on the graph and, from then on, executed by a <strong>cheap model</strong>. The expensive model is paid once, to build the harness. The cheap model rides it forever.</p>
+    </div>
+
+    <div class="loop-panel">
+      <div class="loop-row">
+        <div class="stage"><div class="n">01 · IN</div><h4>Task</h4><p>A request arrives via CLI, channel, cron or webhook.</p></div>
+        <div class="arrow">→</div>
+        <div class="stage"><div class="n">02 · ROUTE</div><h4>Route</h4><p>Router decides: seen this class of task before?</p></div>
+        <div class="arrow">→</div>
+        <div class="stage frontier"><div class="n">03 · MISS</div><h4>Crystallize</h4><p>Frontier authors an AG-IR → compiler lowers it → persisted on the graph.</p></div>
+        <div class="arrow">→</div>
+        <div class="stage small"><div class="n">04 · RUN</div><h4>Execute</h4><p>The crystallized OSP procedure runs on the small model.</p></div>
+        <div class="arrow">→</div>
+        <div class="stage"><div class="n">05 · LEARN</div><h4>Distill</h4><p>Outcome + durable facts persist as memory. Result returned.</p></div>
+      </div>
+      <div class="loop-note">
+        <div class="route hit"><b>HIT</b>Reuse the crystallized procedure on the small model — no frontier call.</div>
+        <div class="route miss"><b>MISS / PARTIAL</b>Frontier crystallizes a new procedure, or mutates an existing one into a new version.</div>
+        <div class="route partial"><b>VALVE</b>On small-model failure, the frontier mutates &amp; retries — evolution under pressure.</div>
+      </div>
+    </div>
+
+    <p class="lead" style="margin-top:30px">Why it matters: the crystallized procedure carries <strong style="color:var(--text)">structure a weak model cannot skip</strong> — step order, embodied tools, grounded verification. The cheap model isn't asked to <em>be</em> smart; it's asked to <em>follow</em> a smart procedure. That is where capability transfers from the frontier model to the cheap one.</p>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ THE GRAPH ============ -->
+<section id="graph">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Everything lives on the graph</div>
+      <h2 class="section-title">Inspired by OpenClaw's config-first soul — with nothing on disk.</h2>
+      <p>There is no markdown to author. The agent is a graph rooted at <span class="node-name">root</span>. Its identity, config, skills, memory, channels and schedules are all nodes and edges you mutate in place.</p>
+    </div>
+
+    <div class="graph-layout">
+      <div class="graph-card">
+        <svg class="graph-svg" viewBox="0 0 900 300" role="img" aria-label="Sigil graph model">
+          <defs>
+            <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#6f6c86"/>
+            </marker>
+            <style>
+              .gn{fill:#161624;stroke:#a78bfa;stroke-width:1.3;rx:10}
+              .gn-2{fill:#12121d;stroke:rgba(255,255,255,.16);stroke-width:1.2}
+              .glabel{fill:#e9e7f3;font-family:ui-monospace,monospace;font-size:14px;font-weight:600}
+              .gsub{fill:#9d9ab4;font-family:var(--sans);font-size:11px}
+              .gedge{stroke:#6f6c86;stroke-width:1.2;fill:none}
+              .gedgelabel{fill:#6f6c86;font-family:ui-monospace,monospace;font-size:10.5px}
+            </style>
+          </defs>
+
+          <!-- edges -->
+          <path class="gedge" d="M118 92 L206 66" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="128" y="70">Embodies</text>
+          <path class="gedge" d="M118 108 L206 190" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="120" y="168">Anchored</text>
+
+          <path class="gedge" d="M330 66 L430 44" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="338" y="46">Knows</text>
+          <path class="gedge" d="M330 78 L430 110" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="332" y="104">Remembers</text>
+          <path class="gedge" d="M300 92 L235 175" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="250" y="140">Owns</text>
+
+          <path class="gedge" d="M330 200 L560 152" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="392" y="164">Crystallized</text>
+          <path class="gedge" d="M690 138 L760 88" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="672" y="104">Ran</text>
+          <path class="gedge" d="M625 176 C 600 250, 700 250, 665 182" marker-end="url(#ah)"/>
+          <text class="gedgelabel" x="588" y="250">MutatedFrom</text>
+
+          <!-- nodes -->
+          <g>
+            <rect class="gn" x="40" y="80" width="78" height="40" rx="10"/>
+            <text class="glabel" x="79" y="105" text-anchor="middle">root</text>
+          </g>
+          <g>
+            <rect class="gn" x="206" y="46" width="124" height="46" rx="10"/>
+            <text class="glabel" x="268" y="68" text-anchor="middle">Soul</text>
+            <text class="gsub" x="268" y="83" text-anchor="middle">persona · ethos · tiers</text>
+          </g>
+          <g>
+            <rect class="gn-2" x="206" y="176" width="124" height="46" rx="10"/>
+            <text class="glabel" x="268" y="198" text-anchor="middle">Registry</text>
+            <text class="gsub" x="268" y="213" text-anchor="middle">the skills</text>
+          </g>
+          <g>
+            <rect class="gn-2" x="430" y="24" width="120" height="42" rx="10"/>
+            <text class="glabel" x="490" y="43" text-anchor="middle" style="fill:#f5c451">Spec</text>
+            <text class="gsub" x="490" y="57" text-anchor="middle">AG-IR contract</text>
+          </g>
+          <g>
+            <rect class="gn-2" x="430" y="92" width="120" height="42" rx="10"/>
+            <text class="glabel" x="490" y="111" text-anchor="middle" style="fill:#f5c451">Memory</text>
+            <text class="gsub" x="490" y="125" text-anchor="middle">durable facts</text>
+          </g>
+          <g>
+            <rect class="gn" x="560" y="128" width="130" height="48" rx="10"/>
+            <text class="glabel" x="625" y="150" text-anchor="middle" style="fill:#a78bfa">TaskGraph</text>
+            <text class="gsub" x="625" y="165" text-anchor="middle">crystallized skill</text>
+          </g>
+          <g>
+            <rect class="gn-2" x="760" y="64" width="118" height="42" rx="10"/>
+            <text class="glabel" x="819" y="83" text-anchor="middle" style="fill:#22d3ee">Attempt</text>
+            <text class="gsub" x="819" y="97" text-anchor="middle">every run</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="mem-grid">
+        <div class="mem-card proc">
+          <div class="tag">Procedural</div>
+          <h3><span class="node-name">TaskGraph</span> nodes</h3>
+          <p>The crystallized skills themselves — class-general compiled OSP procedures. This is the agent's learned capability.</p>
+        </div>
+        <div class="mem-card epis">
+          <div class="tag">Episodic</div>
+          <h3><span class="node-name">Attempt</span> nodes</h3>
+          <p>Every run, its outcome and a summary. The record of what the agent has done and how it went.</p>
+        </div>
+        <div class="mem-card sem">
+          <div class="tag">Semantic</div>
+          <h3><span class="node-name">Memory</span> nodes</h3>
+          <p>Durable facts, retrieved by deterministic lexical recall and injected at run time — grown automatically by distilling each completed task.</p>
+        </div>
+      </div>
+
+      <p class="lead" style="margin:6px 0 0">
+        <strong style="color:var(--text)">Soul</strong> is identity and config as state you mutate in place — persona, ethos, model tiers, channels. <code>awaken()</code> rebinds the cognition from the graph on every run, the way a compiled OSP agent rebinds its <code>llm</code> in <code>run()</code>. The crystallized procedure stays class-general; instance-specific memory is injected only at execution time, never baked in.
+      </p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ FEATURES ============ -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Built graph-native &amp; tested</div>
+      <h2 class="section-title">OpenClaw's core categories — as graph state, not JSON files.</h2>
+      <p>Where OpenClaw keeps state in <code>~/.openclaw/*.json</code>, Sigil keeps all of it on one persistent object-spatial graph — visible live in the Observatory. See the full <a href="https://github.com/sigilagent/sigil/blob/main/PARITY.md" target="_blank" rel="noopener">parity map</a>.</p>
+    </div>
+
+    <div class="feat-grid">
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Cron &amp; scheduling</h3>
+        <p><code>at</code>/<code>every</code>/<code>cron</code> jobs as <span class="node-name">CronJob</span> nodes — with run history, and a native LLVM binary for the due-time math.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-9 8.4 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 1121 11.5z"/></svg></div>
+        <h3>Channels</h3>
+        <p>The full inbound → agent → reply loop. Any adapter — Discord, Slack, Telegram — just POSTs to <code>inbound()</code>.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l-4 16M6 8l-4 4 4 4M18 8l4 4-4 4"/></svg></div>
+        <h3>MCP tools</h3>
+        <p>byLLM's native <code>McpClient</code> over stdio / sse / http. Drop in a server; its tools bind to the crystallizer and to live runs.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <h3>Exec approvals</h3>
+        <p>An <span class="node-name">ExecPolicy</span> gate with allowlist and a pending-approval flow: <code>approve(cmd, decision)</code>.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
+        <h3>Three-layer memory</h3>
+        <p>Procedural, episodic and semantic — all graph-native. <code>recall()</code> retrieves; <code>teach()</code> writes; distillation grows it.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></div>
+        <h3>Observatory</h3>
+        <p>A live web Control-UI: the agent-graph rendered in real time, with 100% token observability on every run.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 12h10v8H4zM18 12h2v8h-2z"/></svg></div>
+        <h3>Hooks</h3>
+        <p><span class="node-name">Hook</span> nodes + <code>fire_hooks(event)</code> for lifecycle events — the graph-native version of OpenClaw's hooks.</p>
+      </div>
+      <div class="feat"><span class="badge done">byLLM</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/></svg></div>
+        <h3>52 providers &amp; local models</h3>
+        <p>byLLM → litellm covers every provider out of the box; <code>ollama_chat/…</code> is the default small tier.</p>
+      </div>
+      <div class="feat"><span class="badge done">tested</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/></svg></div>
+        <h3>Skills as plugins</h3>
+        <p><code>register-skill</code> from a SKILL.md, a hand-authored AG-IR, or a precompiled OSP module. All become <span class="node-name">TaskGraph</span>s.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ BYO ============ -->
+<section id="byo">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Bring your own — at runtime, no restart</div>
+      <h2 class="section-title">Config and skills are graph state, so adding either is just a mutation.</h2>
+      <p>Every change takes effect on the <em>next</em> <code>solve</code> — more dynamic than editing files and restarting. In server mode (<code>jac start</code>) the same operations are <code>walker:pub</code> endpoints; swap to <code>:priv</code> and each user gets an isolated graph with auth, for free.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">BYO MCP server — drop-in tools</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># register an MCP server (stdio / sse / http)</span>
+<span class="k">$JAC</span> add-mcp github stdio gh-mcp
+<span class="k">$JAC</span> add-mcp search http http://localhost:9000/mcp
+
+<span class="c"># list servers + their discovered tools</span>
+<span class="k">$JAC</span> mcp
+<span class="c"># tools are now bound by the crystallizer</span>
+<span class="c"># and dispatched by live runs (_live_tool)</span></code></pre>
+      </div>
+
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">BYO skills — three ingress forms</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># frontier lifts SKILL.md -&gt; AG-IR -&gt; compile</span>
+<span class="k">$JAC</span> register-skill ./my-skill/SKILL.md
+
+<span class="c"># compile a hand-authored AG-IR (no model call)</span>
+<span class="k">$JAC</span> register-skill ./procedure.agir <span class="p">agir</span>
+
+<span class="c"># drop in a precompiled OSP module</span>
+<span class="k">$JAC</span> register-skill ./crystallized/foo_v1.jac <span class="p">osp</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ INSTALL ============ -->
+<section id="install">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Download &amp; install</div>
+      <h2 class="section-title">One native binary bundles the whole runtime.</h2>
+      <p>The native <code>jac</code> is a self-contained binary that bundles its own Python, jaclang and byLLM — there's nothing to <code>pip install</code>. Get it, clone Sigil, provision the one compiler dependency, and you're running.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="steps">
+        <div class="step"><div class="num">1</div><div class="body"><h4>Install the native <code>jac</code> binary</h4><p>The install script drops it into <code>~/.local/bin</code> — make sure that's on your <code>PATH</code>.</p></div></div>
+        <div class="step"><div class="num">2</div><div class="body"><h4>Clone Sigil</h4><p>The whole agent is a handful of <code>.jac</code> files plus the vendored compiler.</p></div></div>
+        <div class="step"><div class="num">3</div><div class="body"><h4>Provision PyYAML</h4><p>The AG-IR compiler parses YAML — the one dependency the binary doesn't bundle.</p></div></div>
+        <div class="step"><div class="num">4</div><div class="body"><h4>Point cognition at your models</h4><p>The frontier tier needs a provider key; the small tier can be a local Ollama model.</p></div></div>
+      </div>
+
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">install.sh</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># 1 · install the native jac binary (bundles Python + byLLM)</span>
+curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+<span class="k">export</span> <span class="v">PATH</span>=<span class="s">"$HOME/.local/bin:$PATH"</span>
+jac --version
+
+<span class="c"># 2 · clone Sigil</span>
+git clone https://github.com/sigilagent/sigil.git
+<span class="k">cd</span> sigil
+
+<span class="c"># 3 · provision the one compiler dependency</span>
+jac install pyyaml
+
+<span class="c"># 4 · configure cognition (frontier needs a provider key)</span>
+<span class="k">export</span> <span class="v">OPENAI_API_KEY</span>=sk-...
+<span class="k">export</span> <span class="v">SIGIL_FRONTIER</span>=gpt-5                 <span class="c"># default</span>
+<span class="k">export</span> <span class="v">SIGIL_SMALL</span>=ollama_chat/qwen3:32b     <span class="c"># can be local</span></code></pre>
+      </div>
+    </div>
+
+    <p class="lead" style="margin:4px 0 0">
+      Verify the build with the test suite — <code>jac test *.test.jac report_fix_tests.jac</code> — or launch the live Observatory Control-UI with <code>jac start observatory.jac</code>. Then run the agent:
+    </p>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ QUICKSTART ============ -->
+<section id="quickstart" style="padding-top:34px">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Run it</div>
+      <h2 class="section-title">The graph persists in a session file across every invocation.</h2>
+      <p>Cognition is configured on the graph (or seeded from env on first boot): <code>SIGIL_FRONTIER</code>, <code>SIGIL_SMALL</code>, <code>SIGIL_ROUTER</code>. The frontier needs its provider key; the small model can be fully local.</p>
+    </div>
+
+    <div class="stack">
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">terminal</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># the graph persists in a session file across every invocation</span>
+<span class="v">JAC</span>=<span class="s">"jac run main.jac -s sigil.session --"</span>
+
+<span class="k">$JAC</span> soul                              <span class="c"># identity, config, skills &amp; memory (all graph state)</span>
+<span class="k">$JAC</span> teach <span class="s">"the user always wants CSV with a header row"</span>
+<span class="k">$JAC</span> configure small_model ollama_chat/qwen3:8b   <span class="c"># mutate config — no file written</span>
+
+<span class="k">$JAC</span> solve <span class="s">"extract the tables from report.pdf as csv"</span>   <span class="c"># crystallize → run → learn</span>
+<span class="k">$JAC</span> solve <span class="s">"pull the tables out of invoice.pdf"</span>          <span class="c"># HIT: reuse the procedure</span>
+
+<span class="k">$JAC</span> library                           <span class="c"># the crystallized skills, with run stats</span></code></pre>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h3 style="font-size:18px;margin-bottom:14px">Repository layout</h3>
+          <div class="tree">
+<span class="f">sigil.jac</span>        <span class="d">the agent: graph model + walkers + two-tier cognition</span>
+<span class="f">main.jac</span>         <span class="d">CLI (solve / soul / teach / recall / add-mcp / …)</span>
+<span class="f">sigil_runtime.py</span> <span class="d">disk + OS glue: persist &amp; run a lowered module</span>
+<span class="f">sigil_mcp.py</span>     <span class="d">adapter over byLLM's native McpClient</span>
+<span class="f">compiler/</span>        <span class="d">AG-IR → OSP compiler (the LOWER engine)</span>
+<span class="f">contracts/</span>       <span class="d">the AG-IR authoring contract (seed for Spec)</span>
+<span class="f">crystallized/</span>    <span class="d">lowered OSP modules — the learned skills</span>
+<span class="f">*.session</span>        <span class="d">the persistent graph</span>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:18px;margin-bottom:14px">Status — honest</h3>
+          <div class="status-panel" style="padding:24px 22px">
+            <p>The graph model, routing, the frontier → AG-IR → compile → persist pipeline, and the full soul / memory / config lifecycle are <strong style="color:var(--green)">built and verified</strong>.</p>
+            <p style="margin-top:12px">The compile half lowers a real AG-IR to a working OSP <code>run()</code>; <code>jac check</code> is clean; and <code>teach</code> / <code>configure</code> / <code>recall</code> / <code>soul</code> persist across separate processes.</p>
+            <p style="margin-top:12px">The live <code>solve</code> loop needs the configured models — a frontier provider key plus a small model.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ CTA ============ -->
+<section style="padding:70px 0">
+  <div class="wrap" style="text-align:center">
+    <svg width="46" height="46" viewBox="0 0 32 32" style="margin-bottom:20px;filter:drop-shadow(0 0 18px rgba(139,92,246,.5))">
+      <g fill="none" stroke="#a78bfa" stroke-width="1.4"><polygon points="16,3 28,10 28,22 16,29 4,22 4,10"/><path d="M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16"/></g>
+      <circle cx="16" cy="16" r="2.4" fill="#22d3ee"/>
+    </svg>
+    <h2 class="section-title" style="max-width:640px;margin:0 auto 18px">Pay the frontier model once. Ride the harness forever.</h2>
+    <p class="muted" style="max-width:560px;margin:0 auto 30px;font-size:17px">Sigil is MIT-licensed and built on Jac's object-spatial programming model. Clone it, teach it, watch it crystallize.</p>
+    <div class="btns" style="justify-content:center">
+      <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        sigilagent/sigil
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/sigilagent/sigil/blob/main/PARITY.md" target="_blank" rel="noopener">Read the parity map</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap foot-inner">
+    <div class="muted">
+      <span class="accent" style="font-weight:600">Sigil</span> · MIT © 2026 Jayanaka Dantanarayana · built with <a href="https://www.jac-lang.org" target="_blank" rel="noopener">Jac</a>
+    </div>
+    <div class="foot-links">
+      <a href="#idea">The idea</a>
+      <a href="#graph">The graph</a>
+      <a href="#features">Features</a>
+      <a href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // copy-to-clipboard for code blocks
+  document.querySelectorAll('[data-code] .copy-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var code = btn.closest('[data-code]').querySelector('pre').innerText;
+      navigator.clipboard.writeText(code).then(function(){
+        var t = btn.textContent; btn.textContent = 'Copied ✓';
+        setTimeout(function(){ btn.textContent = t; }, 1400);
+      });
+    });
+  });
+  // close mobile nav on link click
+  document.querySelectorAll('#navlinks a').forEach(function(a){
+    a.addEventListener('click', function(){ document.getElementById('navlinks').classList.remove('open'); });
+  });
+</script>
+</body>
+</html>
