@@ -13,7 +13,8 @@ import sys;
 import from sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill,
-    eval_skill, relearn, forget
+    eval_skill, relearn, forget,
+    model_alias, model_set_fallback, models_info
 }
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
@@ -90,6 +91,26 @@ with entry:__main__ {
         val = _arg(argv, 2);
         if not key or not val { print("usage: configure <key> <value>"); }
         else { print(configure(key, val)); }
+    } elif cmd == "models" {
+        # models list | set <tier> <name> | alias <name> <model> | fallback <tier> <m1,m2,...>
+        sub = _arg(argv, 1);
+        if sub == "set" { print(configure(_arg(argv, 2) + "_model", _arg(argv, 3))); }
+        elif sub == "alias" { print(model_alias(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "fallback" { print(model_set_fallback(_arg(argv, 2), _arg(argv, 3))); }
+        elif (sub == "list") or (not sub) {
+            mi = models_info();
+            print("tiers:");
+            print("  frontier : " + str(mi["frontier"]));
+            print("  small    : " + str(mi["small"]));
+            print("  router   : " + str(mi["router"]));
+            al = dict(mi["aliases"]);
+            if al { print("aliases:"); for (k, v) in al.items() { print("  " + str(k) + " -> " + str(v)); } }
+            fb = dict(mi["fallbacks"]);
+            has_fb = False;
+            for (k, v) in fb.items() { if v { has_fb = True; } }
+            if has_fb { print("fallbacks:"); for (k, v) in fb.items() { if v { print("  " + str(k) + " : " + str(v)); } } }
+        }
+        else { print("usage: models list|set <tier> <name>|alias <name> <model>|fallback <tier> <m1,m2>"); }
     } elif cmd == "teach" {
         fact = _arg(argv, 1);
         if not fact { print("usage: teach \"<fact>\""); }
@@ -222,6 +243,7 @@ with entry:__main__ {
         print("  forget <sig>                remove a skill entirely (all versions + files)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
         print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold)");
+        print("  models list|set|alias|fallback   manage model tiers, aliases & fallback pools");
         print("  teach \"<fact>\"              write a durable memory onto the graph");
         print("  recall \"<query>\"            retrieve relevant memories");
         print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");
