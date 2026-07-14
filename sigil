@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# sigil — HTTP client for a running Sigil agent (the Observatory gateway).
+# sigil — talk to your Sigil agent.
 #
-#   sigil local solve "count the words in notes.txt"   # run the CLI directly (no server)
-#   sigil local soul | tasks list | models list | chat | config | …  (any main.jac command)
-#   sigil serve                       # start the gateway (jac start observatory.jac)
-#   sigil login                       # register+login, cache a JWT (run once)
-#   sigil solve "extract tables from report.pdf as csv"   # via the running gateway
-#   sigil chat  "say hello"           # OpenAI-shaped reply
-#   sigil soul | library | graph | tokens | mcp
-#   sigil configure small_model gpt-4o-mini
-#   sigil teach "the user prefers CSV with headers"  |  sigil recall "csv"
-#   sigil add-mcp github stdio gh-mcp
+# Runs locally by default — no server needed:
+#   sigil solve "turn report.pdf into a clean CSV"
+#   sigil soul | tasks list | models list | teach "…" | recall "…"
+#   sigil chat | config                # interactive
+#   sigil add-mcp github stdio gh-mcp  # give it tools
 #   sigil register-skill ./skill.agir agir
 #
-# Config via env:  SIGIL_URL (http://localhost:8199)  SIGIL_USER (owner)  SIGIL_PASS
+# Prefer a server + web dashboard? Start the gateway, then point at it:
+#   sigil serve                        # Observatory web UI + HTTP API
+#   export SIGIL_URL=http://localhost:8199   # route commands to that gateway
+#   sigil login                        # once — caches a JWT
+#
+# Config via env:  SIGIL_SESSION · SIGIL_URL (gateway) · SIGIL_USER / SIGIL_PASS · SIGIL_JAC
 set -euo pipefail
 
 URL="${SIGIL_URL:-http://localhost:8199}"
@@ -62,23 +62,34 @@ login() {
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  local)      exec "$JAC" run "$HERE/main.jac" -s "${SIGIL_SESSION:-$HOME/.sigil/agent.session}" -- "$@" ;;
   serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${SIGIL_PORT:-8199}" -a "${SIGIL_API_PORT:-8198}" ;;
   login)      login ;;
-  solve)      call api_solve         "{\"task\": $(esc "${1:?usage: sigil solve \"<task>\"}")}" ;;
-  chat)       call api_chat_completions "{\"messages\":[{\"role\":\"user\",\"content\": $(esc "${1:?usage: sigil chat \"<msg>\"}")}]}" ;;
-  soul)       call api_soul ;;
-  configure)  call api_configure     "{\"key\": $(esc "${1:?key}"), \"value\": $(esc "${2:?value}")}" ;;
-  recall)     call api_recall        "{\"query\": $(esc "${1:?usage: sigil recall \"<query>\"}")}" ;;
-  library)    call api_library ;;
-  graph)      call api_graph ;;
-  tokens)     call api_observability "{\"n\": ${1:-100}}" ;;
-  mcp)        call api_mcp ;;
-  teach)      call api_teach         "{\"fact\": $(esc "${1:?usage: sigil teach \"<fact>\"}")}" ;;
-  add-mcp)    call api_add_mcp       "{\"name\": $(esc "${1:?name}"), \"transport\": $(esc "${2:-stdio}"), \"target\": $(esc "${3:?cmd-or-url}")}" ;;
-  register-skill)
-              src="${1:?usage: sigil register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
-              payload="${src}"; [ "$kind" != "osp" ] && payload="$(cat "$src")"
-              call api_register_skill "{\"source\": $(esc "$payload"), \"kind\": $(esc "$kind")}" ;;
-  help|*)     awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
+  help|"")    awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
+  *)
+    # LOCAL by default — run the full CLI straight through main.jac, no server.
+    # Export SIGIL_URL to talk to a running gateway (sigil serve) instead.
+    if [ -z "${SIGIL_URL+set}" ]; then
+      [ "$cmd" = "local" ] && { cmd="${1:-help}"; shift || true; }
+      exec "$JAC" run "$HERE/main.jac" -s "${SIGIL_SESSION:-$HOME/.sigil/agent.session}" -- "$cmd" "$@"
+    fi
+    # GATEWAY mode — SIGIL_URL is set: POST to the running agent's HTTP endpoints.
+    case "$cmd" in
+      solve)      call api_solve         "{\"task\": $(esc "${1:?usage: sigil solve \"<task>\"}")}" ;;
+      chat)       call api_chat_completions "{\"messages\":[{\"role\":\"user\",\"content\": $(esc "${1:?usage: sigil chat \"<msg>\"}")}]}" ;;
+      soul)       call api_soul ;;
+      configure)  call api_configure     "{\"key\": $(esc "${1:?key}"), \"value\": $(esc "${2:?value}")}" ;;
+      recall)     call api_recall        "{\"query\": $(esc "${1:?usage: sigil recall \"<query>\"}")}" ;;
+      library)    call api_library ;;
+      graph)      call api_graph ;;
+      tokens)     call api_observability "{\"n\": ${1:-100}}" ;;
+      mcp)        call api_mcp ;;
+      teach)      call api_teach         "{\"fact\": $(esc "${1:?usage: sigil teach \"<fact>\"}")}" ;;
+      add-mcp)    call api_add_mcp       "{\"name\": $(esc "${1:?name}"), \"transport\": $(esc "${2:-stdio}"), \"target\": $(esc "${3:?cmd-or-url}")}" ;;
+      register-skill)
+                  src="${1:?usage: sigil register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
+                  payload="${src}"; [ "$kind" != "osp" ] && payload="$(cat "$src")"
+                  call api_register_skill "{\"source\": $(esc "$payload"), \"kind\": $(esc "$kind")}" ;;
+      *)          echo "sigil: '$cmd' isn't available over the gateway — unset SIGIL_URL to run it locally." >&2; exit 1 ;;
+    esac
+    ;;
 esac
