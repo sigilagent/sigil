@@ -114,7 +114,7 @@ noted, not built).
 | OpenClaw | Sigil | Status |
 |---|---|---|
 | Gateway process (one per host, WS + HTTP) | `jac start observatory.jac` (jac-cloud) — API + client on one port | ✅ |
-| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) | 🔶 |
+| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) + **interactive `chat` REPL** and **`config` settings editor** (`sigil_chat.jac`, rich + prompt_toolkit) | ✅ |
 | Web Control UI | **Observatory** — live agent-graph + 100% token observability | ✅ |
 | OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | **`api_chat_completions` + `api_models` + `api_tools_invoke`** (`walker:pub`, OpenAI shape) | ✅ |
 | Bonjour/mDNS discovery, tailscale, multiple gateways | jac-cloud deploy features; discovery 📋 | 🔶 |

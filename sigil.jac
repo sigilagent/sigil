@@ -713,6 +713,8 @@ def describe_soul() -> dict {
         "frontier_model": soul.frontier_model, "small_model": soul.small_model,
         "router_model": (soul.router_model if soul.router_model else soul.small_model),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
+        "channels": soul.channels,
+        "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
         "skills": nskills
     };
