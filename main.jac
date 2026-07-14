@@ -1,12 +1,17 @@
 """Sigil CLI — the agent has no config files. Its soul, skills and memory
 all live on the graph; persist that graph across invocations with a session file:
 
+    jac run main.jac -s sigil.session -- chat                 # interactive Claude-style REPL
+    jac run main.jac -s sigil.session -- config               # interactive settings editor
     jac run main.jac -s sigil.session -- solve "extract tables from report.pdf as csv"
     jac run main.jac -s sigil.session -- solve "..."     # reuses / evolves the graph
     jac run main.jac -s sigil.session -- soul
     jac run main.jac -s sigil.session -- configure small_model ollama_chat/qwen3:8b
     jac run main.jac -s sigil.session -- teach "the user always wants CSV with a header row"
     jac run main.jac -s sigil.session -- library
+
+`chat` and `config` live in sigil_chat.jac (rich + prompt_toolkit); both drive the
+same persistent graph as the one-shot commands above.
 """
 
 import sys;
@@ -213,8 +218,21 @@ with entry:__main__ {
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+    } elif cmd == "chat" {
+        import from sigil_chat { chat_repl }
+        chat_repl();
+    } elif cmd == "config" {
+        # `config` alone -> interactive editor; `config <key> <value>` -> set one key.
+        key = _arg(argv, 1); val = _arg(argv, 2);
+        if key and val { print(configure(key, val)); }
+        else {
+            import from sigil_chat { config_menu }
+            config_menu();
+        }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
+        print("  chat                        interactive Claude-style chat REPL");
+        print("  config [<key> <value>]      interactive settings editor (or set one key)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");
         print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
