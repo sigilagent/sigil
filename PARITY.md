@@ -105,7 +105,7 @@ noted, not built).
 | Code plugins (`register*` API, ~40 slots) | Jac modules imported by the entry (cron/channels/hooks/approvals are exactly this) | 🔶 |
 | `openclaw.plugin.json` manifest | AG-IR frontmatter + a `Plugin` manifest node 📋 | 🔶 |
 | ClawHub registry / marketplace | 📋 | 📋 |
-| Migration providers (migrate-claude/hermes) | 📋 (a trace→AG-IR crystallizer is the natural fit) | 📋 |
+| Migration providers (migrate-claude/hermes) | **`migrate openclaw <dir>`** — SOUL.md + config -> Soul; `*.agir` skills registered | ✅ |
 
 ## Gateway / frontends
 

@@ -22,6 +22,7 @@ import from channels { channel_add, channel_list, channel_remove, message_send, 
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
+import from sigil_migrate { migrate_openclaw }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -213,6 +214,15 @@ with entry:__main__ {
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+    } elif cmd == "migrate" {
+        # migrate openclaw <dir>  — fold an OpenClaw export (SOUL.md + config + skills) onto the graph
+        sub = _arg(argv, 1); path = _arg(argv, 2);
+        if (sub == "openclaw") and path {
+            r = migrate_openclaw(path);
+            print("migrated: persona=" + str(r["persona"]) + "  ethos+=" + str(r["ethos"])
+                  + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
+        }
+        else { print("usage: migrate openclaw <dir>"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
