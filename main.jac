@@ -356,6 +356,9 @@ with entry:__main__ {
     } elif cmd == "chat" {
         import from src.sigil_chat { chat_repl }
         chat_repl();
+    } elif cmd == "setup" {
+        import from src.sigil_chat { setup_wizard }
+        setup_wizard();
     } elif cmd == "config" {
         # `config` alone -> interactive editor; `config <key> <value>` -> set one key.
         key = _arg(argv, 1); val = _arg(argv, 2);
@@ -366,7 +369,8 @@ with entry:__main__ {
         }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
-        print("  chat                        interactive Claude-style chat REPL");
+        print("  chat                        streaming chat — talk to your agent; it can change its own settings");
+        print("  setup                       first-run wizard to configure models & persona");
         print("  config [<key> <value>]      interactive settings editor (or set one key)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");

@@ -748,6 +748,49 @@ def configure(key: str, value: str) -> str {
     return key + " = " + value;
 }
 
+# ---------------------------------------------------------------------------
+# Conversational chat — a streaming, tool-using turn. The user talks to the
+# agent in its persona; when they ask to change config or remember something,
+# the model calls one of the config tools below (which mutate the graph) and
+# confirms. `stream=True` returns a token generator the CLI/gateway renders live.
+# ---------------------------------------------------------------------------
+glob chat_history: list[dict] = [];
+
+def cfg_set_model(tier: str, name: str) -> str { return configure(tier + "_model", name); }
+sem cfg_set_model = "Change one of the agent's three model tiers.";
+sem cfg_set_model.tier = "Which tier: 'frontier' (builds skills), 'small' (runs them), or 'router'.";
+sem cfg_set_model.name = "The model name, e.g. 'gpt-4o', 'gpt-4o-mini', or 'ollama_chat/qwen3:8b'.";
+
+def cfg_set_persona(text: str) -> str { return configure("persona", text); }
+sem cfg_set_persona = "Set the agent's persona — its voice and character.";
+sem cfg_set_persona.text = "The new persona description.";
+
+def cfg_set_prompt_mode(mode: str) -> str { return configure("prompt_mode", mode); }
+sem cfg_set_prompt_mode = "Set how much context wraps the agent: 'full', 'minimal', or 'none'.";
+sem cfg_set_prompt_mode.mode = "One of: full | minimal | none.";
+
+def cfg_remember(fact: str) -> str { return teach(fact, "fact"); }
+sem cfg_remember = "Store a durable fact the agent should remember about the user or their work.";
+sem cfg_remember.fact = "The fact to remember, as one short sentence.";
+
+sem chat_reply = "You are the user's own Sigil agent. Chat with them in your persona (given in ABOUT) — concise, warm, direct. When they ask you to change a setting (a model tier, your persona, the prompt mode) or to remember something, CALL the matching tool and then confirm what you changed in one short sentence. Otherwise, just reply — do not call a tool.";
+def chat_reply(message: str, about: str) -> str by small(
+    stream=True, conversation=chat_history,
+    tools=[cfg_set_model, cfg_set_persona, cfg_set_prompt_mode, cfg_remember]
+);
+sem chat_reply.message = "What the user just said.";
+sem chat_reply.about = "Who you are — your persona and operating principles.";
+
+def chat_context() -> str {
+    # the "about you" the chat model speaks from — persona + principles, from the graph
+    soul = awaken();
+    parts: list = ["Persona: " + (soul.persona if soul.persona else "a pragmatic, helpful agent")];
+    if soul.ethos { parts.append("Principles: " + "; ".join([str(e) for e in soul.ethos])); }
+    return "\n".join(parts);
+}
+
+def chat_reset() { global chat_history; chat_history = []; }
+
 # --- Tool policy (allow / deny / groups / profile) --------------------------
 def tool_group_set(name: str, csv: str) -> str {
     soul = awaken();
