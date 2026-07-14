@@ -51,7 +51,7 @@ noted, not built).
 | Webhook channel | **`api_inbound` HTTP endpoint** (ready webhook) | ✅ |
 | dm scope routing (main/per-peer) | `Channel.dm_scope` | ✅ |
 | 27 concrete adapters (discord/slack/telegram/whatsapp/matrix/imessage/…) | any adapter POSTs to `inbound()` / delivers `outbound` | 🔶 (the plug-in long tail) |
-| Reactions / threads / polls / edits | 📋 | 📋 |
+| Reactions / threads / polls / edits | **`react` / `edit` + `Message.thread_id`/`mid`** on the graph (polls 📋) | ✅ |
 
 ## Tools / "superpowers"
 

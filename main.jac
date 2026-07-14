@@ -18,7 +18,7 @@ import from sigil {
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
-import from channels { channel_add, channel_list, channel_remove, message_send, inbound }
+import from channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
@@ -194,9 +194,21 @@ with entry:__main__ {
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
         elif sub == "list" { for c in channel_list() { print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  " + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])); } }
         elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
-        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"])); }
-        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("reply: " + str(r["reply"])); }
-        else { print("usage: channel add|list|rm|send|inbound ..."); }
+        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])); }
+        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("reply: " + str(r["reply"]) + "  (in=" + str(r["in_mid"]) + " out=" + str(r["out_mid"]) + " thread=" + str(r["thread_id"]) + ")"); }
+        elif sub == "react" { print(react(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
+        elif sub == "edit" { print(edit(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
+        elif sub == "history" {
+            for m in channel_history(_arg(argv, 2), 20) {
+                rx = list(m["reactions"]);
+                line = "  " + str(m["mid"]) + "  " + str(m["dir"]) + "  " + str(m["peer"]);
+                if m["thread"] { line += "  thread=" + str(m["thread"]); }
+                if m["edited"] { line += "  (edited)"; }
+                if rx { line += "  reacts=" + ",".join([str(x) for x in rx]); }
+                print(line + "  " + str(m["text"]));
+            }
+        }
+        else { print("usage: channel add|list|rm|send|inbound|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
     } elif cmd == "hook" {
         sub = _arg(argv, 1);
         if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }
