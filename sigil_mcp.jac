@@ -61,14 +61,26 @@ def _safe_tools(srv: any) -> list {
     return list(_TOOLS.get(name) or []);
 }
 
+def _tool_permitted(name: str) -> bool {
+    # Tool-policy gate (deny wins, then allow-list). The effective allow/deny lists are
+    # expanded from the Soul policy in the main process and passed via env, so BOTH the
+    # crystallizer binding (below) and run-time dispatch (isolated subprocess) honor it.
+    deny = [x.strip() for x in os.getenv("SIGIL_TOOL_DENY", "").split(",") if x.strip()];
+    allow = [x.strip() for x in os.getenv("SIGIL_TOOL_ALLOW", "").split(",") if x.strip()];
+    if (name in deny) or ("*" in deny) { return False; }
+    if allow { return (name in allow) or ("*" in allow); }
+    return True;
+}
+
 def tools_for(servers: list) -> list {
     # Live McpTool objects across the given servers — pass straight to by llm(tools=).
+    # Policy-denied tools are dropped here so the crystallizer never binds them.
     out = [];
     for srv in servers or [] {
         if not srv.get("enabled", True) {
             continue;
         }
-        out.extend(_safe_tools(srv));
+        for t in _safe_tools(srv) { if _tool_permitted(str(t.name)) { out.append(t); } }
     }
     return out;
 }
@@ -110,6 +122,9 @@ def dispatch(tool_name: str, args: list) -> dict | None {
     servers = _servers_from_env();
     if not servers {
         return None;
+    }
+    if not _tool_permitted(tool_name) {
+        return {"ok": False, "text": "", "error": "tool '" + tool_name + "' denied by policy"};
     }
     for srv in servers {
         for t in _safe_tools(srv) {

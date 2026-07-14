@@ -15,6 +15,7 @@ import from sigil {
     add_mcp, remove_mcp, mcp_status, register_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info
+    tool_group_set, tool_allowed, tools_policy_info
 }
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
@@ -303,6 +304,22 @@ with entry:__main__ {
         elif sub == "deescalate" { print(approvals_deescalate()); }
         elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
+    } elif cmd == "tools" {
+        # tools policy | check <name> | group <name> <t1,t2,...>   (allow/deny via `configure tool_allow|tool_deny|tool_profile`)
+        sub = _arg(argv, 1);
+        if sub == "check" { print(_arg(argv, 2) + ": " + ("allowed" if tool_allowed(_arg(argv, 2)) else "DENIED")); }
+        elif sub == "group" { print(tool_group_set(_arg(argv, 2), _arg(argv, 3))); }
+        elif (sub == "policy") or (not sub) {
+            p = tools_policy_info();
+            print("allow    : " + (", ".join([str(x) for x in list(p["allow"])]) or "(any)"));
+            print("deny     : " + (", ".join([str(x) for x in list(p["deny"])]) or "(none)"));
+            print("profile  : " + (str(p["profile"]) or "(none)"));
+            gr = dict(p["groups"]);
+            if gr { print("groups   :"); for (k, v) in gr.items() { print("  " + str(k) + " = " + str(v)); } }
+            print("effective allow: " + (", ".join([str(x) for x in list(p["effective_allow"])]) or "(any)"));
+            print("effective deny : " + (", ".join([str(x) for x in list(p["effective_deny"])]) or "(none)"));
+        }
+        else { print("usage: tools policy|check <name>|group <name> <t1,t2,...>   (set allow/deny via configure tool_allow|tool_deny|tool_profile)"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
