@@ -4,9 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sigil — a self-evolving agent that is a graph</title>
-<meta name="description" content="Sigil is a self-evolving agent that is an object-spatial graph. A frontier model crystallizes each task into a typed, compiled procedure; a cheap model runs it; the procedures persist as the agent itself. OpenClaw-inspired, with nothing on disk." />
+<meta name="description" content="Sigil is a self-evolving AI agent: the first time you ask for something, it builds a reusable skill; every time after, it runs it fast and cheap. Install with one command — no config files, nothing on disk to edit." />
 <meta property="og:title" content="Sigil — a self-evolving agent that is a graph" />
-<meta property="og:description" content="A frontier model crystallizes each task into a typed procedure; a small model runs it forever; every skill, memory and config lives on one persistent graph." />
+<meta property="og:description" content="Ask for something once and it builds a reusable skill; a small, cheap model runs it forever. Every skill, memory and setting lives in one place — install with one command." />
 <meta property="og:type" content="website" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23a78bfa' stroke-width='1.6'%3E%3Cpolygon points='16,3 28,10 28,22 16,29 4,22 4,10' /%3E%3Cpath d='M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.6' fill='%2322d3ee'/%3E%3C/svg%3E" />
 <style>
@@ -126,8 +126,12 @@
   /* sigil mark */
   .sigil-wrap{display:flex;justify-content:center;align-items:center}
   .sigil{width:100%;max-width:340px;height:auto;filter:drop-shadow(0 0 40px rgba(139,92,246,.35))}
-  .sigil .ring{animation:spin 60s linear infinite;transform-origin:center}
-  .sigil .ring-2{animation:spin 44s linear infinite reverse;transform-origin:center}
+  /* the three shapes counter-rotate, alternating direction:
+     circle (ring) ↻ CW · hexagon ↺ CCW · triangle ↻ CW */
+  .sigil .ring{animation:spin 60s linear infinite;transform-box:view-box;transform-origin:center}
+  .sigil .ring-2{animation:spin 44s linear infinite reverse;transform-box:view-box;transform-origin:center}
+  .sigil .hex{animation:spin 42s linear infinite reverse;transform-box:view-box;transform-origin:center}
+  .sigil .tri{animation:spin 30s linear infinite;transform-box:view-box;transform-origin:center}
   .sigil .pulse{animation:pulse 3.4s ease-in-out infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
@@ -382,10 +386,10 @@
   <div class="wrap">
     <div class="hero-grid">
       <div>
-        <span class="eyebrow"><span class="dot"></span>OpenClaw-like · but it compiles its own skills</span>
+        <span class="eyebrow"><span class="dot"></span>A self-evolving agent · it builds its own skills</span>
         <h1 class="hero-title">A self-evolving agent that <span class="em">is</span> a graph.</h1>
-        <p class="hero-sub">A frontier model crystallizes each task into a <strong>typed, compiled procedure</strong>. A small model runs it. The procedures persist as the agent itself — <strong>no <code>SOUL.md</code>, no <code>SKILL.md</code>, no config files.</strong></p>
-        <p class="hero-tag">identity · skills · memory · channels · cron · hooks — all nodes on one object-spatial graph</p>
+        <p class="hero-sub">The first time you ask for something, a powerful model works out <strong>how</strong> and turns it into a reusable skill. A small, cheap model runs that skill from then on. The skills <em>are</em> the agent — <strong>no config files, nothing to hand-edit.</strong></p>
+        <p class="hero-tag">skills · memory · chat · schedules · tools · connections — all in one place</p>
         <div class="hero-install">
           <span class="hero-install-label">Install — macOS &amp; Linux</span>
           <div class="oneliner" data-code>
@@ -417,21 +421,24 @@
           <g class="ring-2" stroke="rgba(34,211,238,.28)" fill="none" stroke-width="1">
             <circle cx="130" cy="130" r="96" stroke-dasharray="1 9"/>
           </g>
-          <!-- hexagon + spokes -->
-          <g stroke="#a78bfa" stroke-width="1.4" fill="none" opacity=".85">
-            <polygon points="130,28 218,79 218,181 130,232 42,181 42,79"/>
-            <path d="M130 28 L130 130 M218 79 L130 130 M218 181 L130 130 M130 232 L130 130 M42 181 L130 130 M42 79 L130 130"/>
-            <!-- inner triangle sigil -->
-            <path d="M130 66 L186 162 L74 162 Z" stroke="#22d3ee" stroke-width="1.1" opacity=".7"/>
+          <!-- hexagon + spokes + corner nodes — spin together (counter-clockwise) -->
+          <g class="hex">
+            <g stroke="#a78bfa" stroke-width="1.4" fill="none" opacity=".85">
+              <polygon points="130,28 218,79 218,181 130,232 42,181 42,79"/>
+              <path d="M130 28 L130 130 M218 79 L130 130 M218 181 L130 130 M130 232 L130 130 M42 181 L130 130 M42 79 L130 130"/>
+            </g>
+            <g fill="#8b5cf6">
+              <circle class="pulse" cx="130" cy="28" r="5"/>
+              <circle class="pulse" cx="218" cy="79" r="5" style="animation-delay:.4s"/>
+              <circle class="pulse" cx="218" cy="181" r="5" style="animation-delay:.8s"/>
+              <circle class="pulse" cx="130" cy="232" r="5" style="animation-delay:1.2s"/>
+              <circle class="pulse" cx="42" cy="181" r="5" style="animation-delay:1.6s"/>
+              <circle class="pulse" cx="42" cy="79" r="5" style="animation-delay:2s"/>
+            </g>
           </g>
-          <!-- outer nodes -->
-          <g fill="#8b5cf6">
-            <circle class="pulse" cx="130" cy="28" r="5"/>
-            <circle class="pulse" cx="218" cy="79" r="5" style="animation-delay:.4s"/>
-            <circle class="pulse" cx="218" cy="181" r="5" style="animation-delay:.8s"/>
-            <circle class="pulse" cx="130" cy="232" r="5" style="animation-delay:1.2s"/>
-            <circle class="pulse" cx="42" cy="181" r="5" style="animation-delay:1.6s"/>
-            <circle class="pulse" cx="42" cy="79" r="5" style="animation-delay:2s"/>
+          <!-- inner triangle — spins clockwise, opposite the hexagon -->
+          <g class="tri">
+            <path d="M130 66 L186 162 L74 162 Z" fill="none" stroke="#22d3ee" stroke-width="1.1" opacity=".7"/>
           </g>
           <!-- core -->
           <circle cx="130" cy="130" r="11" fill="url(#core)"/>
@@ -461,7 +468,7 @@
         <div class="arrow">→</div>
         <div class="stage frontier"><div class="n">03 · MISS</div><h4>Crystallize</h4><p>Frontier authors an AG-IR → compiler lowers it → persisted on the graph.</p></div>
         <div class="arrow">→</div>
-        <div class="stage small"><div class="n">04 · RUN</div><h4>Execute</h4><p>The crystallized OSP procedure runs on the small model.</p></div>
+        <div class="stage small"><div class="n">04 · RUN</div><h4>Execute</h4><p>It runs the skill it built — on the small, cheap model.</p></div>
         <div class="arrow">→</div>
         <div class="stage"><div class="n">05 · LEARN</div><h4>Distill</h4><p>Outcome + durable facts persist as memory. Result returned.</p></div>
       </div>
@@ -483,8 +490,8 @@
   <div class="wrap">
     <div class="section-head">
       <div class="kicker">Everything lives on the graph</div>
-      <h2 class="section-title">Inspired by OpenClaw's config-first soul — with nothing on disk.</h2>
-      <p>There is no markdown to author. The agent is a graph rooted at <span class="node-name">root</span>. Its identity, config, skills, memory, channels and schedules are all nodes and edges you mutate in place.</p>
+      <h2 class="section-title">Your whole agent is one living graph — with nothing on disk.</h2>
+      <p>Nothing to author, nothing to configure. Its identity, skills, memory, connections and schedules all live together as one connected whole — and change the moment you ask.</p>
     </div>
 
     <div class="graph-layout">
@@ -565,17 +572,17 @@
       <div class="mem-grid">
         <div class="mem-card proc">
           <div class="tag">Procedural</div>
-          <h3><span class="node-name">TaskGraph</span> nodes</h3>
-          <p>The crystallized skills themselves — class-general compiled OSP procedures. This is the agent's learned capability.</p>
+          <h3>Skills</h3>
+          <p>The reusable skills it has built — each one covers a whole kind of task, not just one. This is what it has learned to do.</p>
         </div>
         <div class="mem-card epis">
           <div class="tag">Episodic</div>
-          <h3><span class="node-name">Attempt</span> nodes</h3>
+          <h3>History</h3>
           <p>Every run, its outcome and a summary. The record of what the agent has done and how it went.</p>
         </div>
         <div class="mem-card sem">
           <div class="tag">Semantic</div>
-          <h3><span class="node-name">Memory</span> nodes</h3>
+          <h3>Memory</h3>
           <p>Durable facts, retrieved by deterministic lexical recall and injected at run time — grown automatically by distilling each completed task.</p>
         </div>
       </div>
@@ -593,36 +600,36 @@
 <section id="features">
   <div class="wrap">
     <div class="section-head">
-      <div class="kicker">Built graph-native &amp; tested</div>
-      <h2 class="section-title">OpenClaw's core categories — as graph state, not JSON files.</h2>
-      <p>Where OpenClaw keeps state in <code>~/.openclaw/*.json</code>, Sigil keeps all of it on one persistent object-spatial graph — visible live in the Observatory. See the full <a href="https://github.com/sigilagent/sigil/blob/main/PARITY.md" target="_blank" rel="noopener">parity map</a>.</p>
+      <div class="kicker">Everything included</div>
+      <h2 class="section-title">Everything an agent needs — working out of the box.</h2>
+      <p>Skills, memory, schedules, tools and connections all live together in one place — and you can watch it all work in real time.</p>
     </div>
 
     <div class="feat-grid">
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
         <h3>Cron &amp; scheduling</h3>
-        <p><code>at</code>/<code>every</code>/<code>cron</code> jobs as <span class="node-name">CronJob</span> nodes — with run history, and a native LLVM binary for the due-time math.</p>
+        <p>Have it run on a schedule — once at a time, every few minutes, or a full cron expression — and keep a history of every run.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-9 8.4 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 1121 11.5z"/></svg></div>
         <h3>Channels</h3>
-        <p>The full inbound → agent → reply loop. Any adapter — Discord, Slack, Telegram — just POSTs to <code>inbound()</code>.</p>
+        <p>Reach it on Discord, Slack, Telegram — or a plain webhook. A message comes in, the agent answers, the reply goes out.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l-4 16M6 8l-4 4 4 4M18 8l4 4-4 4"/></svg></div>
         <h3>MCP tools</h3>
-        <p>byLLM's native <code>McpClient</code> over stdio / sse / http. Drop in a server; its tools bind to the crystallizer and to live runs.</p>
+        <p>Connect any tool server and the agent can use it right away — GitHub, web search, your own APIs.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
         <h3>Exec approvals</h3>
-        <p>An <span class="node-name">ExecPolicy</span> gate with allowlist and a pending-approval flow: <code>approve(cmd, decision)</code>.</p>
+        <p>It asks before it runs anything risky. You keep an allowlist and approve or deny — nothing sensitive happens behind your back.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
         <h3>Three-layer memory</h3>
-        <p>Procedural, episodic and semantic — all graph-native. <code>recall()</code> retrieves; <code>teach()</code> writes; distillation grows it.</p>
+        <p>It remembers your preferences, what it has done, and the facts it has learned — and pulls the right ones back when they matter.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></div>
@@ -632,17 +639,17 @@
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 12h10v8H4zM18 12h2v8h-2z"/></svg></div>
         <h3>Hooks</h3>
-        <p><span class="node-name">Hook</span> nodes + <code>fire_hooks(event)</code> for lifecycle events — the graph-native version of OpenClaw's hooks.</p>
+        <p>Run your own logic on the moments that matter — a new task arrives, a reply goes out, a run finishes.</p>
       </div>
-      <div class="feat"><span class="badge done">byLLM</span>
+      <div class="feat"><span class="badge done">any model</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/></svg></div>
         <h3>52 providers &amp; local models</h3>
-        <p>byLLM → litellm covers every provider out of the box; <code>ollama_chat/…</code> is the default small tier.</p>
+        <p>Use any model — GPT, Claude, Gemini and dozens more — or run fully local with Ollama. Mix a big model for hard thinking with a small one for everyday runs.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/></svg></div>
         <h3>Skills as plugins</h3>
-        <p><code>register-skill</code> from a SKILL.md, a hand-authored AG-IR, or a precompiled OSP module. All become <span class="node-name">TaskGraph</span>s.</p>
+        <p>Hand it a skill written in plain Markdown, a ready-made recipe, or one it built earlier — and it just works.</p>
       </div>
     </div>
   </div>
@@ -654,34 +661,33 @@
 <section id="byo">
   <div class="wrap">
     <div class="section-head">
-      <div class="kicker">Bring your own — at runtime, no restart</div>
-      <h2 class="section-title">Config and skills are graph state, so adding either is just a mutation.</h2>
-      <p>Every change takes effect on the <em>next</em> <code>solve</code> — more dynamic than editing files and restarting. In server mode (<code>jac start</code>) the same operations are <code>walker:pub</code> endpoints; swap to <code>:priv</code> and each user gets an isolated graph with auth, for free.</p>
+      <div class="kicker">Bring your own — no restart</div>
+      <h2 class="section-title">Add tools and skills whenever. They work on your next command.</h2>
+      <p>Give it new abilities on the fly — connect any tool server, or hand it a ready-made skill — and it can use them right away. Nothing to restart, no files to edit.</p>
     </div>
 
     <div class="two-col">
       <div class="code" data-code>
-        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">BYO MCP server — drop-in tools</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="c"># register an MCP server (stdio / sse / http)</span>
-<span class="k">$JAC</span> add-mcp github stdio gh-mcp
-<span class="k">$JAC</span> add-mcp search http http://localhost:9000/mcp
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">give it new tools</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># connect any tool server (an MCP server)</span>
+<span class="k">sigil</span> add-mcp github stdio gh-mcp
+<span class="k">sigil</span> add-mcp search http http://localhost:9000/mcp
 
-<span class="c"># list servers + their discovered tools</span>
-<span class="k">$JAC</span> mcp
-<span class="c"># tools are now bound by the crystallizer</span>
-<span class="c"># and dispatched by live runs (_live_tool)</span></code></pre>
+<span class="c"># see the servers and the tools they bring</span>
+<span class="k">sigil</span> mcp
+<span class="c"># it can use those tools from your very next command</span></code></pre>
       </div>
 
       <div class="code" data-code>
-        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">BYO skills — three ingress forms</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="c"># frontier lifts SKILL.md -&gt; AG-IR -&gt; compile</span>
-<span class="k">$JAC</span> register-skill ./my-skill/SKILL.md
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">give it new skills</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># hand it a skill written in plain Markdown — it learns to run it</span>
+<span class="k">sigil</span> register-skill ./my-skill/SKILL.md
 
-<span class="c"># compile a hand-authored AG-IR (no model call)</span>
-<span class="k">$JAC</span> register-skill ./procedure.agir <span class="p">agir</span>
+<span class="c"># or a ready-made recipe (no model needed)</span>
+<span class="k">sigil</span> register-skill ./procedure.agir <span class="p">agir</span>
 
-<span class="c"># drop in a precompiled OSP module</span>
-<span class="k">$JAC</span> register-skill ./crystallized/foo_v1.jac <span class="p">osp</span></code></pre>
+<span class="c"># or drop in one it already built</span>
+<span class="k">sigil</span> register-skill ./skills/report_v1.jac <span class="p">osp</span></code></pre>
       </div>
     </div>
   </div>
@@ -706,7 +712,7 @@
     <p class="oneliner-note">macOS &amp; Linux · installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
 
     <div class="what-grid">
-      <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs the <code>jac</code> binary — its own Python, jaclang &amp; byLLM bundled in.</p></div>
+      <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs one small self-contained program — no Python, no dependencies to manage.</p></div>
       <div class="what"><div class="k">02</div><h4>Fetches Sigil</h4><p>Clones the source into <code>~/.sigil/app</code> (or a tarball if you have no git).</p></div>
       <div class="what"><div class="k">03</div><h4>Provisions PyYAML</h4><p>The one dependency the compiler needs and the binary doesn't bundle.</p></div>
       <div class="what"><div class="k">04</div><h4>Puts <code>sigil</code> on PATH</h4><p>A launcher so <code>sigil serve</code> / <code>sigil solve</code> work from anywhere.</p></div>
@@ -717,7 +723,7 @@
       <div class="manual-body">
         <div class="code" data-code>
           <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">manual install</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="c"># 1 · install the native jac binary (bundles Python + byLLM)</span>
+<pre><code><span class="c"># 1 · install one small self-contained runtime</span>
 curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
 <span class="k">export</span> <span class="v">PATH</span>=<span class="s">"$HOME/.local/bin:$PATH"</span>
 
@@ -745,47 +751,43 @@ jac install pyyaml
 <section id="quickstart" style="padding-top:34px">
   <div class="wrap">
     <div class="section-head">
-      <div class="kicker">Run it</div>
-      <h2 class="section-title">The graph persists in a session file across every invocation.</h2>
-      <p>Cognition is configured on the graph (or seeded from env on first boot): <code>SIGIL_FRONTIER</code>, <code>SIGIL_SMALL</code>, <code>SIGIL_ROUTER</code>. The frontier needs its provider key; the small model can be fully local.</p>
+      <div class="kicker">Use it</div>
+      <h2 class="section-title">Just tell it what you want — in plain English.</h2>
+      <p>Point it at models once — a hosted one like <code>gpt-4o</code> for the hard thinking, and a small or fully-local one (via <code>ollama</code>) for the everyday runs. After that, you just talk to it.</p>
     </div>
 
     <div class="stack">
       <div class="code" data-code>
-        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">terminal</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="c"># the graph persists in a session file across every invocation</span>
-<span class="v">JAC</span>=<span class="s">"jac run main.jac -s sigil.session --"</span>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">your terminal</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># ask it to do something — it works out HOW, just once</span>
+<span class="k">sigil</span> solve <span class="s">"turn report.pdf into a clean CSV"</span>
 
-<span class="k">$JAC</span> soul                              <span class="c"># identity, config, skills &amp; memory (all graph state)</span>
-<span class="k">$JAC</span> teach <span class="s">"the user always wants CSV with a header row"</span>
-<span class="k">$JAC</span> configure small_model ollama_chat/qwen3:8b   <span class="c"># mutate config — no file written</span>
+<span class="c"># ask for something similar — it reuses what it learned (fast &amp; cheap)</span>
+<span class="k">sigil</span> solve <span class="s">"pull the tables out of invoice.pdf"</span>
 
-<span class="k">$JAC</span> solve <span class="s">"extract the tables from report.pdf as csv"</span>   <span class="c"># crystallize → run → learn</span>
-<span class="k">$JAC</span> solve <span class="s">"pull the tables out of invoice.pdf"</span>          <span class="c"># HIT: reuse the procedure</span>
+<span class="c"># tell it your preferences — they stick, no config files to edit</span>
+<span class="k">sigil</span> teach <span class="s">"always give me CSV with a header row"</span>
 
-<span class="k">$JAC</span> library                           <span class="c"># the crystallized skills, with run stats</span></code></pre>
+<span class="c"># see what it is, and everything it's done</span>
+<span class="k">sigil</span> soul
+<span class="k">sigil</span> tasks</code></pre>
       </div>
 
       <div class="two-col">
         <div>
-          <h3 style="font-size:18px;margin-bottom:14px">Repository layout</h3>
-          <div class="tree">
-<span class="f">sigil.jac</span>        <span class="d">the agent: graph model + walkers + two-tier cognition</span>
-<span class="f">main.jac</span>         <span class="d">CLI (solve / soul / teach / recall / add-mcp / …)</span>
-<span class="f">sigil_runtime.py</span> <span class="d">disk + OS glue: persist &amp; run a lowered module</span>
-<span class="f">sigil_mcp.py</span>     <span class="d">adapter over byLLM's native McpClient</span>
-<span class="f">compiler/</span>        <span class="d">AG-IR → OSP compiler (the LOWER engine)</span>
-<span class="f">contracts/</span>       <span class="d">the AG-IR authoring contract (seed for Spec)</span>
-<span class="f">crystallized/</span>    <span class="d">lowered OSP modules — the learned skills</span>
-<span class="f">*.session</span>        <span class="d">the persistent graph</span>
+          <h3 style="font-size:18px;margin-bottom:14px">Two ways to run it</h3>
+          <div class="status-panel" style="padding:22px 20px">
+            <p><strong style="color:var(--text)">In your terminal.</strong> Type <code>sigil solve "…"</code> and read the answer. Nothing else to start up.</p>
+            <p style="margin-top:12px"><strong style="color:var(--text)">As a dashboard.</strong> Run <code>sigil serve</code> for a live web view — watch it think, and see every skill it builds, in your browser.</p>
+            <p style="margin-top:12px"><strong style="color:var(--text)">Wherever you are.</strong> The same agent can answer on Discord, Slack, or on a schedule.</p>
           </div>
         </div>
         <div>
-          <h3 style="font-size:18px;margin-bottom:14px">Status — honest</h3>
-          <div class="status-panel" style="padding:24px 22px">
-            <p>The graph model, routing, the frontier → AG-IR → compile → persist pipeline, and the full soul / memory / config lifecycle are <strong style="color:var(--green)">built and verified</strong>.</p>
-            <p style="margin-top:12px">The compile half lowers a real AG-IR to a working OSP <code>run()</code>; <code>jac check</code> is clean; and <code>teach</code> / <code>configure</code> / <code>recall</code> / <code>soul</code> persist across separate processes.</p>
-            <p style="margin-top:12px">The live <code>solve</code> loop needs the configured models — a frontier provider key plus a small model.</p>
+          <h3 style="font-size:18px;margin-bottom:14px">Nothing to babysit</h3>
+          <div class="status-panel" style="padding:22px 20px">
+            <p>Your agent lives in <code>~/.sigil</code> — <strong style="color:var(--green)">no config files, nothing to hand-edit.</strong></p>
+            <p style="margin-top:12px">The first time it meets a new kind of task it's a little slower — it's building a reusable skill. Every time after, it's fast and cheap: it just <em>reuses</em> what it made.</p>
+            <p style="margin-top:12px">Teach it something and it remembers. Point it at a different model and it switches. All of it, live.</p>
           </div>
         </div>
       </div>
@@ -802,14 +804,14 @@ jac install pyyaml
       <g fill="none" stroke="#a78bfa" stroke-width="1.4"><polygon points="16,3 28,10 28,22 16,29 4,22 4,10"/><path d="M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16"/></g>
       <circle cx="16" cy="16" r="2.4" fill="#22d3ee"/>
     </svg>
-    <h2 class="section-title" style="max-width:640px;margin:0 auto 18px">Pay the frontier model once. Ride the harness forever.</h2>
-    <p class="muted" style="max-width:560px;margin:0 auto 30px;font-size:17px">Sigil is MIT-licensed and built on Jac's object-spatial programming model. Clone it, teach it, watch it crystallize.</p>
+    <h2 class="section-title" style="max-width:640px;margin:0 auto 18px">Build a skill once. Run it cheap, forever.</h2>
+    <p class="muted" style="max-width:560px;margin:0 auto 30px;font-size:17px">Sigil is free and open-source (MIT). Install it, teach it, and let it get better every day.</p>
     <div class="btns" style="justify-content:center">
       <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         sigilagent/sigil
       </a>
-      <a class="btn btn-ghost" href="https://github.com/sigilagent/sigil/blob/main/PARITY.md" target="_blank" rel="noopener">Read the parity map</a>
+      <a class="btn btn-ghost" href="#install">Install in one command</a>
     </div>
   </div>
 </section>
