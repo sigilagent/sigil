@@ -8,14 +8,17 @@ exec-capable tool consults `check_exec(cmd)` before running.
 """
 
 import from sigil { awaken, Soul }
+import from sigil_cron { now_ms }
 
 edge Governs {}    # Soul -> ExecPolicy
 edge Allows {}     # ExecPolicy -> AllowRule
 edge Pending {}    # ExecPolicy -> Approval
+edge Audited {}    # ExecPolicy -> Approval (elevated break-glass allows, for audit)
 
 node ExecPolicy {
     has security: str = "allowlist";   # deny | allowlist | full
     has ask: str = "on-miss";          # off | on-miss | always
+    has elevated_until_ms: int = 0;    # break-glass: while now < this, the gate allows everything (audited)
 }
 
 node AllowRule { has pattern: str; }
@@ -41,7 +44,34 @@ def approvals_get() -> dict {
     p = _policy();
     rules = [r.pattern for r in [p -->[?:AllowRule]]];
     pend = [{"cmd": a.cmd, "status": a.status} for a in [p -->[?:Approval]] if a.status == "pending"];
-    return {"security": p.security, "ask": p.ask, "allowlist": rules, "pending": pend};
+    remaining = p.elevated_until_ms - now_ms();
+    return {
+        "security": p.security, "ask": p.ask, "allowlist": rules, "pending": pend,
+        "elevated": remaining > 0, "elevated_ms_left": (remaining if remaining > 0 else 0)
+    };
+}
+
+def approvals_elevate(minutes: int) -> str {
+    # break-glass: bypass the gate for a bounded window (every allow is audited)
+    p = _policy();
+    mins = minutes if minutes > 0 else 15;
+    p.elevated_until_ms = now_ms() + (mins * 60000);
+    return "elevated (break-glass) for " + str(mins) + " min — every exec is now allowed and audited";
+}
+
+def approvals_deescalate() -> str {
+    p = _policy();
+    p.elevated_until_ms = 0;
+    return "de-escalated — the exec gate is active again";
+}
+
+def _audit_elevated(p: ExecPolicy, cmd: str) {
+    p +>:Audited:+> Approval(cmd=cmd, status="elevated-allow", ts=_ts());
+}
+
+def elevated_audit() -> list {
+    p = _policy();
+    return [{"cmd": a.cmd, "ts": a.ts} for a in [p -->[?:Approval]] if a.status == "elevated-allow"];
 }
 
 def approvals_set(security: str, ask: str) -> str {
@@ -84,6 +114,11 @@ def _pend(p: ExecPolicy, cmd: str) -> dict {
 def check_exec(cmd: str) -> dict {
     # The gate an exec tool consults. Returns decision: allow | deny | approval-pending.
     p = _policy();
+    # break-glass overrides the policy while the elevated window is open (every allow audited)
+    if p.elevated_until_ms > now_ms() {
+        _audit_elevated(p, cmd);
+        return {"decision": "allow", "reason": "elevated (break-glass) until " + str(p.elevated_until_ms)};
+    }
     if p.security == "deny" {
         return {"decision": "deny", "reason": "exec.security=deny"};
     }

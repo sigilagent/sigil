@@ -20,7 +20,7 @@ import from cron {
 }
 import from channels { channel_add, channel_list, channel_remove, message_send, inbound }
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
+import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
 import from agent { run_task }
 import from sigil_tasks { tasks_list, tasks_show }
 import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
@@ -211,7 +211,7 @@ with entry:__main__ {
         else { print("usage: hook add|list|enable|disable|rm ..."); }
     } elif cmd == "approvals" {
         sub = _arg(argv, 1);
-        if sub == "get" { g = approvals_get(); print("security=" + str(g["security"]) + " ask=" + str(g["ask"])); print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])])); print("pending: " + str(len(list(g["pending"])))); }
+        if sub == "get" { g = approvals_get(); print("security=" + str(g["security"]) + " ask=" + str(g["ask"]) + "  elevated=" + ("yes (" + str(int(int(g["elevated_ms_left"]) / 60000)) + "m left)" if g["elevated"] else "no")); print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])])); print("pending: " + str(len(list(g["pending"])))); }
         elif sub == "set" { print(approvals_set(_arg(argv, 2), _arg(argv, 3))); }
         elif sub == "allow" { print(allowlist_add(_arg(argv, 2))); }
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
@@ -278,6 +278,10 @@ with entry:__main__ {
                   + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
         }
         else { print("usage: migrate openclaw <dir>"); }
+        elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
+        elif sub == "deescalate" { print(approvals_deescalate()); }
+        elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
+        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
