@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # sigil — HTTP client for a running Sigil agent (the Observatory gateway).
 #
+#   sigil local solve "count the words in notes.txt"   # run the CLI directly (no server)
+#   sigil local soul | tasks list | models list | chat | config | …  (any main.jac command)
 #   sigil serve                       # start the gateway (jac start observatory.jac)
 #   sigil login                       # register+login, cache a JWT (run once)
-#   sigil solve "extract tables from report.pdf as csv"
+#   sigil solve "extract tables from report.pdf as csv"   # via the running gateway
 #   sigil chat  "say hello"           # OpenAI-shaped reply
 #   sigil soul | library | graph | tokens | mcp
 #   sigil configure small_model gpt-4o-mini
@@ -16,7 +18,7 @@ set -euo pipefail
 
 URL="${SIGIL_URL:-http://localhost:8199}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-JAC="${SIGIL_JAC:-$(command -v jac || echo /Users/jayanaka-98/miniconda3/envs/voodoo-pypi/bin/jac)}"
+JAC="${SIGIL_JAC:-$(command -v jac || echo "$HOME/.local/bin/jac")}"
 TOKFILE="${SIGIL_TOKENFILE:-$HOME/.sigil/token}"
 TOKEN="${SIGIL_TOKEN:-$(cat "$TOKFILE" 2>/dev/null || true)}"
 
@@ -60,6 +62,7 @@ login() {
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
+  local)      exec "$JAC" run "$HERE/main.jac" -s "${SIGIL_SESSION:-$HOME/.sigil/agent.session}" -- "$@" ;;
   serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${SIGIL_PORT:-8199}" -a "${SIGIL_API_PORT:-8198}" ;;
   login)      login ;;
   solve)      call api_solve         "{\"task\": $(esc "${1:?usage: sigil solve \"<task>\"}")}" ;;
@@ -77,5 +80,5 @@ case "$cmd" in
               src="${1:?usage: sigil register-skill <path> [md|agir|osp]}"; kind="${2:-agir}"
               payload="${src}"; [ "$kind" != "osp" ] && payload="$(cat "$src")"
               call api_register_skill "{\"source\": $(esc "$payload"), \"kind\": $(esc "$kind")}" ;;
-  help|*)     sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|*)     awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
 esac
