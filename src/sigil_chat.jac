@@ -12,7 +12,8 @@ real terminal, falling back to builtin input() when piped (so it stays scriptabl
 
 import sys;
 import os;
-import from .sigil { describe_soul, configure, library, recollect, teach }
+import sys;
+import from .sigil { describe_soul, configure, library, recollect, teach, chat_reply, chat_context, chat_reset }
 import from .agent { run_task }
 import from rich.console { Console }
 import from rich.panel { Panel }
@@ -49,13 +50,14 @@ def _banner(console: any, s: dict) {
     console.print();
     console.print("[bold magenta]  ◆ sigil[/bold magenta] [dim]· self-evolving agent[/dim]");
     console.print("  [dim]frontier[/dim] " + fm + "  [dim]small[/dim] " + sm + "  [dim]skills[/dim] " + str(s["skills"]));
-    console.print("  [dim]type a task · /help for commands · /exit to quit[/dim]");
+    console.print("  [dim]talk to it, or ask it to change a setting · /solve for a task · /help · /exit[/dim]");
     console.print();
 }
 
 def _help(console: any) {
     rows = [
-        ["/help", "show this help"],
+        ["/solve <task>", "run a task (crystallize + execute a skill)"],
+        ["/reset", "start a fresh conversation"],
         ["/soul", "identity, models, skills & memory"],
         ["/config", "edit settings interactively"],
         ["/model <tier> <name>", "set frontier|small|router model"],
@@ -63,12 +65,13 @@ def _help(console: any) {
         ["/teach <fact>", "store a durable memory"],
         ["/recall <query>", "search memories"],
         ["/clear", "clear the screen"],
+        ["/help", "show this help"],
         ["/exit", "quit (also Ctrl-D)"]
     ];
     console.print();
     console.print("[bold]commands[/bold]");
     for r in rows { console.print("  [cyan]" + r[0].ljust(22) + "[/cyan] [dim]" + r[1] + "[/dim]"); }
-    console.print("  [dim]anything else is a task the agent will solve.[/dim]");
+    console.print("  [dim]just talk to it — it replies live, and can change its own settings when you ask.[/dim]");
     console.print();
 }
 
@@ -128,6 +131,25 @@ def _run_and_render(console: any, task: str) {
     console.print();
 }
 
+def _stream_chat(console: any, message: str) {
+    # a streaming, tool-using conversational turn — tokens are rendered live as they
+    # arrive; if the user asks to change config or remember something, the model calls
+    # a tool (which mutates the graph) mid-stream and confirms.
+    about = chat_context();
+    sys.stdout.write("\n  ◆ ");
+    sys.stdout.flush();
+    try {
+        for tok in chat_reply(message, about) {
+            sys.stdout.write(str(tok));
+            sys.stdout.flush();
+        }
+    } except Exception as e {
+        console.print("[red]  (chat error: " + str(e)[:140] + ")[/red]");
+    }
+    sys.stdout.write("\n\n");
+    sys.stdout.flush();
+}
+
 # ---------------------------------------------------------------------------
 # slash commands
 # ---------------------------------------------------------------------------
@@ -141,6 +163,11 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/config" { config_menu(); }
     elif verb == "/library" { _show_library(console); }
     elif verb == "/clear" { console.clear(); }
+    elif verb in ["/solve", "/do"] {
+        if rest { _run_and_render(console, rest); }
+        else { console.print("[dim]  usage: /solve <task> — run a task (crystallize + execute)[/dim]"); }
+    }
+    elif verb == "/reset" { chat_reset(); console.print("[dim]  (conversation cleared)[/dim]"); }
     elif verb == "/teach" {
         if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); }
         else { console.print("[dim]  usage: /teach <fact>[/dim]"); }
@@ -183,7 +210,7 @@ def chat_repl() {
             if _handle_slash(console, cmd) { break; }
             continue;
         }
-        _run_and_render(console, cmd);
+        _stream_chat(console, cmd);
     }
     console.print("[dim]bye ◆[/dim]");
 }
@@ -191,6 +218,38 @@ def chat_repl() {
 # ---------------------------------------------------------------------------
 # interactive settings editor
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# first-run setup wizard — a few guided questions to get going
+# ---------------------------------------------------------------------------
+def setup_wizard() {
+    console = Console();
+    session = _make_session();
+    console.print();
+    console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
+    console.print();
+    steps = [
+        ["frontier_model", "Which model should build new skills? (the smart one)", "gpt-4o"],
+        ["small_model", "Which model runs skills day-to-day? (cheap or fully local)", "ollama_chat/qwen3:8b"],
+        ["persona", "In a line, how should your agent describe itself? (optional)", ""]
+    ];
+    for st in steps {
+        key = st[0]; question = st[1]; default = st[2];
+        hint = ("  [" + default + "]") if default else "  (optional)";
+        console.print("  [cyan]" + question + "[/cyan][dim]" + hint + "[/dim]");
+        val = "";
+        try { val = str(_prompt(session, "  › ")).strip(); }
+        except EOFError as e { console.print(); return; }
+        except KeyboardInterrupt as e { console.print(); return; }
+        if (not val) and default { val = default; }
+        if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); }
+        console.print();
+    }
+    s = describe_soul();
+    console.print("[bold]  You're set.[/bold] [dim]frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "[/dim]");
+    console.print("  [dim]Try:  [/dim][cyan]sigil solve \"…\"[/cyan][dim]   or   [/dim][cyan]sigil chat[/cyan]");
+    console.print();
+}
+
 def config_menu() {
     console = Console();
     session = _make_session();
