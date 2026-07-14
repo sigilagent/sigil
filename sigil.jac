@@ -128,6 +128,8 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
+    has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
+    has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
 }
 
 node Spec {
@@ -151,6 +153,7 @@ node Memory {
     has kind: str = "fact";       # fact | preference | observation
     has salience: float = 1.0;
     has uses: int = 0;
+    has embedding: list = [];      # cached embedding vector (populated lazily in vector recall mode)
 }
 
 node Registry {
@@ -259,11 +262,55 @@ def remember(soul: Soul, content: str, kind: str) -> Memory {
     return m;
 }
 
+def _embed(text: str, model: str) -> list {
+    # Embed via litellm (byLLM's backend) — works for any provider it supports
+    # (openai text-embedding-3-*, ollama/nomic-embed-text, …). Non-raising.
+    try {
+        import litellm;
+        r = litellm.embedding(model=model, input=[text]);
+        return list(r["data"][0]["embedding"]);
+    } except Exception as e { return []; }
+}
+
+def _cosine(a: list, b: list) -> float {
+    if (not a) or (not b) or (len(a) != len(b)) { return 0.0; }
+    import math;
+    dot = 0.0; na = 0.0; nb = 0.0;
+    for (x, y) in zip(a, b) {
+        fx = float(x); fy = float(y);
+        dot += fx * fy; na += fx * fx; nb += fy * fy;
+    }
+    if (na == 0.0) or (nb == 0.0) { return 0.0; }
+    return dot / (math.sqrt(na) * math.sqrt(nb));
+}
+
 def recall(soul: Soul, query: str, k: int) -> list[Memory] {
-    q = _tokens(query);
+    mode = soul.recall_mode if soul.recall_mode else "lexical";
+    emodel = str(soul.embed_model);
     # tuple = (-score, seq, memory); seq is a strict tie-breaker so nodes never compare
     scored: list = [];
     seq = 0;
+
+    if (mode in ["vector", "hybrid"]) and emodel {
+        qv = _embed(query, emodel);
+        if qv {   # embedding available -> semantic (optionally hybrid with lexical)
+            q = _tokens(query);
+            for m in [soul -->[?:Memory]] {
+                if not m.embedding { m.embedding = _embed(m.content, emodel); }   # lazy, cached
+                vscore = _cosine(qv, list(m.embedding));
+                lscore = (len(q & _tokens(m.content)) * 0.05) if mode == "hybrid" else 0.0;
+                total = (vscore * m.salience) + lscore;
+                if total > 0.0 { scored.append((0.0 - total, seq, m)); seq += 1; }
+            }
+            scored.sort();
+            picked: list[Memory] = [t[2] for t in scored[:k]];
+            for m in picked { m.uses += 1; }
+            return picked;
+        }
+    }
+
+    # lexical (default, and the fallback when no embedding model / embedding fails)
+    q = _tokens(query);
     for m in [soul -->[?:Memory]] {
         overlap = len(q & _tokens(m.content));
         if overlap > 0 {
@@ -618,6 +665,11 @@ def configure(key: str, value: str) -> str {
     elif key == "add_channel" { soul.channels = soul.channels + [value]; }
     elif key == "auto_eval" { soul.auto_eval = value.lower() in ["1", "true", "yes", "on"]; }
     elif key == "eval_threshold" { soul.eval_threshold = int(value); }
+    elif key == "recall_mode" {
+        if value not in ["lexical", "vector", "hybrid"] { return "recall_mode must be one of: lexical | vector | hybrid"; }
+        soul.recall_mode = value;
+    }
+    elif key == "embed_model" { soul.embed_model = value; }
     else { return "unknown key: " + key; }
     return key + " = " + value;
 }
