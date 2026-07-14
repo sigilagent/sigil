@@ -102,16 +102,14 @@ esac
 cat <<'EOF'
 
   Next:
-    export OPENAI_API_KEY=sk-...       # your frontier provider key
+    export OPENAI_API_KEY=sk-...       # a model key (or point it at a local model)
 
-    # simplest — run the agent directly, no server:
-    sigil local solve "extract the tables from report.pdf as csv"
-    sigil local soul | sigil local tasks list | sigil local chat
+    # just use it — runs locally, no server needed:
+    sigil solve "turn report.pdf into a clean CSV"
+    sigil soul | sigil tasks list | sigil chat
 
-    # or run it as a gateway (Observatory web UI + HTTP API):
-    sigil serve                        # start the gateway   (terminal 1)
-    sigil login                        # once — caches a JWT
-    sigil solve "extract the tables from report.pdf as csv"
+    # optional — a live web dashboard to watch it work:
+    sigil serve                        # Observatory web UI + HTTP API
 
   Docs: https://sigilagent.com   ·   https://github.com/sigilagent/sigil
 EOF
