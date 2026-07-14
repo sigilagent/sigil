@@ -25,6 +25,7 @@ import from agent { run_task }
 import from sigil_tasks { tasks_list, tasks_show }
 import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
+import from sigil_migrate { migrate_openclaw }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -268,6 +269,15 @@ with entry:__main__ {
             for p in pl { print("  " + str(p["name"]) + " v" + str(p["version"]) + "  servers=[" + ",".join([str(x) for x in list(p["servers"])]) + "]  skills=[" + ",".join([str(x) for x in list(p["skills"])]) + "]"); }
         }
         else { print("usage: plugin install <openclaw.plugin.json>|list|rm <name>"); }
+    } elif cmd == "migrate" {
+        # migrate openclaw <dir>  — fold an OpenClaw export (SOUL.md + config + skills) onto the graph
+        sub = _arg(argv, 1); path = _arg(argv, 2);
+        if (sub == "openclaw") and path {
+            r = migrate_openclaw(path);
+            print("migrated: persona=" + str(r["persona"]) + "  ethos+=" + str(r["ethos"])
+                  + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
+        }
+        else { print("usage: migrate openclaw <dir>"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
