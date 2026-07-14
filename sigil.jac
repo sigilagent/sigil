@@ -14,11 +14,12 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 import os;
 import json;
 import sigil_mcp;
-import from jaclang.byllm.lib { Model }
+import from jaclang.byllm.lib { Model, ModelPool }
 import from compiler.compiler { transpile_ir }
 import from sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
+import from sigil_cron { now_ms }
 import from views { VNode, VEdge, VGraph, VCall, VObs }
 
 # ---------------------------------------------------------------------------
@@ -30,13 +31,15 @@ glob FRONTIER_NAME: str = os.getenv("SIGIL_FRONTIER", "gpt-5");
 glob SMALL_NAME: str    = os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b");
 glob ROUTER_NAME: str   = os.getenv("SIGIL_ROUTER", os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"));
 
-glob frontier: Model = Model(model_name=FRONTIER_NAME);
-glob small: Model    = Model(model_name=SMALL_NAME);
-glob router: Model   = Model(model_name=ROUTER_NAME);
+# A tier holds a single Model, or a ModelPool (fallback chain) once configured.
+glob frontier: any = Model(model_name=FRONTIER_NAME);
+glob small: any    = Model(model_name=SMALL_NAME);
+glob router: any   = Model(model_name=ROUTER_NAME);
 
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
 glob ETHOS: str    = "";   # the soul's operating principles, rebound from the graph at awaken()
+glob PROMPT_MODE: str = "full";  # full | minimal | none — how much context wraps the crystallizer/run
 
 # ---------------------------------------------------------------------------
 # Cognition — the ONLY model calls in the system. Everything else is graph
@@ -128,6 +131,15 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
+    has model_aliases: dict = {};    # friendly name -> model string (e.g. "fast" -> "gpt-4o-mini")
+    has model_fallbacks: dict = {};  # tier ("frontier"|"small"|"router") -> comma-sep fallback models
+    has prompt_mode: str = "full"; # system-prompt assembly: full (ethos+memory) | minimal (contract only) | none (bare task)
+    has tool_allow: list[str] = [];   # tool policy: if non-empty, only these tools (+groups/profile) are permitted
+    has tool_deny: list[str] = [];    # denied tools (deny wins over allow); "*" denies all
+    has tool_groups: dict = {};       # group name -> comma-separated tool names
+    has tool_profile: str = "";       # active profile = a group whose tools join the allow-list
+    has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
+    has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
 }
 
 node Spec {
@@ -151,6 +163,7 @@ node Memory {
     has kind: str = "fact";       # fact | preference | observation
     has salience: float = 1.0;
     has uses: int = 0;
+    has embedding: list = [];      # cached embedding vector (populated lazily in vector recall mode)
 }
 
 node Registry {
@@ -175,6 +188,7 @@ node Attempt {
     has ok: bool;
     has model: str;
     has summary: str = "";
+    has at_ms: int = 0;    # epoch-ms of the run, for the task ledger (tasks list/show)
 }
 
 # ---------------------------------------------------------------------------
@@ -204,8 +218,51 @@ def model_for(name: str) -> Model {
     return Model(model_name=name);
 }
 
+def _resolve_alias(soul: Soul, name: str) -> str {
+    return str(soul.model_aliases.get(name, name));
+}
+
+def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
+    # Resolve the tier's model (through any alias) and, if the tier has a fallback
+    # chain configured, return a byLLM ModelPool that fails over primary -> fallbacks.
+    primary = _resolve_alias(soul, tier_model);
+    fb = str(soul.model_fallbacks.get(tier, "")).strip();
+    if not fb { return Model(model_name=primary); }
+    models: list = [Model(model_name=primary)];
+    for m in fb.split(",") {
+        mm = _resolve_alias(soul, m.strip());
+        if mm { models.append(Model(model_name=mm)); }
+    }
+    return ModelPool(models=models, strategy="fallback");
+}
+
+def model_alias(name: str, target: str) -> str {
+    soul = awaken();
+    al = dict(soul.model_aliases);
+    al[name] = target;
+    soul.model_aliases = al;
+    return "alias  " + name + " -> " + target;
+}
+
+def model_set_fallback(tier: str, csv: str) -> str {
+    soul = awaken();
+    fb = dict(soul.model_fallbacks);
+    fb[tier] = csv;
+    soul.model_fallbacks = fb;
+    return tier + " fallbacks -> " + (csv if csv else "(none)");
+}
+
+def models_info() -> dict {
+    soul = awaken();
+    return {
+        "frontier": soul.frontier_model, "small": soul.small_model,
+        "router": (soul.router_model if soul.router_model else soul.small_model),
+        "aliases": dict(soul.model_aliases), "fallbacks": dict(soul.model_fallbacks)
+    };
+}
+
 def awaken() -> Soul {
-    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS;
+    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS, PROMPT_MODE;
     found = [root -->[?:Soul]];
     if found {
         soul = found[0];
@@ -231,13 +288,19 @@ def awaken() -> Soul {
         soul +>:Knows:+> Spec(kind="agir-contract", body=default_contract());
     }
     # rebind cognition from the graph
-    frontier = model_for(soul.frontier_model);
-    small = model_for(soul.small_model);
+    frontier = _bind_tier(soul, "frontier", soul.frontier_model);
+    small = _bind_tier(soul, "small", soul.small_model);
     SMALL_NAME = soul.small_model;
-    router = model_for(soul.router_model if soul.router_model else soul.small_model);
+    router = _bind_tier(soul, "router", soul.router_model if soul.router_model else soul.small_model);
     ETHOS = "\n".join(["- " + e for e in soul.ethos]);
+    router = model_for(soul.router_model if soul.router_model else soul.small_model);
+    PROMPT_MODE = soul.prompt_mode if soul.prompt_mode else "full";
+    # ethos is woven into crystallization only in full mode; minimal/none keep the
+    # crystallizer to the structural contract (contract is always required for valid AG-IR).
+    ETHOS = ("\n".join(["- " + e for e in soul.ethos])) if PROMPT_MODE == "full" else "";
     specs = [soul -->[?:Spec]];
     if specs { CONTRACT = specs[0].body; }
+    _publish_tool_policy(soul);   # expose the tool policy to binding + run-time dispatch via env
     return soul;
 }
 
@@ -259,11 +322,55 @@ def remember(soul: Soul, content: str, kind: str) -> Memory {
     return m;
 }
 
+def _embed(text: str, model: str) -> list {
+    # Embed via litellm (byLLM's backend) — works for any provider it supports
+    # (openai text-embedding-3-*, ollama/nomic-embed-text, …). Non-raising.
+    try {
+        import litellm;
+        r = litellm.embedding(model=model, input=[text]);
+        return list(r["data"][0]["embedding"]);
+    } except Exception as e { return []; }
+}
+
+def _cosine(a: list, b: list) -> float {
+    if (not a) or (not b) or (len(a) != len(b)) { return 0.0; }
+    import math;
+    dot = 0.0; na = 0.0; nb = 0.0;
+    for (x, y) in zip(a, b) {
+        fx = float(x); fy = float(y);
+        dot += fx * fy; na += fx * fx; nb += fy * fy;
+    }
+    if (na == 0.0) or (nb == 0.0) { return 0.0; }
+    return dot / (math.sqrt(na) * math.sqrt(nb));
+}
+
 def recall(soul: Soul, query: str, k: int) -> list[Memory] {
-    q = _tokens(query);
+    mode = soul.recall_mode if soul.recall_mode else "lexical";
+    emodel = str(soul.embed_model);
     # tuple = (-score, seq, memory); seq is a strict tie-breaker so nodes never compare
     scored: list = [];
     seq = 0;
+
+    if (mode in ["vector", "hybrid"]) and emodel {
+        qv = _embed(query, emodel);
+        if qv {   # embedding available -> semantic (optionally hybrid with lexical)
+            q = _tokens(query);
+            for m in [soul -->[?:Memory]] {
+                if not m.embedding { m.embedding = _embed(m.content, emodel); }   # lazy, cached
+                vscore = _cosine(qv, list(m.embedding));
+                lscore = (len(q & _tokens(m.content)) * 0.05) if mode == "hybrid" else 0.0;
+                total = (vscore * m.salience) + lscore;
+                if total > 0.0 { scored.append((0.0 - total, seq, m)); seq += 1; }
+            }
+            scored.sort();
+            picked: list[Memory] = [t[2] for t in scored[:k]];
+            for m in picked { m.uses += 1; }
+            return picked;
+        }
+    }
+
+    # lexical (default, and the fallback when no embedding model / embedding fails)
+    q = _tokens(query);
     for m in [soul -->[?:Memory]] {
         overlap = len(q & _tokens(m.content));
         if overlap > 0 {
@@ -462,7 +569,7 @@ def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
-    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400]);
+    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
     tg +>:Ran:+> a;
     return res;
 }
@@ -505,9 +612,14 @@ walker solve {
         reg = [-->][?:Registry][0];
 
         # --- semantic memory: recall durable facts relevant to this task ----
-        mems = recall(soul, self.task, 5);
-        ctx = memory_context(mems);
-        if mems { self.trace += "recall -> " + str(len(mems)) + " memory\n"; }
+        # prompt_mode gates run-time context: none = bare task (no memory injected).
+        ctx = "";
+        if PROMPT_MODE != "none" {
+            mems = recall(soul, self.task, 5);
+            ctx = memory_context(mems);
+            if mems { self.trace += "recall -> " + str(len(mems)) + " memory\n"; }
+        }
+        self.trace += "prompt-mode: " + PROMPT_MODE + "\n";
 
         # --- route through the procedural library ---------------------------
         crystals: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
@@ -600,7 +712,9 @@ def describe_soul() -> dict {
         "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
         "frontier_model": soul.frontier_model, "small_model": soul.small_model,
         "router_model": (soul.router_model if soul.router_model else soul.small_model),
+        "channels": soul.channels, "prompt_mode": soul.prompt_mode,
         "channels": soul.channels,
+        "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
         "skills": nskills
     };
@@ -618,8 +732,59 @@ def configure(key: str, value: str) -> str {
     elif key == "add_channel" { soul.channels = soul.channels + [value]; }
     elif key == "auto_eval" { soul.auto_eval = value.lower() in ["1", "true", "yes", "on"]; }
     elif key == "eval_threshold" { soul.eval_threshold = int(value); }
+    elif key == "prompt_mode" {
+        if value not in ["full", "minimal", "none"] { return "prompt_mode must be one of: full | minimal | none"; }
+        soul.prompt_mode = value;
+    }
+    elif key == "tool_allow" { soul.tool_allow = [x.strip() for x in value.split(",") if x.strip()]; }
+    elif key == "tool_deny" { soul.tool_deny = [x.strip() for x in value.split(",") if x.strip()]; }
+    elif key == "tool_profile" { soul.tool_profile = value; }
+    elif key == "recall_mode" {
+        if value not in ["lexical", "vector", "hybrid"] { return "recall_mode must be one of: lexical | vector | hybrid"; }
+        soul.recall_mode = value;
+    }
+    elif key == "embed_model" { soul.embed_model = value; }
     else { return "unknown key: " + key; }
     return key + " = " + value;
+}
+
+# --- Tool policy (allow / deny / groups / profile) --------------------------
+def tool_group_set(name: str, csv: str) -> str {
+    soul = awaken();
+    g = dict(soul.tool_groups); g[name] = csv; soul.tool_groups = g;
+    return "tool group '" + name + "' = " + csv;
+}
+
+def _expand_policy(soul: Soul) -> dict {
+    # profile = a group whose tools join the allow-list
+    allow = [str(x) for x in soul.tool_allow];
+    deny = [str(x) for x in soul.tool_deny];
+    prof = str(soul.tool_profile);
+    if prof and (prof in soul.tool_groups) {
+        for t in str(soul.tool_groups.get(prof, "")).split(",") { tt = t.strip(); if tt and (tt not in allow) { allow.append(tt); } }
+    }
+    return {"allow": allow, "deny": deny};
+}
+
+def tool_allowed(name: str) -> bool {
+    eff = _expand_policy(awaken());
+    if (name in eff["deny"]) or ("*" in eff["deny"]) { return False; }
+    if eff["allow"] { return (name in eff["allow"]) or ("*" in eff["allow"]); }
+    return True;
+}
+
+def tools_policy_info() -> dict {
+    soul = awaken();
+    eff = _expand_policy(soul);
+    return {"allow": soul.tool_allow, "deny": soul.tool_deny, "profile": soul.tool_profile,
+            "groups": dict(soul.tool_groups), "effective_allow": eff["allow"], "effective_deny": eff["deny"]};
+}
+
+def _publish_tool_policy(soul: Soul) {
+    # expand the Soul policy into env the run subprocess + crystallizer binding both read
+    eff = _expand_policy(soul);
+    os.environ["SIGIL_TOOL_ALLOW"] = ",".join([str(x) for x in eff["allow"]]);
+    os.environ["SIGIL_TOOL_DENY"] = ",".join([str(x) for x in eff["deny"]]);
 }
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import from sigil {
     api_teach, api_soul, api_library, api_mcp, api_configure, api_recall,
     api_eval, api_relearn, api_forget
 }
-import from agent { api_chat_completions }
+import from agent { api_chat_completions, api_models, api_tools_invoke }
 
 cl {
     import from web.app { App }

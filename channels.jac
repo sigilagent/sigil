@@ -11,6 +11,7 @@ the `api_inbound` HTTP endpoint IS a ready webhook channel.
 import from sigil { awaken, Soul }
 import from agent { run_task }
 import from hooks { fire_hooks }
+import from sigil_sessions { session_note }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message
@@ -28,11 +29,20 @@ node Message {
     has peer: str = "";
     has text: str = "";
     has ts: float = 0.0;
+    has mid: str = "";              # stable message id — adapters reference it for react/edit/thread
+    has thread_id: str = "";        # thread linkage (empty = top-level)
+    has reactions: list[str] = [];  # emoji reactions applied to this message
+    has edited: bool = False;       # set once the message text has been edited
 }
 
 def _ts() -> float {
     import time;
     return time.time();
+}
+
+def _mid() -> str {
+    import uuid;
+    return str(uuid.uuid4()).split("-")[0];
 }
 
 def _channels(soul: Soul) -> list[Channel] { return [soul -->[?:Channel]]; }
@@ -69,42 +79,73 @@ def _get_channel(soul: Soul, name: str) -> Channel {
     return ch;
 }
 
-def _record(ch: Channel, direction: str, peer: str, text: str) -> Message {
-    m = Message(direction=direction, peer=peer, text=text, ts=_ts());
+def _record(ch: Channel, direction: str, peer: str, text: str, thread_id: str = "") -> Message {
+    m = Message(direction=direction, peer=peer, text=text, ts=_ts(), mid=_mid(), thread_id=thread_id);
     ch +>:Carried:+> m;
     return m;
 }
 
-def inbound(channel: str, peer: str, text: str) -> dict {
+def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
     # The core loop: a message arrives on a channel -> the agent solves it ->
     # the reply is recorded as outbound (an adapter delivers it). The peer becomes
     # part of the routing key (per OpenClaw's dm_scope) — here, memory context.
+    # The reply threads under the inbound message so thread_id round-trips.
     soul = awaken();
     ch = _get_channel(soul, channel);
     if not ch.enabled { return {"ok": False, "reply": "", "error": "channel disabled"}; }
-    _record(ch, "in", peer, text);
+    inm = _record(ch, "in", peer, text, thread_id);
     fire_hooks("message_received", channel + ":" + peer + ": " + text);
+    session_note(channel, peer, ch.dm_scope, "user", text);   # transcript, scoped by dm_scope
     res = run_task(text, "");
     reply = str(res["result"]);
-    _record(ch, "out", peer, reply);
+    reply_thread = thread_id if thread_id else inm.mid;
+    outm = _record(ch, "out", peer, reply, reply_thread);
+    session_note(channel, peer, ch.dm_scope, "assistant", reply);
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
-            "signature": str(res["signature"])};
+            "signature": str(res["signature"]), "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};
 }
 
-def message_send(channel: str, peer: str, text: str) -> dict {
+def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
     # Outbound send (agent-initiated / broadcast). The adapter for `channel`
     # delivers it; we record it on the graph.
     soul = awaken();
     ch = _get_channel(soul, channel);
-    _record(ch, "out", peer, text);
-    return {"ok": True, "channel": channel, "peer": peer, "text": text};
+    m = _record(ch, "out", peer, text, thread_id);
+    return {"ok": True, "channel": channel, "peer": peer, "text": text, "mid": m.mid, "thread_id": thread_id};
+}
+
+def react(channel: str, mid: str, emoji: str) -> str {
+    # Apply an emoji reaction to a prior message (by its stable mid).
+    soul = awaken();
+    for c in _channels(soul) {
+        if c.name == channel {
+            for m in [c -->[?:Message]] {
+                if m.mid == mid { m.reactions = m.reactions + [emoji]; return "reacted " + emoji + " on " + mid; }
+            }
+        }
+    }
+    return "no message " + mid + " on channel " + channel;
+}
+
+def edit(channel: str, mid: str, text: str) -> str {
+    # Edit a prior message's text in place (marks it edited).
+    soul = awaken();
+    for c in _channels(soul) {
+        if c.name == channel {
+            for m in [c -->[?:Message]] {
+                if m.mid == mid { m.text = text; m.edited = True; return "edited " + mid; }
+            }
+        }
+    }
+    return "no message " + mid + " on channel " + channel;
 }
 
 def channel_history(channel: str, n: int = 20) -> list {
     soul = awaken();
     for c in _channels(soul) {
         if c.name == channel {
-            msgs = [{"dir": m.direction, "peer": m.peer, "text": m.text[:200], "ts": m.ts}
+            msgs = [{"mid": m.mid, "dir": m.direction, "peer": m.peer, "text": m.text[:200],
+                     "thread": m.thread_id, "reactions": m.reactions, "edited": m.edited, "ts": m.ts}
                     for m in [c -->[?:Message]]];
             return msgs[-n:];
         }
