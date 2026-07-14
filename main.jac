@@ -75,7 +75,7 @@ with entry:__main__ {
         print("  persona : " + str(s["persona"]));
         print("  models  : frontier=" + str(s["frontier_model"])
               + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
-        print("  channels: " + ", ".join([str(c) for c in s["channels"]]));
+        print("  channels: " + ", ".join([str(c) for c in s["channels"]]) + "   prompt-mode: " + str(s["prompt_mode"]));
         eths = list(s["ethos"]);
         mems = list(s["memories"]);
         print("  skills  : " + str(s["skills"]) + "   memories: " + str(len(mems)));
@@ -221,7 +221,7 @@ with entry:__main__ {
         print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
         print("  forget <sig>                remove a skill entirely (all versions + files)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
-        print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold)");
+        print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
         print("  teach \"<fact>\"              write a durable memory onto the graph");
         print("  recall \"<query>\"            retrieve relevant memories");
         print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");

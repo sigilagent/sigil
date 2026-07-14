@@ -19,7 +19,7 @@ noted, not built).
 |---|---|---|
 | Agent turn (intake→context→infer→tools→reply→persist) | `solve` walker: awaken→recall→route→execute→learn | ✅ |
 | Config model: `SOUL.md`/persona/rules (file-based) | **`Soul` node** — persona, ethos, model tiers, channels, all on the graph (no files) | ✅ |
-| System prompt assembly (`full`/`minimal`/`none` modes) | crystallizer contract + ethos woven into AG-IR authoring | 🔶 |
+| System prompt assembly (`full`/`minimal`/`none` modes) | **`Soul.prompt_mode`** — full (ethos+memory) / minimal (contract only) / none (bare task); `configure prompt_mode` | ✅ |
 | Sessions (dm scope, daily reset, transcripts) | `Attempt` episodic records; `Channel.dm_scope` (main/per-peer) | 🔶 |
 | Compaction / pruning (prompt-cache economics) | byLLM history primitive; memory injected at run-time not baked in | 🔶 |
 | Command queue (steer/queue/followup), streaming | single serialized `solve`; token stream via Observatory | 🔶 |

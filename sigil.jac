@@ -37,6 +37,7 @@ glob router: Model   = Model(model_name=ROUTER_NAME);
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
 glob ETHOS: str    = "";   # the soul's operating principles, rebound from the graph at awaken()
+glob PROMPT_MODE: str = "full";  # full | minimal | none — how much context wraps the crystallizer/run
 
 # ---------------------------------------------------------------------------
 # Cognition — the ONLY model calls in the system. Everything else is graph
@@ -128,6 +129,7 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
+    has prompt_mode: str = "full"; # system-prompt assembly: full (ethos+memory) | minimal (contract only) | none (bare task)
 }
 
 node Spec {
@@ -205,7 +207,7 @@ def model_for(name: str) -> Model {
 }
 
 def awaken() -> Soul {
-    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS;
+    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS, PROMPT_MODE;
     found = [root -->[?:Soul]];
     if found {
         soul = found[0];
@@ -235,7 +237,10 @@ def awaken() -> Soul {
     small = model_for(soul.small_model);
     SMALL_NAME = soul.small_model;
     router = model_for(soul.router_model if soul.router_model else soul.small_model);
-    ETHOS = "\n".join(["- " + e for e in soul.ethos]);
+    PROMPT_MODE = soul.prompt_mode if soul.prompt_mode else "full";
+    # ethos is woven into crystallization only in full mode; minimal/none keep the
+    # crystallizer to the structural contract (contract is always required for valid AG-IR).
+    ETHOS = ("\n".join(["- " + e for e in soul.ethos])) if PROMPT_MODE == "full" else "";
     specs = [soul -->[?:Spec]];
     if specs { CONTRACT = specs[0].body; }
     return soul;
@@ -505,9 +510,14 @@ walker solve {
         reg = [-->][?:Registry][0];
 
         # --- semantic memory: recall durable facts relevant to this task ----
-        mems = recall(soul, self.task, 5);
-        ctx = memory_context(mems);
-        if mems { self.trace += "recall -> " + str(len(mems)) + " memory\n"; }
+        # prompt_mode gates run-time context: none = bare task (no memory injected).
+        ctx = "";
+        if PROMPT_MODE != "none" {
+            mems = recall(soul, self.task, 5);
+            ctx = memory_context(mems);
+            if mems { self.trace += "recall -> " + str(len(mems)) + " memory\n"; }
+        }
+        self.trace += "prompt-mode: " + PROMPT_MODE + "\n";
 
         # --- route through the procedural library ---------------------------
         crystals: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
@@ -600,7 +610,7 @@ def describe_soul() -> dict {
         "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
         "frontier_model": soul.frontier_model, "small_model": soul.small_model,
         "router_model": (soul.router_model if soul.router_model else soul.small_model),
-        "channels": soul.channels,
+        "channels": soul.channels, "prompt_mode": soul.prompt_mode,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
         "skills": nskills
     };
@@ -618,6 +628,10 @@ def configure(key: str, value: str) -> str {
     elif key == "add_channel" { soul.channels = soul.channels + [value]; }
     elif key == "auto_eval" { soul.auto_eval = value.lower() in ["1", "true", "yes", "on"]; }
     elif key == "eval_threshold" { soul.eval_threshold = int(value); }
+    elif key == "prompt_mode" {
+        if value not in ["full", "minimal", "none"] { return "prompt_mode must be one of: full | minimal | none"; }
+        soul.prompt_mode = value;
+    }
     else { return "unknown key: " + key; }
     return key + " = " + value;
 }
