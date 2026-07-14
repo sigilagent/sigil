@@ -11,6 +11,7 @@ the `api_inbound` HTTP endpoint IS a ready webhook channel.
 import from sigil { awaken, Soul }
 import from agent { run_task }
 import from hooks { fire_hooks }
+import from sigil_sessions { session_note }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message
@@ -84,9 +85,11 @@ def inbound(channel: str, peer: str, text: str) -> dict {
     if not ch.enabled { return {"ok": False, "reply": "", "error": "channel disabled"}; }
     _record(ch, "in", peer, text);
     fire_hooks("message_received", channel + ":" + peer + ": " + text);
+    session_note(channel, peer, ch.dm_scope, "user", text);   # transcript, scoped by dm_scope
     res = run_task(text, "");
     reply = str(res["result"]);
     _record(ch, "out", peer, reply);
+    session_note(channel, peer, ch.dm_scope, "assistant", reply);
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
             "signature": str(res["signature"])};
 }

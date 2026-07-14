@@ -22,6 +22,7 @@ import from channels { channel_add, channel_list, channel_remove, message_send, 
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
+import from sigil_sessions { session_note, session_show, session_reset, session_list }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -213,6 +214,22 @@ with entry:__main__ {
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+    } elif cmd == "session" {
+        # session note <ch> <peer> <role> <text> | show <ch> <peer> | reset <ch> <peer> | list
+        sub = _arg(argv, 1);
+        if sub == "note" { print(session_note(_arg(argv, 2), _arg(argv, 3), "per-peer", _arg(argv, 4), _arg(argv, 5))); }
+        elif sub == "show" {
+            ts = session_show(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer");
+            if not ts { print("(empty transcript)"); }
+            for t in ts { print("  " + str(t["role"]) + ": " + str(t["text"])); }
+        }
+        elif sub == "reset" { print(session_reset(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer")); }
+        elif (sub == "list") or (not sub) {
+            sl = session_list();
+            if not sl { print("(no sessions)"); }
+            for s in sl { print("  " + str(s["key"]) + "  day=" + str(s["day"]) + "  turns=" + str(s["turns"])); }
+        }
+        else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
