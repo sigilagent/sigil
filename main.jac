@@ -23,6 +23,7 @@ import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
 import from sigil_tasks { tasks_list, tasks_show }
+import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -56,7 +57,7 @@ with entry:__main__ {
             print("=== route trace ===");
             print(r["trace"]);
             print("=== signature: " + r["signature"] + " ===");
-            print(r["result"]);
+            print(redact_secrets(str(r["result"])));   # never surface a resolved secret
         }
     } elif cmd == "library" {
         lib = library();
@@ -240,6 +241,18 @@ with entry:__main__ {
                 i += 1;
             }
         }
+    } elif cmd == "secret" {
+        # secret add <name> <ENV_VAR> | list | rm <name> | test <name>   (values are never printed)
+        sub = _arg(argv, 1);
+        if sub == "add" { print(secret_add(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "rm" { print(secret_remove(_arg(argv, 2))); }
+        elif sub == "test" { t = secret_test(_arg(argv, 2)); print("resolvable=" + str(t["resolvable"]) + "  length=" + str(t["length"]) + "  redacted='" + str(t["redacted"]) + "'"); }
+        elif (sub == "list") or (not sub) {
+            sl = secret_list();
+            if not sl { print("(no secrets registered)"); }
+            for s in sl { print("  " + str(s["name"]) + " -> $" + str(s["env"]) + "  [" + ("set" if s["set"] else "unset") + "]"); }
+        }
+        else { print("usage: secret add <name> <ENV_VAR>|list|rm <name>|test <name>"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
