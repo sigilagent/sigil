@@ -103,7 +103,7 @@ noted, not built).
 |---|---|---|
 | Bundle plugins = skills + MCP + config | **`register_skill`** (SKILL.md/AG-IR/OSP) + **`add-mcp`** | ✅ |
 | Code plugins (`register*` API, ~40 slots) | Jac modules imported by the entry (cron/channels/hooks/approvals are exactly this) | 🔶 |
-| `openclaw.plugin.json` manifest | AG-IR frontmatter + a `Plugin` manifest node 📋 | 🔶 |
+| `openclaw.plugin.json` manifest | **`plugin install`** parses the manifest, registers its MCP servers + skills, records a `Plugin` node | ✅ |
 | ClawHub registry / marketplace | 📋 | 📋 |
 | Migration providers (migrate-claude/hermes) | 📋 (a trace→AG-IR crystallizer is the natural fit) | 📋 |
 

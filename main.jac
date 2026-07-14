@@ -22,6 +22,7 @@ import from channels { channel_add, channel_list, channel_remove, message_send, 
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
+import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -213,6 +214,20 @@ with entry:__main__ {
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+    } elif cmd == "plugin" {
+        # plugin install <openclaw.plugin.json> | list | rm <name>
+        sub = _arg(argv, 1);
+        if sub == "install" {
+            if not _arg(argv, 2) { print("usage: plugin install <openclaw.plugin.json>"); }
+            else { r = plugin_install(_arg(argv, 2)); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
+        }
+        elif sub == "rm" { print(plugin_remove(_arg(argv, 2))); }
+        elif (sub == "list") or (not sub) {
+            pl = plugin_list();
+            if not pl { print("(no plugins installed)"); }
+            for p in pl { print("  " + str(p["name"]) + " v" + str(p["version"]) + "  servers=[" + ",".join([str(x) for x in list(p["servers"])]) + "]  skills=[" + ",".join([str(x) for x in list(p["skills"])]) + "]"); }
+        }
+        else { print("usage: plugin install <openclaw.plugin.json>|list|rm <name>"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
