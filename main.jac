@@ -24,6 +24,7 @@ import from approvals { approvals_get, approvals_set, allowlist_add, check_exec,
 import from agent { run_task }
 import from sigil_tasks { tasks_list, tasks_show }
 import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
+import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -253,6 +254,20 @@ with entry:__main__ {
             for s in sl { print("  " + str(s["name"]) + " -> $" + str(s["env"]) + "  [" + ("set" if s["set"] else "unset") + "]"); }
         }
         else { print("usage: secret add <name> <ENV_VAR>|list|rm <name>|test <name>"); }
+    } elif cmd == "plugin" {
+        # plugin install <openclaw.plugin.json> | list | rm <name>
+        sub = _arg(argv, 1);
+        if sub == "install" {
+            if not _arg(argv, 2) { print("usage: plugin install <openclaw.plugin.json>"); }
+            else { r = plugin_install(_arg(argv, 2)); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
+        }
+        elif sub == "rm" { print(plugin_remove(_arg(argv, 2))); }
+        elif (sub == "list") or (not sub) {
+            pl = plugin_list();
+            if not pl { print("(no plugins installed)"); }
+            for p in pl { print("  " + str(p["name"]) + " v" + str(p["version"]) + "  servers=[" + ",".join([str(x) for x in list(p["servers"])]) + "]  skills=[" + ",".join([str(x) for x in list(p["skills"])]) + "]"); }
+        }
+        else { print("usage: plugin install <openclaw.plugin.json>|list|rm <name>"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
