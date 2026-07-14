@@ -15,7 +15,7 @@ Manifest shape:
 
 import os;
 import json;
-import from sigil { awaken, Soul, add_mcp, register_skill }
+import from .sigil { awaken, Soul, add_mcp, register_skill }
 
 edge Installed {}   # Soul -> Plugin
 

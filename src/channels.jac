@@ -8,10 +8,10 @@ concrete adapter (a Discord bot, a webhook) just calls `inbound()` and delivers 
 the `api_inbound` HTTP endpoint IS a ready webhook channel.
 """
 
-import from sigil { awaken, Soul }
-import from agent { run_task }
-import from hooks { fire_hooks }
-import from sigil_sessions { session_note }
+import from .sigil { awaken, Soul }
+import from .agent { run_task }
+import from .hooks { fire_hooks }
+import from .sigil_sessions { session_note }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message

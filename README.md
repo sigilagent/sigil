@@ -87,15 +87,34 @@ operations are `walker:pub` endpoints — swap to `:priv` and each user gets an 
 
 ## Layout
 
+The two entrypoints live at the repo root; the agent itself is the `src/` package.
+
 ```
-sigil.jac        the agent: graph model + walkers + the two-tier cognition
-main.jac              CLI (solve / library / soul / configure / teach / recall / add-mcp / register-skill)
-sigil_runtime.py       disk + OS glue: persist a lowered module, run it isolated
-sigil_mcp.py           adapter over byLLM's native McpClient — discovery + rung-0 dispatch
-compiler/             vendored AG-IR → OSP compiler (the LOWER engine) + runtime asset
-contracts/            the AG-IR authoring contract (seed for the on-graph Spec node)
-crystallized/         (runtime) lowered OSP modules — the agent's learned skills
-*.session             (runtime) the persistent graph
+main.jac                 CLI entrypoint (solve / chat / config / soul / tasks / models / … )
+observatory.jac          full-stack server entrypoint (`jac start`) — API + web UI
+jac.toml                 project + dependency manifest
+src/                     the agent package
+  sigil.jac                graph model + walkers + the two-tier cognition (crystallize/execute)
+  sigil_runtime.jac        disk + OS glue: persist a lowered module, run it isolated
+  sigil_mcp.jac            adapter over byLLM's native McpClient — discovery + rung-0 dispatch
+  agent.jac                run_task hook bus + the OpenAI-compatible walkers (api_*)
+  channels.jac             messaging surface + inbound→reply loop + reactions/threads/edits
+  cron.jac / sigil_cron.jac  scheduling (graph CronJob/CronRun; native due-time math)
+  hooks.jac                lifecycle hook bus (before/after_solve, message_received, …)
+  approvals.jac            exec-approval gate + allowlist + break-glass elevation
+  sigil_secrets.jac        SecretRef indirection (env-backed, redacted)
+  sigil_sessions.jac       per-dm_scope transcripts with daily reset
+  sigil_tasks.jac          background task ledger (Attempt + CronRun projection)
+  sigil_plugins.jac        openclaw.plugin.json manifest install
+  sigil_migrate.jac        OpenClaw export → graph migration
+  sigil_chat.jac           interactive chat REPL + settings editor (rich + prompt_toolkit)
+  views.jac / sigil_observe.jac  Observatory graph + token-observability projections
+  compiler/                vendored AG-IR → OSP compiler (the LOWER engine) + runtime asset
+  contracts/               the AG-IR authoring contract (seed for the on-graph Spec node)
+  *.test.jac               unit-test annexes (run with `jac test src/<module>.jac`)
+  crystallized/            (runtime) lowered OSP modules — the agent's learned skills
+web/                     the Observatory browser client (cl)
+*.session                (runtime) the persistent graph
 ```
 
 Execution isolation: a compiled OSP agent builds its *own* task-graph off `root`

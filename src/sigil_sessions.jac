@@ -8,7 +8,7 @@ run-time context (bounded), and `channels.inbound` records each turn.
 """
 
 import time;
-import from sigil { awaken, Soul }
+import from .sigil { awaken, Soul }
 import from datetime { date }
 
 edge Sessioned {}   # Soul -> Session

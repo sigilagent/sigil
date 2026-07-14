@@ -9,7 +9,7 @@ re-running updates in place rather than duplicating.
 
 import os;
 import json;
-import from sigil { awaken, Soul, register_skill }
+import from .sigil { awaken, Soul, register_skill }
 
 def _read(path: str) -> str {
     with open(path) as f { return str(f.read()); }

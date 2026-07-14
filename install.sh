@@ -103,12 +103,15 @@ cat <<'EOF'
 
   Next:
     export OPENAI_API_KEY=sk-...       # your frontier provider key
-    sigil serve                        # start the Observatory gateway   (terminal 1)
+
+    # simplest — run the agent directly, no server:
+    sigil local solve "extract the tables from report.pdf as csv"
+    sigil local soul | sigil local tasks list | sigil local chat
+
+    # or run it as a gateway (Observatory web UI + HTTP API):
+    sigil serve                        # start the gateway   (terminal 1)
     sigil login                        # once — caches a JWT
     sigil solve "extract the tables from report.pdf as csv"
-
-  Prefer the direct CLI? From the source dir:
-    jac run main.jac -s sigil.session -- solve "…"
 
   Docs: https://sigilagent.com   ·   https://github.com/sigilagent/sigil
 EOF
