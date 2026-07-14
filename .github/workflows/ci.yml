@@ -41,8 +41,8 @@ jobs:
       - name: Provision compiler dependency (PyYAML)
         run: jac install pyyaml
 
-      # `*.test.jac` picks up every annex test (present and future) automatically;
-      # report_fix_tests.jac is a standalone regression suite (non-annex name), so
-      # it is named explicitly.
+      # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
+      # test (present and future) automatically; report_fix_tests.jac is a standalone
+      # regression suite (non-annex name), so it is named explicitly.
       - name: Run test suite
-        run: jac test *.test.jac report_fix_tests.jac
+        run: jac test src/*.test.jac src/report_fix_tests.jac

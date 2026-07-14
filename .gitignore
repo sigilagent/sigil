@@ -226,12 +226,15 @@ __pycache__/
 .jac/
 observability/
 
-# crystallized-run debris leaked into the repo root (the isolated run writes its
-# authored script + captured output to cwd): the script, its stdout, verifier files
+# crystallized-run debris leaked into the run cwd (the isolated run writes its
+# authored script + captured output there): the script, its stdout, verifier files,
+# and any <signature>_v<N>.jac a crystallized OSP agent emits next to itself.
 op.py
 output.txt
 verifier.out
 task.out
+src/*_v[0-9]*.jac
+!src/file_writer_v1.jac   # a hand-authored example OSP skill, intentionally tracked
 
 # native build artifacts (platform-specific)
 bin/

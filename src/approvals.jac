@@ -7,8 +7,8 @@ Sigil models the policy + allowlist + pending approvals on the graph; any
 exec-capable tool consults `check_exec(cmd)` before running.
 """
 
-import from sigil { awaken, Soul }
-import from sigil_cron { now_ms }
+import from .sigil { awaken, Soul }
+import from .sigil_cron { now_ms }
 
 edge Governs {}    # Soul -> ExecPolicy
 edge Allows {}     # ExecPolicy -> AllowRule

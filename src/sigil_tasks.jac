@@ -6,8 +6,8 @@ feed (newest first); `tasks_show` returns the full record of the Nth entry. No n
 state — this is OpenClaw's `tasks list/show` over the graph Sigil already keeps.
 """
 
-import from sigil { Registry, TaskGraph, Attempt, Soul }
-import from cron { CronJob, CronRun }
+import from .sigil { Registry, TaskGraph, Attempt, Soul }
+import from .cron { CronJob, CronRun }
 
 def _rows() -> list {
     rows: list = [];

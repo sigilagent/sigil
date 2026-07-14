@@ -13,14 +13,14 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 
 import os;
 import json;
-import sigil_mcp;
+import from .sigil_mcp { digest, tools_for }
 import from jaclang.byllm.lib { Model, ModelPool }
-import from compiler.compiler { transpile_ir }
-import from sigil_runtime {
+import from .compiler.compiler { transpile_ir }
+import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
-import from sigil_cron { now_ms }
-import from views { VNode, VEdge, VGraph, VCall, VObs }
+import from .sigil_cron { now_ms }
+import from .views { VNode, VEdge, VGraph, VCall, VObs }
 
 # ---------------------------------------------------------------------------
 # The two-tier cascade. Frontier crystallizes (expensive, rare); small executes
@@ -440,7 +440,7 @@ def _crystallize_fresh(reg: Registry, sig: str, intent: str, task: str, version:
     # Author a FRESH AG-IR with the frontier for a KNOWN signature/version — the reusable
     # core behind first crystallization AND relearn (which discards a degraded procedure
     # and re-authors from scratch, rather than revising it like mutate does).
-    tools = sigil_mcp.digest(mcp_servers());
+    tools = digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
     low = _lower(agir, sig);
     if not low["ok"] {
@@ -518,7 +518,7 @@ def mcp_status() -> list {
     out: list = [];
     for srv in servers {
         tools = [];
-        try { tools = [t.name for t in sigil_mcp.tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
+        try { tools = [t.name for t in tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
         out.append({"name": srv["name"], "transport": srv["transport"], "tools": tools});
     }
     return out;
@@ -551,7 +551,7 @@ def register_skill(source: str, kind: str) -> dict {
         tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
     } else {
         # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
-        agir = lift_skill(source, ETHOS, sigil_mcp.digest(mcp_servers()), CONTRACT);
+        agir = lift_skill(source, ETHOS, digest(mcp_servers()), CONTRACT);
         sig = agir_name(agir);
         osp = transpile_ir(agir, sig);
         path = write_module(osp, sig, 1, WORKDIR);
@@ -926,7 +926,7 @@ def graph_snapshot() -> VGraph {
 }
 
 def observability_tail(n: int = 120) -> VObs {
-    import from sigil_observe { read_tail }
+    import from .sigil_observe { read_tail }
     recs = read_tail(os.path.join(WORKDIR, "observability", "live.jsonl"), n);
     o = VObs();
     for raw in recs {
