@@ -6,9 +6,9 @@ hooks are load-bearing on every path — without a circular import (this module 
 sigil + hooks; neither imports this one).
 """
 
-import sigil_mcp;
-import from sigil { solve_task, library, describe_soul }
-import from hooks { fire_hooks }
+import from .sigil_mcp { dispatch }
+import from .sigil { solve_task, library, describe_soul }
+import from .hooks { fire_hooks }
 
 def run_task(task: str, skill: str = "") -> dict {
     fire_hooks("before_solve", task);
@@ -60,7 +60,7 @@ walker:pub api_tools_invoke {
     has name: str = "";
     has arguments: dict = {};
     can run with Root entry {
-        res = sigil_mcp.dispatch(self.name, [self.arguments]);
+        res = dispatch(self.name, [self.arguments]);
         if res is None { report {"ok": False, "error": "no registered tool '" + self.name + "'"}; }
         else { report res; }
     }

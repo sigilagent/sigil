@@ -15,25 +15,25 @@ same persistent graph as the one-shot commands above.
 """
 
 import sys;
-import from sigil {
+import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info,
     tool_group_set, tool_allowed, tools_policy_info
 }
-import from cron {
+import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
-import from channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
-import from hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
-import from agent { run_task }
-import from sigil_tasks { tasks_list, tasks_show }
-import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
-import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
-import from sigil_migrate { migrate_openclaw }
-import from sigil_sessions { session_note, session_show, session_reset, session_list }
+import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
+import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
+import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
+import from src.agent { run_task }
+import from src.sigil_tasks { tasks_list, tasks_show }
+import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
+import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
+import from src.sigil_migrate { migrate_openclaw }
+import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -354,14 +354,14 @@ with entry:__main__ {
         }
         else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
     } elif cmd == "chat" {
-        import from sigil_chat { chat_repl }
+        import from src.sigil_chat { chat_repl }
         chat_repl();
     } elif cmd == "config" {
         # `config` alone -> interactive editor; `config <key> <value>` -> set one key.
         key = _arg(argv, 1); val = _arg(argv, 2);
         if key and val { print(configure(key, val)); }
         else {
-            import from sigil_chat { config_menu }
+            import from src.sigil_chat { config_menu }
             config_menu();
         }
     } else {

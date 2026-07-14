@@ -12,8 +12,8 @@ real terminal, falling back to builtin input() when piped (so it stays scriptabl
 
 import sys;
 import os;
-import from sigil { describe_soul, configure, library, recollect, teach }
-import from agent { run_task }
+import from .sigil { describe_soul, configure, library, recollect, teach }
+import from .agent { run_task }
 import from rich.console { Console }
 import from rich.panel { Panel }
 import from rich.table { Table }
