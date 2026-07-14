@@ -73,7 +73,7 @@ noted, not built).
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
 | Elevated / break-glass | 📋 (an elevated flag on the gate) | 📋 |
 | Sandbox (docker/ssh/openshell) | crystallized runs isolated in a **subprocess** (graph-state isolation, not a security sandbox) | 🔶 |
-| Secrets / SecretRefs | env + graph config; SecretRef indirection 📋 | 🔶 |
+| Secrets / SecretRefs | **`SecretRef` nodes** (name -> env; value never stored) + `secret:` resolve at run-time + `redact_secrets` | ✅ |
 | Gateway auth (token/password/trusted-proxy) | jac-cloud `walker:priv` + JWT; token/proxy modes 📋 | 🔶 |
 | SSRF / egress proxy | 📋 | 📋 |
 
