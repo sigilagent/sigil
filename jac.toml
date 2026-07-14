@@ -14,6 +14,10 @@ entry-point = "observatory.jac"
 # into the project venv.
 [dependencies]
 pyyaml = "latest"
+# The interactive `chat` REPL and `config` editor (sigil_chat.jac) render with rich
+# and use prompt_toolkit for line editing / history when stdin is a TTY.
+rich = "~=15.0"
+prompt_toolkit = "~=3.0"
 
 # Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
 # keeps its live model tiers on the graph (Soul), so this is only a seed default.

@@ -1,27 +1,39 @@
 """Sigil CLI — the agent has no config files. Its soul, skills and memory
 all live on the graph; persist that graph across invocations with a session file:
 
+    jac run main.jac -s sigil.session -- chat                 # interactive Claude-style REPL
+    jac run main.jac -s sigil.session -- config               # interactive settings editor
     jac run main.jac -s sigil.session -- solve "extract tables from report.pdf as csv"
     jac run main.jac -s sigil.session -- solve "..."     # reuses / evolves the graph
     jac run main.jac -s sigil.session -- soul
     jac run main.jac -s sigil.session -- configure small_model ollama_chat/qwen3:8b
     jac run main.jac -s sigil.session -- teach "the user always wants CSV with a header row"
     jac run main.jac -s sigil.session -- library
+
+`chat` and `config` live in sigil_chat.jac (rich + prompt_toolkit); both drive the
+same persistent graph as the one-shot commands above.
 """
 
 import sys;
 import from sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill,
-    eval_skill, relearn, forget
+    eval_skill, relearn, forget,
+    model_alias, model_set_fallback, models_info,
+    tool_group_set, tool_allowed, tools_policy_info
 }
 import from cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
-import from channels { channel_add, channel_list, channel_remove, message_send, inbound }
+import from channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
+import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
 import from agent { run_task }
+import from sigil_tasks { tasks_list, tasks_show }
+import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
+import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
+import from sigil_migrate { migrate_openclaw }
+import from sigil_sessions { session_note, session_show, session_reset, session_list }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -55,7 +67,7 @@ with entry:__main__ {
             print("=== route trace ===");
             print(r["trace"]);
             print("=== signature: " + r["signature"] + " ===");
-            print(r["result"]);
+            print(redact_secrets(str(r["result"])));   # never surface a resolved secret
         }
     } elif cmd == "library" {
         lib = library();
@@ -75,7 +87,7 @@ with entry:__main__ {
         print("  persona : " + str(s["persona"]));
         print("  models  : frontier=" + str(s["frontier_model"])
               + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
-        print("  channels: " + ", ".join([str(c) for c in s["channels"]]));
+        print("  channels: " + ", ".join([str(c) for c in s["channels"]]) + "   prompt-mode: " + str(s["prompt_mode"]));
         eths = list(s["ethos"]);
         mems = list(s["memories"]);
         print("  skills  : " + str(s["skills"]) + "   memories: " + str(len(mems)));
@@ -90,6 +102,26 @@ with entry:__main__ {
         val = _arg(argv, 2);
         if not key or not val { print("usage: configure <key> <value>"); }
         else { print(configure(key, val)); }
+    } elif cmd == "models" {
+        # models list | set <tier> <name> | alias <name> <model> | fallback <tier> <m1,m2,...>
+        sub = _arg(argv, 1);
+        if sub == "set" { print(configure(_arg(argv, 2) + "_model", _arg(argv, 3))); }
+        elif sub == "alias" { print(model_alias(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "fallback" { print(model_set_fallback(_arg(argv, 2), _arg(argv, 3))); }
+        elif (sub == "list") or (not sub) {
+            mi = models_info();
+            print("tiers:");
+            print("  frontier : " + str(mi["frontier"]));
+            print("  small    : " + str(mi["small"]));
+            print("  router   : " + str(mi["router"]));
+            al = dict(mi["aliases"]);
+            if al { print("aliases:"); for (k, v) in al.items() { print("  " + str(k) + " -> " + str(v)); } }
+            fb = dict(mi["fallbacks"]);
+            has_fb = False;
+            for (k, v) in fb.items() { if v { has_fb = True; } }
+            if has_fb { print("fallbacks:"); for (k, v) in fb.items() { if v { print("  " + str(k) + " : " + str(v)); } } }
+        }
+        else { print("usage: models list|set <tier> <name>|alias <name> <model>|fallback <tier> <m1,m2>"); }
     } elif cmd == "teach" {
         fact = _arg(argv, 1);
         if not fact { print("usage: teach \"<fact>\""); }
@@ -194,9 +226,21 @@ with entry:__main__ {
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
         elif sub == "list" { for c in channel_list() { print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  " + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])); } }
         elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
-        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"])); }
-        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4)); print("reply: " + str(r["reply"])); }
-        else { print("usage: channel add|list|rm|send|inbound ..."); }
+        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])); }
+        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("reply: " + str(r["reply"]) + "  (in=" + str(r["in_mid"]) + " out=" + str(r["out_mid"]) + " thread=" + str(r["thread_id"]) + ")"); }
+        elif sub == "react" { print(react(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
+        elif sub == "edit" { print(edit(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
+        elif sub == "history" {
+            for m in channel_history(_arg(argv, 2), 20) {
+                rx = list(m["reactions"]);
+                line = "  " + str(m["mid"]) + "  " + str(m["dir"]) + "  " + str(m["peer"]);
+                if m["thread"] { line += "  thread=" + str(m["thread"]); }
+                if m["edited"] { line += "  (edited)"; }
+                if rx { line += "  reacts=" + ",".join([str(x) for x in rx]); }
+                print(line + "  " + str(m["text"]));
+            }
+        }
+        else { print("usage: channel add|list|rm|send|inbound|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
     } elif cmd == "hook" {
         sub = _arg(argv, 1);
         if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }
@@ -207,21 +251,133 @@ with entry:__main__ {
         else { print("usage: hook add|list|enable|disable|rm ..."); }
     } elif cmd == "approvals" {
         sub = _arg(argv, 1);
-        if sub == "get" { g = approvals_get(); print("security=" + str(g["security"]) + " ask=" + str(g["ask"])); print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])])); print("pending: " + str(len(list(g["pending"])))); }
+        if sub == "get" { g = approvals_get(); print("security=" + str(g["security"]) + " ask=" + str(g["ask"]) + "  elevated=" + ("yes (" + str(int(int(g["elevated_ms_left"]) / 60000)) + "m left)" if g["elevated"] else "no")); print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])])); print("pending: " + str(len(list(g["pending"])))); }
         elif sub == "set" { print(approvals_set(_arg(argv, 2), _arg(argv, 3))); }
         elif sub == "allow" { print(allowlist_add(_arg(argv, 2))); }
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
-        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+        elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
+        elif sub == "deescalate" { print(approvals_deescalate()); }
+        elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
+        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
+    } elif cmd == "tasks" {
+        # tasks list [n] | show <n>  — unified ledger over solve Attempts + cron runs
+        sub = _arg(argv, 1);
+        if sub == "show" {
+            n = int(_arg(argv, 2)) if _arg(argv, 2) else 0;
+            r = tasks_show(n);
+            if not r { print("no such task (try: tasks list)"); }
+            else {
+                print("#" + str(n) + "  [" + str(r["kind"]) + "]  " + str(r["label"]) + "  " + ("ok" if r["ok"] else "err"));
+                print("  when   : " + str(r["at_ms"]));
+                print("  model  : " + str(r["model"]));
+                print("  task   : " + str(r["detail"]));
+                print("  summary: " + str(r["summary"]));
+            }
+        } else {
+            n = int(_arg(argv, 2)) if (sub == "list" and _arg(argv, 2)) else 20;
+            items = tasks_list(n);
+            if not items { print("(no task history yet)"); }
+            i = 1;
+            for r in items {
+                oneline = str(r["summary"]).replace(chr(10), " ").replace(chr(13), " ");
+                print("  " + str(i).rjust(3) + "  [" + str(r["kind"]) + "]  " + str(r["label"]).ljust(16)
+                      + "  " + ("ok " if r["ok"] else "err") + "  " + oneline[:70]);
+                i += 1;
+            }
+        }
+    } elif cmd == "secret" {
+        # secret add <name> <ENV_VAR> | list | rm <name> | test <name>   (values are never printed)
+        sub = _arg(argv, 1);
+        if sub == "add" { print(secret_add(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "rm" { print(secret_remove(_arg(argv, 2))); }
+        elif sub == "test" { t = secret_test(_arg(argv, 2)); print("resolvable=" + str(t["resolvable"]) + "  length=" + str(t["length"]) + "  redacted='" + str(t["redacted"]) + "'"); }
+        elif (sub == "list") or (not sub) {
+            sl = secret_list();
+            if not sl { print("(no secrets registered)"); }
+            for s in sl { print("  " + str(s["name"]) + " -> $" + str(s["env"]) + "  [" + ("set" if s["set"] else "unset") + "]"); }
+        }
+        else { print("usage: secret add <name> <ENV_VAR>|list|rm <name>|test <name>"); }
+    } elif cmd == "plugin" {
+        # plugin install <openclaw.plugin.json> | list | rm <name>
+        sub = _arg(argv, 1);
+        if sub == "install" {
+            if not _arg(argv, 2) { print("usage: plugin install <openclaw.plugin.json>"); }
+            else { r = plugin_install(_arg(argv, 2)); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
+        }
+        elif sub == "rm" { print(plugin_remove(_arg(argv, 2))); }
+        elif (sub == "list") or (not sub) {
+            pl = plugin_list();
+            if not pl { print("(no plugins installed)"); }
+            for p in pl { print("  " + str(p["name"]) + " v" + str(p["version"]) + "  servers=[" + ",".join([str(x) for x in list(p["servers"])]) + "]  skills=[" + ",".join([str(x) for x in list(p["skills"])]) + "]"); }
+        }
+        else { print("usage: plugin install <openclaw.plugin.json>|list|rm <name>"); }
+    } elif cmd == "migrate" {
+        # migrate openclaw <dir>  — fold an OpenClaw export (SOUL.md + config + skills) onto the graph
+        sub = _arg(argv, 1); path = _arg(argv, 2);
+        if (sub == "openclaw") and path {
+            r = migrate_openclaw(path);
+            print("migrated: persona=" + str(r["persona"]) + "  ethos+=" + str(r["ethos"])
+                  + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
+        }
+        else { print("usage: migrate openclaw <dir>"); }
+    } elif cmd == "tools" {
+        # tools policy | check <name> | group <name> <t1,t2,...>   (allow/deny via `configure tool_allow|tool_deny|tool_profile`)
+        sub = _arg(argv, 1);
+        if sub == "check" { print(_arg(argv, 2) + ": " + ("allowed" if tool_allowed(_arg(argv, 2)) else "DENIED")); }
+        elif sub == "group" { print(tool_group_set(_arg(argv, 2), _arg(argv, 3))); }
+        elif (sub == "policy") or (not sub) {
+            p = tools_policy_info();
+            print("allow    : " + (", ".join([str(x) for x in list(p["allow"])]) or "(any)"));
+            print("deny     : " + (", ".join([str(x) for x in list(p["deny"])]) or "(none)"));
+            print("profile  : " + (str(p["profile"]) or "(none)"));
+            gr = dict(p["groups"]);
+            if gr { print("groups   :"); for (k, v) in gr.items() { print("  " + str(k) + " = " + str(v)); } }
+            print("effective allow: " + (", ".join([str(x) for x in list(p["effective_allow"])]) or "(any)"));
+            print("effective deny : " + (", ".join([str(x) for x in list(p["effective_deny"])]) or "(none)"));
+        }
+        else { print("usage: tools policy|check <name>|group <name> <t1,t2,...>   (set allow/deny via configure tool_allow|tool_deny|tool_profile)"); }
+    } elif cmd == "session" {
+        # session note <ch> <peer> <role> <text> | show <ch> <peer> | reset <ch> <peer> | list
+        sub = _arg(argv, 1);
+        if sub == "note" { print(session_note(_arg(argv, 2), _arg(argv, 3), "per-peer", _arg(argv, 4), _arg(argv, 5))); }
+        elif sub == "show" {
+            ts = session_show(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer");
+            if not ts { print("(empty transcript)"); }
+            for t in ts { print("  " + str(t["role"]) + ": " + str(t["text"])); }
+        }
+        elif sub == "reset" { print(session_reset(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer")); }
+        elif (sub == "list") or (not sub) {
+            sl = session_list();
+            if not sl { print("(no sessions)"); }
+            for s in sl { print("  " + str(s["key"]) + "  day=" + str(s["day"]) + "  turns=" + str(s["turns"])); }
+        }
+        else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
+    } elif cmd == "chat" {
+        import from sigil_chat { chat_repl }
+        chat_repl();
+    } elif cmd == "config" {
+        # `config` alone -> interactive editor; `config <key> <value>` -> set one key.
+        key = _arg(argv, 1); val = _arg(argv, 2);
+        if key and val { print(configure(key, val)); }
+        else {
+            import from sigil_chat { config_menu }
+            config_menu();
+        }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
+        print("  chat                        interactive Claude-style chat REPL");
+        print("  config [<key> <value>]      interactive settings editor (or set one key)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");
+        print("  tasks list [n] | show <n>   background task ledger (solve runs + cron fires)");
         print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
         print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
         print("  forget <sig>                remove a skill entirely (all versions + files)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
         print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold)");
+        print("  models list|set|alias|fallback   manage model tiers, aliases & fallback pools");
+        print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
         print("  teach \"<fact>\"              write a durable memory onto the graph");
         print("  recall \"<query>\"            retrieve relevant memories");
         print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");

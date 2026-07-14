@@ -19,8 +19,10 @@ noted, not built).
 |---|---|---|
 | Agent turn (intake→context→infer→tools→reply→persist) | `solve` walker: awaken→recall→route→execute→learn | ✅ |
 | Config model: `SOUL.md`/persona/rules (file-based) | **`Soul` node** — persona, ethos, model tiers, channels, all on the graph (no files) | ✅ |
-| System prompt assembly (`full`/`minimal`/`none` modes) | crystallizer contract + ethos woven into AG-IR authoring | 🔶 |
+| System prompt assembly (`full`/`minimal`/`none` modes) | **`Soul.prompt_mode`** — full (ethos+memory) / minimal (contract only) / none (bare task); `configure prompt_mode` | ✅ |
 | Sessions (dm scope, daily reset, transcripts) | `Attempt` episodic records; `Channel.dm_scope` (main/per-peer) | 🔶 |
+| System prompt assembly (`full`/`minimal`/`none` modes) | crystallizer contract + ethos woven into AG-IR authoring | 🔶 |
+| Sessions (dm scope, daily reset, transcripts) | **`Session` nodes** — per-`dm_scope` transcripts, daily reset, `session show/reset/list` | ✅ |
 | Compaction / pruning (prompt-cache economics) | byLLM history primitive; memory injected at run-time not baked in | 🔶 |
 | Command queue (steer/queue/followup), streaming | single serialized `solve`; token stream via Observatory | 🔶 |
 | Multi-agent / bindings / sub-agents | `walker:priv` per-user root; crystallized sub-procedures | 🔶 |
@@ -39,7 +41,7 @@ noted, not built).
 | — | **native LLVM binary** `cron_native.na.jac`→`jac nacompile`→`bin/cron_native` for the due-time math | ✅ |
 | Webhook / Gmail-PubSub triggers | `api_inbound` webhook endpoint (channels) | 🔶 |
 | Hooks (`/new`, `/reset`, lifecycle) | **`hooks.jac`** — Hook nodes + `fire_hooks(event)` | ✅ |
-| Background task ledger (`tasks list/show`) | `CronRun` + `Attempt` records | 🔶 |
+| Background task ledger (`tasks list/show`) | **`tasks list/show`** — unified time-ordered feed over `Attempt` + `CronRun` (`sigil_tasks.jac`) | ✅ |
 
 ## Channels  ✅ mechanism + loop built
 
@@ -51,7 +53,7 @@ noted, not built).
 | Webhook channel | **`api_inbound` HTTP endpoint** (ready webhook) | ✅ |
 | dm scope routing (main/per-peer) | `Channel.dm_scope` | ✅ |
 | 27 concrete adapters (discord/slack/telegram/whatsapp/matrix/imessage/…) | any adapter POSTs to `inbound()` / delivers `outbound` | 🔶 (the plug-in long tail) |
-| Reactions / threads / polls / edits | 📋 | 📋 |
+| Reactions / threads / polls / edits | **`react` / `edit` + `Message.thread_id`/`mid`** on the graph (polls 📋) | ✅ |
 
 ## Tools / "superpowers"
 
@@ -61,7 +63,7 @@ noted, not built).
 | MCP tools (bundle plugins) | **byLLM `McpClient`** + `add-mcp` + rung-0 dispatch | ✅ |
 | `exec`/`bash` + approval gate | `check_exec` gate (`approvals.jac`) + embodied command tools | ✅ (gate) / 🔶 (runner) |
 | web_search / web_fetch | embodiment rung-0 `_live_tool` (real HTTP) + MCP search servers | 🔶 |
-| Tool groups + `allow`/`deny`/`profile` | 📋 (policy fields on Soul) | 📋 |
+| Tool groups + `allow`/`deny`/`profile` | **policy on `Soul`** (allow/deny/groups/profile); enforced at crystallizer binding + run-time dispatch | ✅ |
 | browser, image/video/music gen, pdf, tts | via MCP servers or a provider plugin | 🔶 |
 | ACP harnesses (Claude Code/Codex/Cursor) | crystallized OSP agents are the harness; ACP bridge 📋 | 🔶 |
 
@@ -71,9 +73,9 @@ noted, not built).
 |---|---|---|
 | exec-approvals (`deny`/`allowlist`/`full` × `off`/`on-miss`/`always`) | **`approvals.jac`** — `ExecPolicy` + allowlist + pending-approval flow | ✅ |
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
-| Elevated / break-glass | 📋 (an elevated flag on the gate) | 📋 |
+| Elevated / break-glass | **`approvals elevate <min>` / `deescalate`** — time-boxed bypass on `ExecPolicy`, every allow audited (`approvals audit`) | ✅ |
 | Sandbox (docker/ssh/openshell) | crystallized runs isolated in a **subprocess** (graph-state isolation, not a security sandbox) | 🔶 |
-| Secrets / SecretRefs | env + graph config; SecretRef indirection 📋 | 🔶 |
+| Secrets / SecretRefs | **`SecretRef` nodes** (name -> env; value never stored) + `secret:` resolve at run-time + `redact_secrets` | ✅ |
 | Gateway auth (token/password/trusted-proxy) | jac-cloud `walker:priv` + JWT; token/proxy modes 📋 | 🔶 |
 | SSRF / egress proxy | 📋 | 📋 |
 
@@ -84,7 +86,7 @@ noted, not built).
 | `memory-core` (SQLite FTS+vector, per-agent) | **three-layer graph memory** — procedural (`TaskGraph`), episodic (`Attempt`), semantic (`Memory`) | ✅ |
 | `memory_search` / `memory_get` | `recall()` (lexical) + `teach()`; `recall` endpoint | ✅ |
 | Exclusive "one active memory plugin" slot | the graph IS the memory; slot is `plugins.slots.memory` analog | 🔶 |
-| LanceDB vector recall | swap `recall()` for embedding search (byLLM embeddings available) | 📋 |
+| LanceDB vector recall | **`recall_mode` vector/hybrid** — litellm embeddings + cosine over graph-stored vectors (lexical fallback) | ✅ |
 | memory-wiki / active-memory / dreaming | dreaming = a cron sweep that `distill`s; wiki 📋 | 🔶 |
 
 ## Providers  🔶 (byLLM/litellm already covers all 52)
@@ -93,8 +95,8 @@ noted, not built).
 |---|---|---|
 | ~52 provider plugins (anthropic/openai/google/deepseek/groq/mistral/…) | **byLLM→litellm** covers every one of them out of the box | 🔶 |
 | Local models (ollama/lmstudio/vllm/sglang) | byLLM `Model("ollama_chat/…")` etc. — already the default small tier | ✅ |
-| `models list/set/aliases/fallbacks` | model tiers on `Soul` (`configure *_model`); `ModelPool` for fallback | 🔶 |
-| Auth-profile rotation + model failover | byLLM `ModelPool(strategy="fallback")` | 🔶 |
+| `models list/set/aliases/fallbacks` | **`models list/set/alias/fallback`** — tiers + aliases + fallback chains on `Soul` | ✅ |
+| Auth-profile rotation + model failover | **byLLM `ModelPool(strategy="fallback")`** built from a tier's fallback chain | ✅ |
 | `registerProvider` extension point | byLLM model-name string = the provider selector | 🔶 |
 
 ## Plugins / Extensions
@@ -103,18 +105,18 @@ noted, not built).
 |---|---|---|
 | Bundle plugins = skills + MCP + config | **`register_skill`** (SKILL.md/AG-IR/OSP) + **`add-mcp`** | ✅ |
 | Code plugins (`register*` API, ~40 slots) | Jac modules imported by the entry (cron/channels/hooks/approvals are exactly this) | 🔶 |
-| `openclaw.plugin.json` manifest | AG-IR frontmatter + a `Plugin` manifest node 📋 | 🔶 |
+| `openclaw.plugin.json` manifest | **`plugin install`** parses the manifest, registers its MCP servers + skills, records a `Plugin` node | ✅ |
 | ClawHub registry / marketplace | 📋 | 📋 |
-| Migration providers (migrate-claude/hermes) | 📋 (a trace→AG-IR crystallizer is the natural fit) | 📋 |
+| Migration providers (migrate-claude/hermes) | **`migrate openclaw <dir>`** — SOUL.md + config -> Soul; `*.agir` skills registered | ✅ |
 
 ## Gateway / frontends
 
 | OpenClaw | Sigil | Status |
 |---|---|---|
 | Gateway process (one per host, WS + HTTP) | `jac start observatory.jac` (jac-cloud) — API + client on one port | ✅ |
-| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) | 🔶 |
+| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) + **interactive `chat` REPL** and **`config` settings editor** (`sigil_chat.jac`, rich + prompt_toolkit) | ✅ |
 | Web Control UI | **Observatory** — live agent-graph + 100% token observability | ✅ |
-| OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | `walker:pub api_*` endpoints; OpenAI-shape adapter 📋 | 🔶 |
+| OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | **`api_chat_completions` + `api_models` + `api_tools_invoke`** (`walker:pub`, OpenAI shape) | ✅ |
 | Bonjour/mDNS discovery, tailscale, multiple gateways | jac-cloud deploy features; discovery 📋 | 🔶 |
 | Native companion apps (macOS/iOS/Android) | 📋 (jac-mobile/jac-desktop can package the client) | 📋 |
 | Devices / node pairing / capabilities | 📋 | 📋 |
