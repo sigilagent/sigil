@@ -84,7 +84,7 @@ noted, not built).
 | `memory-core` (SQLite FTS+vector, per-agent) | **three-layer graph memory** — procedural (`TaskGraph`), episodic (`Attempt`), semantic (`Memory`) | ✅ |
 | `memory_search` / `memory_get` | `recall()` (lexical) + `teach()`; `recall` endpoint | ✅ |
 | Exclusive "one active memory plugin" slot | the graph IS the memory; slot is `plugins.slots.memory` analog | 🔶 |
-| LanceDB vector recall | swap `recall()` for embedding search (byLLM embeddings available) | 📋 |
+| LanceDB vector recall | **`recall_mode` vector/hybrid** — litellm embeddings + cosine over graph-stored vectors (lexical fallback) | ✅ |
 | memory-wiki / active-memory / dreaming | dreaming = a cron sweep that `distill`s; wiki 📋 | 🔶 |
 
 ## Providers  🔶 (byLLM/litellm already covers all 52)
