@@ -336,6 +336,11 @@ def _crystallize_fresh(reg: Registry, sig: str, intent: str, task: str, version:
     tools = sigil_mcp.digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
     low = _lower(agir, sig);
+    if not low["ok"] {
+        # Don't persist an empty module: it would later "run" as a no-op and surface
+        # as a confusing small-model failure. Fail loudly with the real compile error.
+        raise RuntimeError("crystallize '" + sig + "': AG-IR did not compile to a runnable procedure: " + str(low.get("error", "unknown")));
+    }
     path = write_module(str(low["osp"]), sig, version, WORKDIR);
     return _persist(reg, sig, intent, str(low["agir"]), path, origin, version);
 }
@@ -352,6 +357,10 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
     new_agir = revise_agir(tg.agir, task, failure, ETHOS, CONTRACT);
     v = tg.version + 1;
     low = _lower(new_agir, tg.signature);
+    if not low["ok"] {
+        # Keep the prior working version rather than persisting an empty mutation.
+        raise RuntimeError("mutate '" + tg.signature + "' v" + str(v) + ": revised AG-IR did not compile: " + str(low.get("error", "unknown")));
+    }
     path = write_module(str(low["osp"]), tg.signature, v, WORKDIR);
     nt = _persist(reg, tg.signature, tg.intent, str(low["agir"]), path, "mutation", v);
     nt +>:MutatedFrom:+> tg;

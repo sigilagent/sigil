@@ -380,6 +380,17 @@ def _shared_helpers() -> str {
 # ---------------------------------------------------------------------------
 def _load_ir(text: str) -> any {
     fm: any = {};
+    # Strip a Markdown code fence if the frontier wrapped the AG-IR (e.g. ```yaml … ```).
+    # Chat models like gpt-4o fence code/YAML by default; without this the raw backticks
+    # crash yaml.safe_load and every crystallization lowers to an empty module.
+    s = text.strip();
+    if s.startswith("```") {
+        nl = s.find("\n");
+        s = s[nl + 1:] if nl != -1 else "";
+        c = s.rstrip();
+        if c.endswith("```") { s = c[:c.rfind("```")]; }
+        text = s;
+    }
     body = text;
     if text.lstrip().startswith("---") {
         t = text.lstrip();
