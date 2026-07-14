@@ -10,7 +10,7 @@ of the return contract.
 
 import subprocess;
 import from urllib.request { Request, urlopen }
-import from sigil { awaken, Soul, teach }
+import from .sigil { awaken, Soul, teach }
 
 edge Observes {}   # Soul -> Hook
 

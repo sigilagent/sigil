@@ -13,7 +13,7 @@ This module is pure Python-runtime manipulation — it patches a third-party
 library's functions with ``functools.wraps`` + async closures and reassigns module
 attributes. That is exactly what Jac's inline-Python (``::py::``) block is for, so
 the body lives in one below; ``install`` / ``read_tail`` are still ordinary module
-symbols importable from Jac (``import from sigil_observe { read_tail }``).
+symbols importable from Jac (``import from .sigil_observe { read_tail }``).
 """
 
 ::py::

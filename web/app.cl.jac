@@ -6,7 +6,7 @@ run lineage — re-polled and upserted in place so you watch it evolve as tasks 
 solved. Right: 100% token observability — every LLM call captured by sigil_observe.
 """
 
-sv import from sigil { api_graph, api_observability, api_solve }
+sv import from src.sigil { api_graph, api_observability, api_solve }
 import from .graph_canvas { GraphCanvas }
 
 def:pub App() -> JsxElement {
