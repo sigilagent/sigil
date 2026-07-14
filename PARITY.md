@@ -39,7 +39,7 @@ noted, not built).
 | — | **native LLVM binary** `cron_native.na.jac`→`jac nacompile`→`bin/cron_native` for the due-time math | ✅ |
 | Webhook / Gmail-PubSub triggers | `api_inbound` webhook endpoint (channels) | 🔶 |
 | Hooks (`/new`, `/reset`, lifecycle) | **`hooks.jac`** — Hook nodes + `fire_hooks(event)` | ✅ |
-| Background task ledger (`tasks list/show`) | `CronRun` + `Attempt` records | 🔶 |
+| Background task ledger (`tasks list/show`) | **`tasks list/show`** — unified time-ordered feed over `Attempt` + `CronRun` (`sigil_tasks.jac`) | ✅ |
 
 ## Channels  ✅ mechanism + loop built
 

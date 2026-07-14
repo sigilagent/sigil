@@ -22,6 +22,7 @@ import from channels { channel_add, channel_list, channel_remove, message_send, 
 import from hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve }
 import from agent { run_task }
+import from sigil_tasks { tasks_list, tasks_show }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -213,10 +214,37 @@ with entry:__main__ {
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+    } elif cmd == "tasks" {
+        # tasks list [n] | show <n>  — unified ledger over solve Attempts + cron runs
+        sub = _arg(argv, 1);
+        if sub == "show" {
+            n = int(_arg(argv, 2)) if _arg(argv, 2) else 0;
+            r = tasks_show(n);
+            if not r { print("no such task (try: tasks list)"); }
+            else {
+                print("#" + str(n) + "  [" + str(r["kind"]) + "]  " + str(r["label"]) + "  " + ("ok" if r["ok"] else "err"));
+                print("  when   : " + str(r["at_ms"]));
+                print("  model  : " + str(r["model"]));
+                print("  task   : " + str(r["detail"]));
+                print("  summary: " + str(r["summary"]));
+            }
+        } else {
+            n = int(_arg(argv, 2)) if (sub == "list" and _arg(argv, 2)) else 20;
+            items = tasks_list(n);
+            if not items { print("(no task history yet)"); }
+            i = 1;
+            for r in items {
+                oneline = str(r["summary"]).replace(chr(10), " ").replace(chr(13), " ");
+                print("  " + str(i).rjust(3) + "  [" + str(r["kind"]) + "]  " + str(r["label"]).ljust(16)
+                      + "  " + ("ok " if r["ok"] else "err") + "  " + oneline[:70]);
+                i += 1;
+            }
+        }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");
+        print("  tasks list [n] | show <n>   background task ledger (solve runs + cron fires)");
         print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
         print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
         print("  forget <sig>                remove a skill entirely (all versions + files)");
