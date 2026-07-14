@@ -14,7 +14,7 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 import os;
 import json;
 import sigil_mcp;
-import from jaclang.byllm.lib { Model }
+import from jaclang.byllm.lib { Model, ModelPool }
 import from compiler.compiler { transpile_ir }
 import from sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
@@ -31,9 +31,10 @@ glob FRONTIER_NAME: str = os.getenv("SIGIL_FRONTIER", "gpt-5");
 glob SMALL_NAME: str    = os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b");
 glob ROUTER_NAME: str   = os.getenv("SIGIL_ROUTER", os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"));
 
-glob frontier: Model = Model(model_name=FRONTIER_NAME);
-glob small: Model    = Model(model_name=SMALL_NAME);
-glob router: Model   = Model(model_name=ROUTER_NAME);
+# A tier holds a single Model, or a ModelPool (fallback chain) once configured.
+glob frontier: any = Model(model_name=FRONTIER_NAME);
+glob small: any    = Model(model_name=SMALL_NAME);
+glob router: any   = Model(model_name=ROUTER_NAME);
 
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
@@ -129,6 +130,8 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
+    has model_aliases: dict = {};    # friendly name -> model string (e.g. "fast" -> "gpt-4o-mini")
+    has model_fallbacks: dict = {};  # tier ("frontier"|"small"|"router") -> comma-sep fallback models
 }
 
 node Spec {
@@ -206,6 +209,49 @@ def model_for(name: str) -> Model {
     return Model(model_name=name);
 }
 
+def _resolve_alias(soul: Soul, name: str) -> str {
+    return str(soul.model_aliases.get(name, name));
+}
+
+def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
+    # Resolve the tier's model (through any alias) and, if the tier has a fallback
+    # chain configured, return a byLLM ModelPool that fails over primary -> fallbacks.
+    primary = _resolve_alias(soul, tier_model);
+    fb = str(soul.model_fallbacks.get(tier, "")).strip();
+    if not fb { return Model(model_name=primary); }
+    models: list = [Model(model_name=primary)];
+    for m in fb.split(",") {
+        mm = _resolve_alias(soul, m.strip());
+        if mm { models.append(Model(model_name=mm)); }
+    }
+    return ModelPool(models=models, strategy="fallback");
+}
+
+def model_alias(name: str, target: str) -> str {
+    soul = awaken();
+    al = dict(soul.model_aliases);
+    al[name] = target;
+    soul.model_aliases = al;
+    return "alias  " + name + " -> " + target;
+}
+
+def model_set_fallback(tier: str, csv: str) -> str {
+    soul = awaken();
+    fb = dict(soul.model_fallbacks);
+    fb[tier] = csv;
+    soul.model_fallbacks = fb;
+    return tier + " fallbacks -> " + (csv if csv else "(none)");
+}
+
+def models_info() -> dict {
+    soul = awaken();
+    return {
+        "frontier": soul.frontier_model, "small": soul.small_model,
+        "router": (soul.router_model if soul.router_model else soul.small_model),
+        "aliases": dict(soul.model_aliases), "fallbacks": dict(soul.model_fallbacks)
+    };
+}
+
 def awaken() -> Soul {
     global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS;
     found = [root -->[?:Soul]];
@@ -233,10 +279,10 @@ def awaken() -> Soul {
         soul +>:Knows:+> Spec(kind="agir-contract", body=default_contract());
     }
     # rebind cognition from the graph
-    frontier = model_for(soul.frontier_model);
-    small = model_for(soul.small_model);
+    frontier = _bind_tier(soul, "frontier", soul.frontier_model);
+    small = _bind_tier(soul, "small", soul.small_model);
     SMALL_NAME = soul.small_model;
-    router = model_for(soul.router_model if soul.router_model else soul.small_model);
+    router = _bind_tier(soul, "router", soul.router_model if soul.router_model else soul.small_model);
     ETHOS = "\n".join(["- " + e for e in soul.ethos]);
     specs = [soul -->[?:Spec]];
     if specs { CONTRACT = specs[0].body; }

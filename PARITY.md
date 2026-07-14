@@ -93,8 +93,8 @@ noted, not built).
 |---|---|---|
 | ~52 provider plugins (anthropic/openai/google/deepseek/groq/mistral/…) | **byLLM→litellm** covers every one of them out of the box | 🔶 |
 | Local models (ollama/lmstudio/vllm/sglang) | byLLM `Model("ollama_chat/…")` etc. — already the default small tier | ✅ |
-| `models list/set/aliases/fallbacks` | model tiers on `Soul` (`configure *_model`); `ModelPool` for fallback | 🔶 |
-| Auth-profile rotation + model failover | byLLM `ModelPool(strategy="fallback")` | 🔶 |
+| `models list/set/aliases/fallbacks` | **`models list/set/alias/fallback`** — tiers + aliases + fallback chains on `Soul` | ✅ |
+| Auth-profile rotation + model failover | **byLLM `ModelPool(strategy="fallback")`** built from a tier's fallback chain | ✅ |
 | `registerProvider` extension point | byLLM model-name string = the provider selector | 🔶 |
 
 ## Plugins / Extensions
