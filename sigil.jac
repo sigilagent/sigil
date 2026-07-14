@@ -19,6 +19,7 @@ import from compiler.compiler { transpile_ir }
 import from sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
+import from sigil_cron { now_ms }
 import from views { VNode, VEdge, VGraph, VCall, VObs }
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,7 @@ node Attempt {
     has ok: bool;
     has model: str;
     has summary: str = "";
+    has at_ms: int = 0;    # epoch-ms of the run, for the task ledger (tasks list/show)
 }
 
 # ---------------------------------------------------------------------------
@@ -462,7 +464,7 @@ def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
-    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400]);
+    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
     tg +>:Ran:+> a;
     return res;
 }
