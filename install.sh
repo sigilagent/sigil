@@ -7,7 +7,7 @@
 # What it does:
 #   1. installs the native `jac` runtime (self-contained binary) if it's missing
 #   2. fetches the Sigil source into  ~/.sigil/app   (override with $SIGIL_HOME)
-#   3. provisions the one compiler dependency (PyYAML) into the project
+#   3. provisions the runtime deps (PyYAML + the LLM runtime) into the project
 #   4. drops a `sigil` launcher onto your PATH  (~/.local/bin, override $SIGIL_BIN_DIR)
 #
 # Nothing here needs root. Re-running is safe: it updates an existing install.
@@ -74,10 +74,14 @@ else
 fi
 [ -f "$SIGIL_HOME/main.jac" ] || die "Sigil source looks incomplete (no main.jac in $SIGIL_HOME)."
 
-# ---- 3. compiler dependency (PyYAML) -----------------------------------------
-info "Provisioning the compiler dependency (PyYAML)…"
-( cd "$SIGIL_HOME" && jac install pyyaml >/dev/null 2>&1 ) \
-  || warn "\`jac install pyyaml\` failed — run it yourself in $SIGIL_HOME before your first solve."
+# ---- 3. runtime dependencies -------------------------------------------------
+# PyYAML (the compiler parses the crystallizer's YAML output) + the byLLM 'llm'
+# runtime the model calls need (litellm/httpx/loguru/pillow). byLLM itself is
+# bundled in the native jac binary, but that runtime closure is not — without it
+# the very first `solve` fails with "'litellm' is required for this feature".
+info "Provisioning dependencies (PyYAML + the LLM runtime)…"
+( cd "$SIGIL_HOME" && jac install pyyaml litellm httpx loguru pillow >/dev/null 2>&1 ) \
+  || warn "dependency install failed — run \`jac install pyyaml litellm httpx loguru pillow\` in $SIGIL_HOME before your first solve."
 
 # ---- 4. launcher on PATH -----------------------------------------------------
 mkdir -p "$BIN_DIR"
