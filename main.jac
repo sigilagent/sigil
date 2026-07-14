@@ -28,6 +28,7 @@ import from sigil_tasks { tasks_list, tasks_show }
 import from sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from sigil_migrate { migrate_openclaw }
+import from sigil_sessions { session_note, session_show, session_reset, session_list }
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -332,6 +333,22 @@ with entry:__main__ {
             print("effective deny : " + (", ".join([str(x) for x in list(p["effective_deny"])]) or "(none)"));
         }
         else { print("usage: tools policy|check <name>|group <name> <t1,t2,...>   (set allow/deny via configure tool_allow|tool_deny|tool_profile)"); }
+    } elif cmd == "session" {
+        # session note <ch> <peer> <role> <text> | show <ch> <peer> | reset <ch> <peer> | list
+        sub = _arg(argv, 1);
+        if sub == "note" { print(session_note(_arg(argv, 2), _arg(argv, 3), "per-peer", _arg(argv, 4), _arg(argv, 5))); }
+        elif sub == "show" {
+            ts = session_show(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer");
+            if not ts { print("(empty transcript)"); }
+            for t in ts { print("  " + str(t["role"]) + ": " + str(t["text"])); }
+        }
+        elif sub == "reset" { print(session_reset(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4) or "per-peer")); }
+        elif (sub == "list") or (not sub) {
+            sl = session_list();
+            if not sl { print("(no sessions)"); }
+            for s in sl { print("  " + str(s["key"]) + "  day=" + str(s["day"]) + "  turns=" + str(s["turns"])); }
+        }
+        else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
