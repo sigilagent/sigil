@@ -223,16 +223,26 @@ def _resolve_alias(soul: Soul, name: str) -> str {
 }
 
 def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
-    # Resolve the tier's model (through any alias) and, if the tier has a fallback
-    # chain configured, return a byLLM ModelPool that fails over primary -> fallbacks.
+    # Resolve the tier's model (through any alias) and build its fallback chain.
+    # Order: primary -> any user-configured fallbacks -> the frontier model as a
+    # last resort. That safety net means a non-frontier tier (small/router) still
+    # works when its model is unreachable — e.g. a local Ollama model that isn't
+    # running falls over to the big frontier model instead of failing the call.
     primary = _resolve_alias(soul, tier_model);
+    names: list[str] = [primary];
     fb = str(soul.model_fallbacks.get(tier, "")).strip();
-    if not fb { return Model(model_name=primary); }
-    models: list = [Model(model_name=primary)];
-    for m in fb.split(",") {
-        mm = _resolve_alias(soul, m.strip());
-        if mm { models.append(Model(model_name=mm)); }
+    if fb {
+        for m in fb.split(",") {
+            mm = _resolve_alias(soul, m.strip());
+            if mm and mm not in names { names.append(mm); }
+        }
     }
+    if tier != "frontier" {
+        fm = _resolve_alias(soul, soul.frontier_model);
+        if fm and fm not in names { names.append(fm); }
+    }
+    if len(names) == 1 { return Model(model_name=names[0]); }
+    models: list = [Model(model_name=n) for n in names];
     return ModelPool(models=models, strategy="fallback");
 }
 
@@ -293,7 +303,6 @@ def awaken() -> Soul {
     SMALL_NAME = soul.small_model;
     router = _bind_tier(soul, "router", soul.router_model if soul.router_model else soul.small_model);
     ETHOS = "\n".join(["- " + e for e in soul.ethos]);
-    router = model_for(soul.router_model if soul.router_model else soul.small_model);
     PROMPT_MODE = soul.prompt_mode if soul.prompt_mode else "full";
     # ethos is woven into crystallization only in full mode; minimal/none keep the
     # crystallizer to the structural contract (contract is always required for valid AG-IR).
