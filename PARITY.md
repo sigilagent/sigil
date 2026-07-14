@@ -61,7 +61,7 @@ noted, not built).
 | MCP tools (bundle plugins) | **byLLM `McpClient`** + `add-mcp` + rung-0 dispatch | ✅ |
 | `exec`/`bash` + approval gate | `check_exec` gate (`approvals.jac`) + embodied command tools | ✅ (gate) / 🔶 (runner) |
 | web_search / web_fetch | embodiment rung-0 `_live_tool` (real HTTP) + MCP search servers | 🔶 |
-| Tool groups + `allow`/`deny`/`profile` | 📋 (policy fields on Soul) | 📋 |
+| Tool groups + `allow`/`deny`/`profile` | **policy on `Soul`** (allow/deny/groups/profile); enforced at crystallizer binding + run-time dispatch | ✅ |
 | browser, image/video/music gen, pdf, tts | via MCP servers or a provider plugin | 🔶 |
 | ACP harnesses (Claude Code/Codex/Cursor) | crystallized OSP agents are the harness; ACP bridge 📋 | 🔶 |
 

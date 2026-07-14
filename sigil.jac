@@ -128,6 +128,10 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
+    has tool_allow: list[str] = [];   # tool policy: if non-empty, only these tools (+groups/profile) are permitted
+    has tool_deny: list[str] = [];    # denied tools (deny wins over allow); "*" denies all
+    has tool_groups: dict = {};       # group name -> comma-separated tool names
+    has tool_profile: str = "";       # active profile = a group whose tools join the allow-list
 }
 
 node Spec {
@@ -238,6 +242,7 @@ def awaken() -> Soul {
     ETHOS = "\n".join(["- " + e for e in soul.ethos]);
     specs = [soul -->[?:Spec]];
     if specs { CONTRACT = specs[0].body; }
+    _publish_tool_policy(soul);   # expose the tool policy to binding + run-time dispatch via env
     return soul;
 }
 
@@ -618,8 +623,50 @@ def configure(key: str, value: str) -> str {
     elif key == "add_channel" { soul.channels = soul.channels + [value]; }
     elif key == "auto_eval" { soul.auto_eval = value.lower() in ["1", "true", "yes", "on"]; }
     elif key == "eval_threshold" { soul.eval_threshold = int(value); }
+    elif key == "tool_allow" { soul.tool_allow = [x.strip() for x in value.split(",") if x.strip()]; }
+    elif key == "tool_deny" { soul.tool_deny = [x.strip() for x in value.split(",") if x.strip()]; }
+    elif key == "tool_profile" { soul.tool_profile = value; }
     else { return "unknown key: " + key; }
     return key + " = " + value;
+}
+
+# --- Tool policy (allow / deny / groups / profile) --------------------------
+def tool_group_set(name: str, csv: str) -> str {
+    soul = awaken();
+    g = dict(soul.tool_groups); g[name] = csv; soul.tool_groups = g;
+    return "tool group '" + name + "' = " + csv;
+}
+
+def _expand_policy(soul: Soul) -> dict {
+    # profile = a group whose tools join the allow-list
+    allow = [str(x) for x in soul.tool_allow];
+    deny = [str(x) for x in soul.tool_deny];
+    prof = str(soul.tool_profile);
+    if prof and (prof in soul.tool_groups) {
+        for t in str(soul.tool_groups.get(prof, "")).split(",") { tt = t.strip(); if tt and (tt not in allow) { allow.append(tt); } }
+    }
+    return {"allow": allow, "deny": deny};
+}
+
+def tool_allowed(name: str) -> bool {
+    eff = _expand_policy(awaken());
+    if (name in eff["deny"]) or ("*" in eff["deny"]) { return False; }
+    if eff["allow"] { return (name in eff["allow"]) or ("*" in eff["allow"]); }
+    return True;
+}
+
+def tools_policy_info() -> dict {
+    soul = awaken();
+    eff = _expand_policy(soul);
+    return {"allow": soul.tool_allow, "deny": soul.tool_deny, "profile": soul.tool_profile,
+            "groups": dict(soul.tool_groups), "effective_allow": eff["allow"], "effective_deny": eff["deny"]};
+}
+
+def _publish_tool_policy(soul: Soul) {
+    # expand the Soul policy into env the run subprocess + crystallizer binding both read
+    eff = _expand_policy(soul);
+    os.environ["SIGIL_TOOL_ALLOW"] = ",".join([str(x) for x in eff["allow"]]);
+    os.environ["SIGIL_TOOL_DENY"] = ",".join([str(x) for x in eff["deny"]]);
 }
 
 # ---------------------------------------------------------------------------
