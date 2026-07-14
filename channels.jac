@@ -100,7 +100,6 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
     reply = str(res["result"]);
     reply_thread = thread_id if thread_id else inm.mid;
     outm = _record(ch, "out", peer, reply, reply_thread);
-    _record(ch, "out", peer, reply);
     session_note(channel, peer, ch.dm_scope, "assistant", reply);
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
             "signature": str(res["signature"]), "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};

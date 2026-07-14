@@ -19,7 +19,7 @@ import from sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill,
     eval_skill, relearn, forget,
-    model_alias, model_set_fallback, models_info
+    model_alias, model_set_fallback, models_info,
     tool_group_set, tool_allowed, tools_policy_info
 }
 import from cron {
@@ -256,7 +256,10 @@ with entry:__main__ {
         elif sub == "allow" { print(allowlist_add(_arg(argv, 2))); }
         elif sub == "check" { print(check_exec(_arg(argv, 2))["decision"]); }
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
-        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>"); }
+        elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
+        elif sub == "deescalate" { print(approvals_deescalate()); }
+        elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
+        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
     } elif cmd == "tasks" {
         # tasks list [n] | show <n>  — unified ledger over solve Attempts + cron runs
         sub = _arg(argv, 1);
@@ -318,10 +321,6 @@ with entry:__main__ {
                   + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
         }
         else { print("usage: migrate openclaw <dir>"); }
-        elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
-        elif sub == "deescalate" { print(approvals_deescalate()); }
-        elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
-        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
     } elif cmd == "tools" {
         # tools policy | check <name> | group <name> <t1,t2,...>   (allow/deny via `configure tool_allow|tool_deny|tool_profile`)
         sub = _arg(argv, 1);
