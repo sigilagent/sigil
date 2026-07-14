@@ -7,6 +7,7 @@
 #   sigil chat | config                # interactive
 #   sigil add-mcp github stdio gh-mcp  # give it tools
 #   sigil register-skill ./skill.agir agir
+#   sigil update                       # update to the latest release
 #
 # Prefer a server + web dashboard? Start the gateway, then point at it:
 #   sigil serve                        # Observatory web UI + HTTP API
@@ -64,6 +65,8 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${SIGIL_PORT:-8199}" -a "${SIGIL_API_PORT:-8198}" ;;
   login)      login ;;
+  update)     echo "Updating Sigil to the latest release…"
+              exec bash -c 'curl -fsSL "${SIGIL_INSTALL_URL:-https://github.com/sigilagent/sigil/releases/latest/download/install.sh}" | bash' ;;
   help|"")    awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
   *)
     # LOCAL by default — run the full CLI straight through main.jac, no server.
