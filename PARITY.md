@@ -114,7 +114,7 @@ noted, not built).
 | Gateway process (one per host, WS + HTTP) | `jac start observatory.jac` (jac-cloud) — API + client on one port | ✅ |
 | CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) | 🔶 |
 | Web Control UI | **Observatory** — live agent-graph + 100% token observability | ✅ |
-| OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | `walker:pub api_*` endpoints; OpenAI-shape adapter 📋 | 🔶 |
+| OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | **`api_chat_completions` + `api_models` + `api_tools_invoke`** (`walker:pub`, OpenAI shape) | ✅ |
 | Bonjour/mDNS discovery, tailscale, multiple gateways | jac-cloud deploy features; discovery 📋 | 🔶 |
 | Native companion apps (macOS/iOS/Android) | 📋 (jac-mobile/jac-desktop can package the client) | 📋 |
 | Devices / node pairing / capabilities | 📋 | 📋 |

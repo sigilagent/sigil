@@ -6,7 +6,8 @@ hooks are load-bearing on every path — without a circular import (this module 
 sigil + hooks; neither imports this one).
 """
 
-import from sigil { solve_task }
+import sigil_mcp;
+import from sigil { solve_task, library, describe_soul }
 import from hooks { fire_hooks }
 
 def run_task(task: str, skill: str = "") -> dict {
@@ -35,5 +36,32 @@ walker:pub api_chat_completions {
             "choices": [{"index": 0, "finish_reason": "stop",
                          "message": {"role": "assistant", "content": str(r["result"])}}]
         };
+    }
+}
+
+# GET-style: list the tiers + each crystallized skill as an OpenAI "model" so a
+# client can discover what Sigil can route to (POST /walker/api_models).
+walker:pub api_models {
+    can run with Root entry {
+        data: list = [];
+        for tier in ["frontier", "small", "router"] {
+            data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
+        }
+        for e in list(library()) {
+            data.append({"id": "sigil-skill/" + str(e["signature"]), "object": "model", "owned_by": "sigil"});
+        }
+        report {"object": "list", "data": data};
+    }
+}
+
+# Invoke a registered MCP tool by name (POST /walker/api_tools_invoke) — the
+# `/tools/invoke` analog. Returns the tool result or an error if no server has it.
+walker:pub api_tools_invoke {
+    has name: str = "";
+    has arguments: dict = {};
+    can run with Root entry {
+        res = sigil_mcp.dispatch(self.name, [self.arguments]);
+        if res is None { report {"ok": False, "error": "no registered tool '" + self.name + "'"}; }
+        else { report res; }
     }
 }
