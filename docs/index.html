@@ -239,17 +239,19 @@
 
   /* ---------- install one-liner ---------- */
   .oneliner{
-    display:flex;align-items:center;gap:14px;
+    display:flex;align-items:flex-start;gap:14px;
     border:1px solid rgba(139,92,246,.42);border-radius:14px;
     background:linear-gradient(180deg,rgba(139,92,246,.1),rgba(10,10,18,.85));
     padding:16px 18px;box-shadow:0 14px 50px -16px rgba(139,92,246,.5);
     overflow:hidden;
   }
-  .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px;flex:0 0 auto}
-  .oneliner .ol-scroll{flex:1 1 auto;min-width:0;overflow-x:auto}
-  .oneliner .ol-scroll pre{margin:0;padding:0;background:none;border:0}
-  .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:nowrap}
-  .oneliner .copy-btn{flex:0 0 auto;font-size:12px;padding:6px 12px}
+  .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px;flex:0 0 auto;line-height:1.55}
+  .oneliner .ol-scroll{flex:1 1 auto;min-width:0}
+  .oneliner .ol-scroll pre{margin:0;padding:0;background:none;border:0;white-space:normal}
+  /* wrap the command (incl. the long URL) so the whole line is visible on any width —
+     no horizontal scrollbar, which read as an ugly bar in the narrow/hero box */
+  .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:normal;overflow-wrap:anywhere;line-height:1.55}
+  .oneliner .copy-btn{flex:0 0 auto;font-size:12px;padding:6px 12px;margin-top:1px}
   .oneliner-note{font-size:13px;color:var(--faint);margin:12px 2px 0;font-family:var(--mono)}
   /* hero variant of the install one-liner */
   .hero-install{margin:0 0 30px;max-width:600px}
