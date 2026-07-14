@@ -71,7 +71,7 @@ noted, not built).
 |---|---|---|
 | exec-approvals (`deny`/`allowlist`/`full` × `off`/`on-miss`/`always`) | **`approvals.jac`** — `ExecPolicy` + allowlist + pending-approval flow | ✅ |
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
-| Elevated / break-glass | 📋 (an elevated flag on the gate) | 📋 |
+| Elevated / break-glass | **`approvals elevate <min>` / `deescalate`** — time-boxed bypass on `ExecPolicy`, every allow audited (`approvals audit`) | ✅ |
 | Sandbox (docker/ssh/openshell) | crystallized runs isolated in a **subprocess** (graph-state isolation, not a security sandbox) | 🔶 |
 | Secrets / SecretRefs | env + graph config; SecretRef indirection 📋 | 🔶 |
 | Gateway auth (token/password/trusted-proxy) | jac-cloud `walker:priv` + JWT; token/proxy modes 📋 | 🔶 |
