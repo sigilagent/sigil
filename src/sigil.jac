@@ -140,7 +140,7 @@ node Soul {
     has tool_profile: str = "";       # active profile = a group whose tools join the allow-list
     has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
     has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
-    has chat_model: str = "";          # conversational (chat-mode) model tier; falls back to small_model
+    has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
     has workspace: str = "";           # sandboxed workspace dir the file tools are jailed to (default ~/.sigil/workspace)
     has sandbox_mode: str = "jail";    # how ws_exec is contained: jail (cwd-confined subprocess) | docker | off
 }
@@ -240,12 +240,13 @@ def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
 }
 
 def bind_chat_model() -> any {
-    # The model that powers chat-mode + sub-agents: the `chat` tier, falling back
-    # to small, then a sane default. Rebound from the graph so `configure chat_model`
-    # takes effect on the next turn (no restart). Returns a Model, or a ModelPool
-    # when the chat tier has a fallback chain configured.
+    # The model that powers chat-mode + sub-agents. Chat is the user-facing surface and
+    # has no crystallized procedure to lean on, so it wants the STRONG model: the `chat`
+    # tier falls back to `frontier` (not `small` — the small tier is for executing
+    # already-crystallized skills). Rebound from the graph so `configure chat_model` takes
+    # effect next turn. Returns a Model, or a ModelPool when a fallback chain is set.
     soul = awaken();
-    name = soul.chat_model if soul.chat_model else (soul.small_model if soul.small_model else "gpt-4o-mini");
+    name = soul.chat_model if soul.chat_model else (soul.frontier_model if soul.frontier_model else "gpt-4o");
     return _bind_tier(soul, "chat", name);
 }
 
@@ -725,7 +726,7 @@ def describe_soul() -> dict {
         "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
         "frontier_model": soul.frontier_model, "small_model": soul.small_model,
         "router_model": (soul.router_model if soul.router_model else soul.small_model),
-        "chat_model": (soul.chat_model if soul.chat_model else soul.small_model),
+        "chat_model": (soul.chat_model if soul.chat_model else soul.frontier_model),
         "workspace": (soul.workspace if soul.workspace else "~/.sigil/workspace"),
         "sandbox_mode": (soul.sandbox_mode if soul.sandbox_mode else "jail"),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
