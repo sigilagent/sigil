@@ -223,27 +223,66 @@ def web_fetch(url: str) -> str {
     return text if len(text) <= 12000 else (text[:12000] + "\n… [truncated]");
 }
 
-def web_search(query: str) -> str {
-    url = "https://html.duckduckgo.com/html/?q=" + quote_plus(query);
-    try {
-        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (sigil)"});
-        resp = urlopen(req, timeout=20);
-        html = str(resp.read().decode("utf-8", "replace"));
-        resp.close();
-    } except Exception as e { _trace("web_search", query + " err", False); return "search error: " + str(e)[:200]; }
-    hits = list(re.findall(r'(?s)result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html));
-    snips = list(re.findall(r'(?s)result__snippet"[^>]*>(.*?)</a>', html));
+# Web search goes through a real provider API (keyless engines now serve bot
+# challenges, not results — same reason OpenClaw uses Brave/Firecrawl/LLM-native
+# search, never scraping). Keys come from the environment (document them with
+# `secret add` if you like). Brave is tried first, then Firecrawl.
+def _fmt_results(items: list) -> str {
     out: list = [];
     i = 0;
-    for pair in hits[:5] {
-        href = str(pair[0]);
-        title = _strip_html(str(pair[1]));
-        snip = _strip_html(str(snips[i])) if i < len(snips) else "";
-        out.append(str(i + 1) + ". " + title + "\n   " + href + "\n   " + snip[:220]);
+    for it in items[:6] {
+        d = dict(it);
+        out.append(str(i + 1) + ". " + str(d.get("title", "")) + "\n   " + str(d.get("url", "")) + "\n   " + str(d.get("desc", ""))[:220]);
         i += 1;
     }
-    _trace("web_search", query + " (" + str(len(out)) + " hits)");
-    return "\n".join(out) if out else "no results for: " + query;
+    return "\n".join(out);
+}
+
+def _search_brave(query: str, key: str) -> list {
+    url = "https://api.search.brave.com/res/v1/web/search?count=6&q=" + quote_plus(query);
+    req = Request(url, headers={"X-Subscription-Token": key, "Accept": "application/json", "User-Agent": "sigil/0.1"});
+    resp = urlopen(req, timeout=20);
+    body = json.loads(str(resp.read().decode("utf-8", "replace")));
+    resp.close();
+    results = ((dict(body).get("web") or {}).get("results")) or [];
+    return [{"title": str(r.get("title", "")), "url": str(r.get("url", "")), "desc": str(r.get("description", ""))} for r in results];
+}
+
+def _search_firecrawl(query: str, key: str) -> list {
+    data = json.dumps({"query": query, "limit": 6}).encode("utf-8");
+    req = Request("https://api.firecrawl.dev/v1/search", data=data,
+                  headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "User-Agent": "sigil/0.1"});
+    resp = urlopen(req, timeout=25);
+    body = json.loads(str(resp.read().decode("utf-8", "replace")));
+    resp.close();
+    results = dict(body).get("data") or [];
+    return [{"title": str(r.get("title", "")), "url": str(r.get("url", "")), "desc": str(r.get("description", ""))} for r in results];
+}
+
+def web_search(query: str) -> str {
+    brave = os.getenv("BRAVE_API_KEY") or os.getenv("BRAVE_SEARCH_API_KEY");
+    fire = os.getenv("FIRECRAWL_API_KEY");
+    if brave {
+        try {
+            items = _search_brave(query, str(brave));
+            _trace("web_search", query + " (brave, " + str(len(items)) + ")");
+            return _fmt_results(items) if items else "no results for: " + query;
+        } except Exception as e { _trace("web_search", "brave err", False); }
+    }
+    if fire {
+        try {
+            items = _search_firecrawl(query, str(fire));
+            _trace("web_search", query + " (firecrawl, " + str(len(items)) + ")");
+            return _fmt_results(items) if items else "no results for: " + query;
+        } except Exception as e { _trace("web_search", "firecrawl err", False); }
+    }
+    _trace("web_search", query + " (no provider key)", False);
+    return ("web_search needs a search-provider API key — keyless engines now block automated queries.\n"
+            "Set one of:\n"
+            "  • Brave      export BRAVE_API_KEY=…       (free tier: https://brave.com/search/api/)\n"
+            "  • Firecrawl  export FIRECRAWL_API_KEY=…   (https://firecrawl.dev)\n"
+            "Without a key I can still fetch a specific URL with web_fetch — including keyless JSON APIs, "
+            "e.g. GitHub: web_fetch('https://api.github.com/repos/<org>/<repo>/pulls').");
 }
 
 def workspace_info() -> dict {
