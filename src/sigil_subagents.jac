@@ -15,7 +15,7 @@ persistent agent graph, so running many at once is safe.
 import from jaclang.byllm.lib { Model }
 import from .sigil { bind_chat_model }
 import from .sigil_workspace {
-    ws_read, ws_write, ws_edit, ws_list, ws_exec, web_fetch, web_search, _trace
+    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search, _trace
 }
 
 glob sub_llm: any = Model(model_name="gpt-4o-mini");
@@ -34,10 +34,11 @@ def _ensure_sub_llm() -> None {
 
 sem subagent_run = """You are a focused sub-agent. Complete the single TASK using
 the workspace tools, then return a SHORT (1-3 sentence) result stating exactly what
-you did and where any output landed. Do the work — don't ask questions.""";
+you did and where any output landed. Ground claims in what you actually read (ws_tree
+to survey, ws_grep to locate, ws_read to read); do the work — don't ask questions.""";
 sem subagent_run.task = "The one self-contained sub-task to complete.";
 def subagent_run(task: str) -> str by sub_llm(
-    tools=[ws_read, ws_write, ws_edit, ws_list, ws_exec, web_fetch, web_search],
+    tools=[ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search],
     max_react_iterations=8
 );
 

@@ -98,14 +98,41 @@ def ws_list(subdir: str = ".") -> str {
     return (_rel(target) + "/\n" + "\n".join(rows)) if rows else (_rel(target) + "/  (empty)");
 }
 
-def ws_read(path: str) -> str {
+def ws_read(path: str, offset: int = 0, limit: int = 0) -> str {
+    # Read a file, optionally a line range: `offset` = 1-based start line (0 = from the
+    # top), `limit` = max lines (0 = a default page of 400). Lines are numbered (cat -n
+    # style) and a header states the slice's position in the file, so a large file can be
+    # paged through (grep -> read around a line) and a partial read is never mistaken for
+    # the whole file.
     try { full = _jail(path); } except Exception as e { _trace("read", str(e), False); return "error: " + str(e); }
     if not os.path.isfile(full) { _trace("read", path + " (missing)", False); return "no such file: " + path; }
     try {
         with open(full, "r") as f { data = f.read(); }
     } except Exception as e { _trace("read", str(e), False); return "error reading " + path + ": " + str(e); }
-    _trace("read", _rel(full) + " (" + str(len(data)) + " chars)");
-    return data if len(data) <= 20000 else (data[:20000] + "\n… [truncated, " + str(len(data)) + " chars total]");
+    lines = data.split(chr(10));
+    total = len(lines);
+    start = (offset - 1) if offset > 0 else 0;
+    if start < 0 { start = 0; }
+    if start >= total { start = max(0, total - 1); }
+    page = limit if limit > 0 else 400;
+    body: list = [];
+    chars = 0;
+    n = start;
+    while n < total and len(body) < page {
+        row = str(n + 1).rjust(6) + chr(9) + lines[n];
+        chars += len(row) + 1;
+        if chars > 20000 { break; }          # char safety per page
+        body.append(row);
+        n += 1;
+    }
+    shown_end = start + len(body);
+    header = _rel(full) + "  (lines " + str(start + 1) + "-" + str(shown_end) + " of " + str(total) + ")";
+    _trace("read", header);
+    note = "";
+    if shown_end < total {
+        note = chr(10) + "… " + str(total - shown_end) + " more line(s) — continue with ws_read(\"" + path + "\", offset=" + str(shown_end + 1) + ")";
+    }
+    return header + chr(10) + chr(10).join(body) + note;
 }
 
 def ws_write(path: str, content: str) -> str {
@@ -128,6 +155,95 @@ def ws_edit(path: str, old: str, new: str) -> str {
     with open(full, "w") as f { f.write(data.replace(old, resolve_refs(new))); }
     _trace("edit", _rel(full));
     return "edited " + _rel(full);
+}
+
+# ---------------------------------------------------------------------------
+# Survey tools — read-only, jailed, NO approval (unlike ws_exec). These let the
+# agent understand a codebase before diving in: ws_tree for structure, ws_grep to
+# locate. Noise dirs are pruned so a repo with node_modules/.git stays readable.
+# ---------------------------------------------------------------------------
+glob _SKIP_DIRS: list = [".git", "node_modules", "__pycache__", ".jac", ".venv", "venv",
+                         "dist", "build", ".mypy_cache", ".pytest_cache", ".idea",
+                         ".next", "target", ".gradle", "vendor"];
+
+def ws_tree(subdir: str = ".", depth: int = 3) -> str {
+    # Recursive directory survey (structure only). Skips noise dirs, bounds depth and
+    # entry count — for getting the shape of a repo before reading files.
+    try { base = _jail(subdir); } except Exception as e { _trace("tree", str(e), False); return "error: " + str(e); }
+    if not os.path.isdir(base) { _trace("tree", subdir + " (not a dir)", False); return "not a directory: " + subdir; }
+    d = depth if depth > 0 else 3;
+    cap = 500;
+    rows: list = [];
+    stopped = False;
+    for (dirpath, dirnames, filenames) in os.walk(base) {
+        rel = os.path.relpath(str(dirpath), base);
+        level = 0 if rel == "." else len(rel.split(os.sep));
+        # prune noise + hidden dirs, and don't descend past the depth limit
+        dirnames[:] = sorted([x for x in dirnames if (x not in _SKIP_DIRS) and not str(x).startswith(".")]) if level < d else [];
+        indent = "  " * level;
+        label = _rel(base) if rel == "." else str(rel).split(os.sep)[-1];
+        rows.append(indent + label + "/");
+        for fn in sorted(filenames) {
+            if str(fn).startswith(".") { continue; }
+            rows.append(indent + "  " + str(fn));
+            if len(rows) >= cap { stopped = True; break; }
+        }
+        if stopped { break; }
+    }
+    _trace("tree", _rel(base) + " (" + str(len(rows)) + " entries, depth " + str(d) + ")");
+    out = "\n".join(rows);
+    if stopped { out += "\n… (truncated at " + str(cap) + " entries — narrow with a subdir or smaller depth)"; }
+    return out;
+}
+
+def _is_texty(path: str) -> bool {
+    # cheap binary sniff: reject files with a NUL byte in the first 1KB
+    try {
+        with open(path, "rb") as f { head = f.read(1024); }
+        return b"\x00" not in head;
+    } except Exception as e { return False; }
+}
+
+def ws_grep(pattern: str, path: str = ".") -> str {
+    # Search file contents for a regex (read-only). `path` may be a file or a directory
+    # (searched recursively, noise dirs pruned). Returns relpath:line: text, capped.
+    try { base = _jail(path); } except Exception as e { _trace("grep", str(e), False); return "error: " + str(e); }
+    if not os.path.exists(base) { _trace("grep", path + " (missing)", False); return "no such path: " + path; }
+    try { rx = re.compile(pattern); } except Exception as e { _trace("grep", "bad regex", False); return "bad regex: " + str(e)[:120]; }
+    targets: list = [];
+    if os.path.isfile(base) { targets = [base]; }
+    else {
+        for (dirpath, dirnames, filenames) in os.walk(base) {
+            dirnames[:] = [x for x in dirnames if (x not in _SKIP_DIRS) and not str(x).startswith(".")];
+            for fn in sorted(filenames) {
+                if not str(fn).startswith(".") { targets.append(os.path.join(str(dirpath), str(fn))); }
+            }
+            if len(targets) > 4000 { break; }
+        }
+    }
+    hits: list = [];
+    max_hits = 100;
+    for fp in targets {
+        fpath = str(fp);
+        if len(hits) >= max_hits { break; }
+        if not _is_texty(fpath) { continue; }
+        try {
+            with open(fpath, "r") as f { flines = f.read().split(chr(10)); }
+        } except Exception as e { continue; }
+        i = 0;
+        for ln in flines {
+            i += 1;
+            if rx.search(ln) {
+                hits.append(_rel(fpath) + ":" + str(i) + ": " + ln.strip()[:200]);
+                if len(hits) >= max_hits { break; }
+            }
+        }
+    }
+    _trace("grep", pattern + " (" + str(len(hits)) + " hits)");
+    if not hits { return "no matches for /" + pattern + "/ under " + _rel(base); }
+    out = "\n".join(hits);
+    if len(hits) >= max_hits { out += "\n… (stopped at " + str(max_hits) + " matches — refine the pattern or scope to a subdir)"; }
+    return out;
 }
 
 # ---------------------------------------------------------------------------
