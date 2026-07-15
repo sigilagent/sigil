@@ -18,6 +18,9 @@ pyyaml = "latest"
 # and use prompt_toolkit for line editing / history when stdin is a TTY.
 rich = "~=15.0"
 prompt_toolkit = "~=3.0"
+# byLLM's streaming path (chat mode streams the reply token-by-token) imports httpx,
+# which the native runtime does not bundle — provision it so streaming works.
+httpx = "latest"
 
 # Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
 # keeps its live model tiers on the graph (Soul), so this is only a seed default.
