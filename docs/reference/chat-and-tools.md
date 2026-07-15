@@ -10,9 +10,19 @@ effects (files, code, live data, scheduling, memory, delegation).
 
 ## The tools
 
-**Files & shell** (jailed to the workspace — see [workspace-and-sandbox](workspace-and-sandbox.md))
-- `ws_list(subdir)` · `ws_read(path)` · `ws_write(path, content)` · `ws_edit(path, old, new)`
-- `ws_exec(command)` — runs through the exec-approval gate + sandbox.
+**Files & code** (jailed to the workspace — see [workspace-and-sandbox](workspace-and-sandbox.md))
+- `ws_list(subdir)` — one directory level; `ws_tree(subdir, depth)` — recursive survey
+  (noise dirs like `.git`/`node_modules` skipped), for getting the shape of a repo.
+- `ws_grep(pattern, path)` — regex search across files, returns `path:line: text`.
+- `ws_read(path, offset, limit)` — read a file; large files are paged (line-numbered,
+  with a `lines X-Y of N` header), so read on rather than concluding from the first page.
+- `ws_write(path, content)` · `ws_edit(path, old, new)`.
+- `ws_exec(command)` — real shell, runs through the exec-approval gate + sandbox.
+  `ws_tree` / `ws_grep` / `ws_read` are read-only and need **no** approval.
+
+When analyzing a codebase, the agent surveys with `ws_tree`, locates with `ws_grep`, and
+reads several files before drawing conclusions — and fans out with `spawn_parallel` for a
+repo-scale review.
 
 **Web**
 - `web_search(query)` — open-web search via a provider (needs `BRAVE_API_KEY` or

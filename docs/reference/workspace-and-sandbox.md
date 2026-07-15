@@ -5,10 +5,21 @@ boundary for chat mode.
 
 ## The workspace jail
 
-Every file tool (`ws_read` / `ws_write` / `ws_edit` / `ws_list`) is confined to one
-directory: the `workspace` (default `~/.sigil/workspace`, set with
-`configure workspace <path>`). A path that resolves outside the workspace is **refused**,
-not clamped — there is no reading `/etc/passwd` or writing `../elsewhere`.
+Every file tool is confined to one directory: the `workspace` (default
+`~/.sigil/workspace`, set with `configure workspace <path>`). A path that resolves outside
+the workspace is **refused**, not clamped — there is no reading `/etc/passwd` or writing
+`../elsewhere`.
+
+- `ws_list(subdir)` — one level; `ws_tree(subdir, depth)` — recursive structure survey,
+  skipping noise dirs (`.git`, `node_modules`, `__pycache__`, …), bounded in depth/entries.
+- `ws_grep(pattern, path)` — regex content search across files, returning `path:line: text`.
+- `ws_read(path, offset, limit)` — read a file or a line range; output is line-numbered
+  with a `lines X-Y of N` header so large files can be paged and a partial read is never
+  mistaken for the whole file.
+- `ws_write` / `ws_edit` — create/modify files.
+
+`ws_tree`, `ws_grep`, and `ws_read` are read-only and run without the exec-approval gate;
+only `ws_exec` (real shell) is gated.
 
 Check the current workspace with `/workspace` in chat or `sigil soul`.
 
