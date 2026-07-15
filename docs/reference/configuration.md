@@ -12,7 +12,7 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 |---|---|---|
 | `name` | text | The agent's name. |
 | `persona` | text | Voice/character the agent speaks with. |
-| `chat_model` | model name | The model that powers **chat mode** and sub-agents. Falls back to `small_model`. |
+| `chat_model` | model name | The **user-facing** model for chat and sub-agents — use a strong one. Falls back to `frontier_model`. |
 | `frontier_model` | model name | Expensive model that **crystallizes** new skills. |
 | `small_model` | model name | Cheap model that **executes** crystallized skills. |
 | `router_model` | model name | Model that routes a task to a skill. Falls back to `small_model`. |
