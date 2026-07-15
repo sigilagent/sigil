@@ -24,7 +24,7 @@ import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, chan
 import from .sigil_docs { list_docs, read_doc }
 import from .sigil_mcp { dispatch }
 import from .sigil_workspace {
-    ws_read, ws_write, ws_edit, ws_list, ws_exec, web_fetch, web_search,
+    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search,
     workspace_info, ws_root, _trace, drain_trace
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
@@ -167,9 +167,19 @@ When it does need action, do it (don't just describe it) and don't ask permissio
 reversible steps.
 
 Guidance:
-- Files & shell: use ws_read/ws_write/ws_edit/ws_list and ws_exec — only for real file or
-  program work, never to echo text. Everything is jailed to the workspace; shell is
-  approval-gated, so don't send trivial commands through it — if a command is blocked, say so.
+- Files: ws_list (one level) / ws_tree (survey a whole directory) / ws_grep (find text
+  across files) / ws_read (read a file; page big ones with offset/limit) / ws_write /
+  ws_edit. ws_tree and ws_grep are read-only and need no approval — use them freely.
+- Shell: ws_exec only for real program work (running/building/cloning), never to echo
+  text. It's jailed to the workspace and approval-gated, so don't send trivial commands
+  through it — if one is blocked, say so.
+- Analyzing a codebase/repo: SURVEY FIRST with ws_tree, LOCATE with ws_grep, then READ
+  SEVERAL representative files (page large ones — a partial read shows "lines X-Y of N",
+  so keep reading rather than concluding from the first page). Never judge a codebase from
+  the README or one file alone. For a repo-scale survey, fan out with spawn_parallel (one
+  sub-agent per subsystem). Give a BALANCED, evidence-based take — cite files/lines, note
+  concerns as well as strengths, and don't flatter. When asked for a document or report,
+  WRITE it to the workspace with ws_write (and say where), don't just print it.
 - Web: web_search covers the open web (it needs a provider key — if it reports one is
   missing, say so). web_fetch reads a specific URL, INCLUDING keyless JSON APIs — for
   "new PRs/issues in a repo" fetch GitHub's API directly, e.g.
@@ -191,7 +201,7 @@ paths and command results. If a tool fails, say what failed and what you'll try 
 sem chat_agent.message = "The user's latest message.";
 def chat_agent(message: str) -> str by chat_llm(
     tools=[
-        ws_read, ws_write, ws_edit, ws_list, ws_exec, web_fetch, web_search,
+        ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search,
         schedule_task, list_scheduled, cancel_scheduled,
         remember_fact, recall_memory, learn_skill, list_skills,
         mcp_call, send_message, connect_channel, setup_channel,
