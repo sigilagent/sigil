@@ -203,26 +203,50 @@ def _show_library(console: any) {
 }
 
 # ---------------------------------------------------------------------------
-# live tool trace + inline exec approver (wired into the workspace tools)
+# live tool trace + a "thinking" spinner + inline exec approver.
+# The spinner is a rich status (its own refresh thread, so it animates while the
+# model blocks on the network); completed tool calls stream ABOVE it, and it pauses
+# cleanly for the approval prompt so input isn't fighting the animation.
 # ---------------------------------------------------------------------------
+glob _STATUS: any = None;   # the live spinner handle, set for the duration of a turn
+
 def _install_hooks(console: any, session: any) {
     def sink(tool: str, detail: str, ok: bool) {
         mark = "✓" if ok else "✗";
         col = _tool_style(tool) if ok else "red";
         console.print("  [dim]" + mark + "[/dim] [" + col + "]" + tool.ljust(11) + "[/" + col + "] [dim]" + str(detail) + "[/dim]");
+        if _STATUS is not None {
+            try { _STATUS.update("[magenta]✦[/magenta] [dim]working — [/dim][" + col + "]" + tool + "[/" + col + "][dim]…[/dim]"); }
+            except Exception as e {}
+        }
     }
     def approver(command: str) -> bool {
+        paused = False;
+        if _STATUS is not None { try { _STATUS.stop(); paused = True; } except Exception as e {} }
         console.print("  [yellow]⚠ approve shell[/yellow] [dim]" + command + "[/dim]");
-        try { ans = str(_prompt(session, "    run this? [y/N] ")).strip().lower(); }
-        except Exception as e { return False; }
-        return ans in ["y", "yes"];
+        decided = False;
+        try { ans = str(_prompt(session, "    run this? [y/N] ")).strip().lower(); decided = ans in ["y", "yes"]; }
+        except Exception as e { decided = False; }
+        if paused { try { _STATUS.start(); } except Exception as e {} }
+        return decided;
     }
     set_trace_sink(sink);
     set_approver(approver);
 }
 
 def _run_and_render(console: any, message: str) {
-    r = chat_turn(message);
+    global _STATUS;
+    r: dict = {};
+    if sys.stdin.isatty() {
+        st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
+        st.start();
+        _STATUS = st;
+        r = chat_turn(message);          # chat_turn never raises (it catches internally)
+        try { st.stop(); } except Exception as e {}
+        _STATUS = None;
+    } else {
+        r = chat_turn(message);
+    }
     console.print();
     try { console.print(Markdown(str(r["reply"]))); }
     except Exception as e { console.print(Text(str(r["reply"]))); }
