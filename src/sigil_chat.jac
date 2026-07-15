@@ -22,6 +22,7 @@ import from .chat_agent { chat_turn, chat_reset }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
 import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
+import from .sigil_docs { list_docs, read_doc }
 import from rich.console { Console }
 import from rich.panel { Panel }
 import from rich.table { Table }
@@ -74,6 +75,7 @@ def _help(console: any) {
         ["/cron", "list scheduled jobs"],
         ["/channels", "channels: supported + configured"],
         ["/connect <kind>", "how to connect discord|telegram|whatsapp|slack"],
+        ["/docs [topic]", "Sigil's reference — how it works, config, tools"],
         ["/skills", "list crystallized skills"],
         ["/model <tier> <name>", "set frontier|small|router|chat model"],
         ["/remember <fact>", "store a durable memory"],
@@ -142,6 +144,18 @@ def _show_connect(console: any, kind: str) {
     console.print();
     console.print(Panel(Text(channel_setup_guide(kind)), title="[dim]connect " + kind + "[/dim]",
                         title_align="left", border_style="grey37", padding=(0, 1)));
+    console.print();
+}
+
+def _show_docs(console: any, topic: str) {
+    console.print();
+    if topic {
+        try { console.print(Markdown(read_doc(topic))); }
+        except Exception as e { console.print(Text(read_doc(topic))); }
+    } else {
+        console.print(Text(list_docs()));
+        console.print("[dim]  /docs <topic> to read one[/dim]");
+    }
     console.print();
 }
 
@@ -231,6 +245,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/cron" { _show_cron(console); }
     elif verb == "/channels" { _show_channels(console); }
     elif verb == "/connect" { _show_connect(console, rest); }
+    elif verb == "/docs" { _show_docs(console, rest); }
     elif verb in ["/skills", "/library"] { _show_library(console); }
     elif verb == "/clear" { console.clear(); }
     elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }

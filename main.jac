@@ -27,6 +27,7 @@ import from src.cron {
 }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
+import from src.sigil_docs { list_docs, read_doc }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
 import from src.agent { run_task }
@@ -130,6 +131,12 @@ with entry:__main__ {
     } elif cmd == "recall" {
         q = _arg(argv, 1);
         for m in recollect(q, 8) { print("  (" + m["kind"] + ") " + m["content"]); }
+    } elif cmd == "docs" {
+        # docs           -> list reference topics
+        # docs <topic>   -> print one (fuzzy match)
+        topic = _arg(argv, 1);
+        if topic { print(read_doc(topic)); }
+        else { print(list_docs()); }
     } elif cmd == "eval" {
         # eval <signature> [probe-task]  — grounded verification of a crystallized skill
         sig = _arg(argv, 1); probe = _arg(argv, 2);
@@ -400,6 +407,7 @@ with entry:__main__ {
         print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
         print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
         print("  forget <sig>                remove a skill entirely (all versions + files)");
+        print("  docs [<topic>]              Sigil's own reference (how it works, config, tools)");
         print("  soul                        show identity, config, skills & memory (all graph state)");
         print("  configure <key> <value>     config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold)");
         print("  models list|set|alias|fallback   manage model tiers, aliases & fallback pools");
