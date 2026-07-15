@@ -43,7 +43,12 @@ def _make_session() -> any {
 }
 
 def _prompt(session: any, msg: str) -> str {
-    if session is not None { return str(session.prompt(msg)); }
+    if session is not None {
+        try {
+            import from prompt_toolkit { ANSI }
+            return str(session.prompt(ANSI(msg)));   # lets the prompt carry ANSI colour
+        } except Exception as e { return str(session.prompt(msg)); }
+    }
     return str(input(msg));
 }
 
@@ -211,6 +216,7 @@ def _show_library(console: any) {
 # ---------------------------------------------------------------------------
 glob _STATUS: any = None;    # the live spinner handle, set for the duration of a turn
 glob _STREAMED: bool = False; # did the reply stream any tokens this turn? (skip re-render if so)
+glob _GUTTER: str = chr(27) + "[38;5;141m│" + chr(27) + "[0m ";  # purple left-border on each reply line
 
 def _install_hooks(console: any, session: any) {
     def sink(tool: str, detail: str, ok: bool) {
@@ -223,15 +229,18 @@ def _install_hooks(console: any, session: any) {
         }
     }
     def token_sink(piece: str) {
-        # first token ends the "thinking" phase: stop the spinner, break a line, then
-        # write the reply live, character group by character group.
+        # first token ends the "thinking" phase: stop the spinner, print the "◆ sigil"
+        # header, then stream the reply as a distinct block — a purple left-border gutter
+        # on every line so each turn's answer is clearly bracketed and separated.
         global _STREAMED;
         if not _STREAMED {
             _STREAMED = True;
             if _STATUS is not None { try { _STATUS.stop(); } except Exception as e {} }
-            sys.stdout.write("\n");
+            console.print();
+            console.print("[#a78bfa]◆[/] [dim]sigil[/]");
+            sys.stdout.write(_GUTTER);
         }
-        sys.stdout.write(str(piece));
+        sys.stdout.write(str(piece).replace(chr(10), chr(10) + _GUTTER));
         sys.stdout.flush();
     }
     def approver(command: str) -> bool {
@@ -264,12 +273,15 @@ def _run_and_render(console: any, message: str) {
         r = chat_turn(message);
     }
     if _STREAMED {
-        # tokens already rendered live — just close the block
-        sys.stdout.write("\n\n");
+        # tokens already rendered live in the gutter block — close it and add a
+        # blank line so the next prompt is clearly separated.
+        sys.stdout.write("\n");
         sys.stdout.flush();
+        console.print();
     } else {
         # nothing streamed (empty reply, or an error before the first token) — render it
         console.print();
+        console.print("[#a78bfa]◆[/] [dim]sigil[/]");
         try { console.print(Markdown(str(r["reply"]))); }
         except Exception as e { console.print(Text(str(r["reply"]))); }
         console.print();
@@ -326,10 +338,12 @@ def chat_repl() {
     session = _make_session();
     _install_hooks(console, session);
     _banner(console);
+    # colour the prompt so each user turn stands out from the reply block above it
+    user_prompt = chr(27) + "[38;5;141msigil" + chr(27) + "[0m " + chr(27) + "[1m›" + chr(27) + "[0m ";
     while True {
         line = "";
         try {
-            line = _prompt(session, "sigil › ");
+            line = _prompt(session, user_prompt);
         } except EOFError as e {
             console.print();
             break;
