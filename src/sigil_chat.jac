@@ -6,10 +6,11 @@ MCP, channels, parallel sub-agents), holding a running conversation.
     jac run main.jac -s sigil.session -- chat
     jac run main.jac -s sigil.session -- config
 
-The REPL renders replies as markdown, streams a LIVE trace of every tool the agent
-calls, and prompts inline to approve any shell command the exec policy gates. All of
-it drives the SAME persistent graph as the one-shot commands, so a fact remembered or
-a job scheduled in chat is there for `solve`, cron, and the Observatory too.
+The REPL streams the reply token-by-token, shows a LIVE trace of every tool the agent
+calls (with a thinking spinner between them), and prompts inline to approve any shell
+command the exec policy gates. All of it drives the SAME persistent graph as the one-shot
+commands, so a fact remembered or a job scheduled in chat is there for `solve`, cron, and
+the Observatory too.
 
 Rendering uses `rich`; line editing/history uses `prompt_toolkit` in a real terminal,
 falling back to builtin input() when piped (so it stays scriptable).
@@ -18,7 +19,7 @@ falling back to builtin input() when piped (so it stays scriptable).
 import sys;
 import os;
 import from .sigil { describe_soul, configure, library, recollect, teach }
-import from .chat_agent { chat_turn, chat_reset }
+import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
 import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
@@ -208,7 +209,8 @@ def _show_library(console: any) {
 # model blocks on the network); completed tool calls stream ABOVE it, and it pauses
 # cleanly for the approval prompt so input isn't fighting the animation.
 # ---------------------------------------------------------------------------
-glob _STATUS: any = None;   # the live spinner handle, set for the duration of a turn
+glob _STATUS: any = None;    # the live spinner handle, set for the duration of a turn
+glob _STREAMED: bool = False; # did the reply stream any tokens this turn? (skip re-render if so)
 
 def _install_hooks(console: any, session: any) {
     def sink(tool: str, detail: str, ok: bool) {
@@ -219,6 +221,18 @@ def _install_hooks(console: any, session: any) {
             try { _STATUS.update("[magenta]✦[/magenta] [dim]working — [/dim][" + col + "]" + tool + "[/" + col + "][dim]…[/dim]"); }
             except Exception as e {}
         }
+    }
+    def token_sink(piece: str) {
+        # first token ends the "thinking" phase: stop the spinner, break a line, then
+        # write the reply live, character group by character group.
+        global _STREAMED;
+        if not _STREAMED {
+            _STREAMED = True;
+            if _STATUS is not None { try { _STATUS.stop(); } except Exception as e {} }
+            sys.stdout.write("\n");
+        }
+        sys.stdout.write(str(piece));
+        sys.stdout.flush();
     }
     def approver(command: str) -> bool {
         paused = False;
@@ -231,26 +245,35 @@ def _install_hooks(console: any, session: any) {
         return decided;
     }
     set_trace_sink(sink);
+    set_token_sink(token_sink);
     set_approver(approver);
 }
 
 def _run_and_render(console: any, message: str) {
-    global _STATUS;
+    global _STATUS, _STREAMED;
+    _STREAMED = False;
     r: dict = {};
     if sys.stdin.isatty() {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
         st.start();
         _STATUS = st;
-        r = chat_turn(message);          # chat_turn never raises (it catches internally)
+        r = chat_turn(message);          # streams tokens via the sink; never raises (caught inside)
         try { st.stop(); } except Exception as e {}
         _STATUS = None;
     } else {
         r = chat_turn(message);
     }
-    console.print();
-    try { console.print(Markdown(str(r["reply"]))); }
-    except Exception as e { console.print(Text(str(r["reply"]))); }
-    console.print();
+    if _STREAMED {
+        # tokens already rendered live — just close the block
+        sys.stdout.write("\n\n");
+        sys.stdout.flush();
+    } else {
+        # nothing streamed (empty reply, or an error before the first token) — render it
+        console.print();
+        try { console.print(Markdown(str(r["reply"]))); }
+        except Exception as e { console.print(Text(str(r["reply"]))); }
+        console.print();
+    }
 }
 
 # ---------------------------------------------------------------------------

@@ -36,10 +36,11 @@ jobs:
       - name: Show jac version
         run: jac --version
 
-      # byLLM is bundled in the native binary, but the AG-IR compiler parses YAML
-      # via PyYAML, which is not bundled. Provision it into the project venv.
-      - name: Provision compiler dependency (PyYAML)
-        run: jac install pyyaml
+      # byLLM is bundled in the native binary, but a couple of Python deps are not:
+      # PyYAML (the AG-IR compiler parses YAML) and httpx (byLLM's streaming path
+      # imports it — chat mode streams the reply token-by-token). Provision both.
+      - name: Provision runtime dependencies (PyYAML, httpx)
+        run: jac install pyyaml httpx
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
       # test (present and future) automatically; report_fix_tests.jac is a standalone
