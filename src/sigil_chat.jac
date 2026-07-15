@@ -53,13 +53,49 @@ def _to_int(s: str, dflt: int) -> int {
 # ---------------------------------------------------------------------------
 # rendering helpers
 # ---------------------------------------------------------------------------
+def _version() -> str {
+    # read the project version from jac.toml (one dir up from this package), so the
+    # banner never drifts from the manifest.
+    try {
+        here = os.path.dirname(os.path.abspath(__file__));
+        toml = os.path.join(os.path.dirname(here), "jac.toml");
+        with open(toml, "r") as f { lines = f.read().split(chr(10)); }
+        for ln in lines {
+            t = ln.strip();
+            if t.startswith("version") and ("=" in t) { return t.split("=")[1].strip().strip('"').strip("'"); }
+        }
+    } except Exception as e {}
+    return "0.1.0";
+}
+
 def _banner(console: any) {
+    # The hexagonal graph mark from the website (purple #a78bfa outline, cyan #22d3ee
+    # center node), the SIGIL wordmark, version, and the base config — side by side.
     s = describe_soul();
     wi = workspace_info();
     cm = str(s["chat_model"]) if s["chat_model"] else "unset";
+    logo = (
+        "[#a78bfa]    ◆    [/]\n"
+        + "[#a78bfa]   ╱ ╲   [/]\n"
+        + "[#a78bfa]  ◆   ◆  [/]\n"
+        + "[#a78bfa]  │ [/][bold #22d3ee]◉[/][#a78bfa] │  [/]\n"
+        + "[#a78bfa]  ◆   ◆  [/]\n"
+        + "[#a78bfa]   ╲ ╱   [/]\n"
+        + "[#a78bfa]    ◆    [/]"
+    );
+    info = (
+        "[bold #a78bfa]S I G I L[/]  [dim]v" + _version() + "[/]\n"
+        + "[dim]the whole agent, from one conversation[/]\n\n"
+        + "[dim]model    [/] " + cm + "\n"
+        + "[dim]workspace[/] " + str(wi["root"]) + "\n"
+        + "[dim]sandbox  [/] " + str(wi["sandbox_mode"]) + "\n"
+        + "[dim]skills   [/] " + str(s["skills"])
+    );
+    t = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2));
+    t.add_column(); t.add_column();
+    t.add_row(logo, info);
     console.print();
-    console.print("[bold magenta]  ◆ sigil[/bold magenta] [dim]· chat — the whole agent, from one conversation[/dim]");
-    console.print("  [dim]model[/dim] " + cm + "  [dim]workspace[/dim] " + str(wi["root"]) + "  [dim]sandbox[/dim] " + str(wi["sandbox_mode"]) + "  [dim]skills[/dim] " + str(s["skills"]));
+    console.print(t);
     console.print("  [dim]just say what you want — files, shell, web, cron, memory, sub-agents. /help · /exit[/dim]");
     console.print();
 }
