@@ -32,6 +32,9 @@ import from .sigil_subagents { spawn_subagent, spawn_parallel }
 glob chat_llm: any = Model(model_name="gpt-4o-mini");
 glob CHAT_HISTORY: list = [];
 glob CHAT_INFO: dict = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
+glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
+
+def set_token_sink(fn: any) -> None { global _TOKEN_SINK; _TOKEN_SINK = fn; }
 
 # ---------------------------------------------------------------------------
 # Bridge tools — thin wrappers over the graph-native subsystems, each with a
@@ -210,7 +213,8 @@ def chat_agent(message: str) -> str by chat_llm(
     ],
     conversation=CHAT_HISTORY,
     incl_info=CHAT_INFO,
-    max_react_iterations=14
+    max_react_iterations=14,
+    stream=True
 );
 
 # ---------------------------------------------------------------------------
@@ -238,16 +242,23 @@ def _refresh_info(message: str) -> None {
 
 def chat_turn(message: str) -> dict {
     # One conversational turn. Rebinds the chat model from the graph (so
-    # `configure chat_model` applies live), injects the soul via incl_info,
-    # runs the ReAct agent, and returns the reply plus the tool trace.
+    # `configure chat_model` applies live), injects the soul via incl_info, runs the
+    # ReAct agent, and STREAMS the reply token-by-token: chat_agent is `stream=True`,
+    # so it returns a generator; we emit each token to the token sink (the REPL renders
+    # it live) while accumulating the full reply for history + the return value.
     global chat_llm, CHAT_HISTORY;
     chat_llm = bind_chat_model();
     _refresh_info(message);
     drain_trace();   # clear any stale trace
+    reply = "";
     try {
-        reply = chat_agent(message);
+        for tok in chat_agent(message) {
+            piece = str(tok);
+            reply += piece;
+            if _TOKEN_SINK is not None { try { _TOKEN_SINK(piece); } except Exception as e {} }
+        }
     } except Exception as e {
-        reply = "⚠ agent error: " + str(e)[:300];
+        if not reply { reply = "⚠ agent error: " + str(e)[:300]; }
     }
     # keep history bounded (last ~16 turns)
     if len(CHAT_HISTORY) > 32 { CHAT_HISTORY = CHAT_HISTORY[-32:]; }
