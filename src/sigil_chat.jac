@@ -311,9 +311,9 @@ def setup_wizard() {
     console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
     console.print();
     steps = [
-        ["chat_model", "Which model powers chat mode? (the one you'll talk to)", "gpt-4o-mini"],
-        ["frontier_model", "Which model should build new skills? (the smart one)", "gpt-4o"],
-        ["small_model", "Which model runs skills day-to-day? (cheap or fully local)", "ollama_chat/qwen3:8b"],
+        ["chat_model", "Which model do you TALK to in chat? (use a strong one)", "gpt-4o"],
+        ["frontier_model", "Which model builds new skills? (also strong)", "gpt-4o"],
+        ["small_model", "Which cheap/local model RUNS crystallized skills?", "gpt-4o-mini"],
         ["persona", "In a line, how should your agent describe itself? (optional)", ""]
     ];
     for st in steps {
