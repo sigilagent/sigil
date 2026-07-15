@@ -140,6 +140,9 @@ node Soul {
     has tool_profile: str = "";       # active profile = a group whose tools join the allow-list
     has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
     has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
+    has chat_model: str = "";          # conversational (chat-mode) model tier; falls back to small_model
+    has workspace: str = "";           # sandboxed workspace dir the file tools are jailed to (default ~/.sigil/workspace)
+    has sandbox_mode: str = "jail";    # how ws_exec is contained: jail (cwd-confined subprocess) | docker | off
 }
 
 node Spec {
@@ -234,6 +237,16 @@ def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
         if mm { models.append(Model(model_name=mm)); }
     }
     return ModelPool(models=models, strategy="fallback");
+}
+
+def bind_chat_model() -> any {
+    # The model that powers chat-mode + sub-agents: the `chat` tier, falling back
+    # to small, then a sane default. Rebound from the graph so `configure chat_model`
+    # takes effect on the next turn (no restart). Returns a Model, or a ModelPool
+    # when the chat tier has a fallback chain configured.
+    soul = awaken();
+    name = soul.chat_model if soul.chat_model else (soul.small_model if soul.small_model else "gpt-4o-mini");
+    return _bind_tier(soul, "chat", name);
 }
 
 def model_alias(name: str, target: str) -> str {
@@ -712,8 +725,10 @@ def describe_soul() -> dict {
         "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
         "frontier_model": soul.frontier_model, "small_model": soul.small_model,
         "router_model": (soul.router_model if soul.router_model else soul.small_model),
+        "chat_model": (soul.chat_model if soul.chat_model else soul.small_model),
+        "workspace": (soul.workspace if soul.workspace else "~/.sigil/workspace"),
+        "sandbox_mode": (soul.sandbox_mode if soul.sandbox_mode else "jail"),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
-        "channels": soul.channels,
         "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
         "skills": nskills
@@ -744,21 +759,24 @@ def configure(key: str, value: str) -> str {
         soul.recall_mode = value;
     }
     elif key == "embed_model" { soul.embed_model = value; }
+    elif key == "chat_model" { soul.chat_model = value; }
+    elif key == "workspace" { soul.workspace = value; }
+    elif key == "sandbox_mode" {
+        if value not in ["jail", "docker", "off"] { return "sandbox_mode must be one of: jail | docker | off"; }
+        soul.sandbox_mode = value;
+    }
     else { return "unknown key: " + key; }
     return key + " = " + value;
 }
 
 # ---------------------------------------------------------------------------
-# Conversational chat — a streaming, tool-using turn. The user talks to the
-# agent in its persona; when they ask to change config or remember something,
-# the model calls one of the config tools below (which mutate the graph) and
-# confirms. `stream=True` returns a token generator the CLI/gateway renders live.
+# Config-mutation tools — the chat agent (chat_agent.jac) calls these to change
+# the agent's own settings mid-conversation: the model tier, persona, or prompt
+# mode. Each just wraps `configure`, so the change persists on the graph.
 # ---------------------------------------------------------------------------
-glob chat_history: list[dict] = [];
-
 def cfg_set_model(tier: str, name: str) -> str { return configure(tier + "_model", name); }
-sem cfg_set_model = "Change one of the agent's three model tiers.";
-sem cfg_set_model.tier = "Which tier: 'frontier' (builds skills), 'small' (runs them), or 'router'.";
+sem cfg_set_model = "Change one of the agent's model tiers.";
+sem cfg_set_model.tier = "Which tier: 'frontier' (builds skills), 'small' (runs them), 'router', or 'chat'.";
 sem cfg_set_model.name = "The model name, e.g. 'gpt-4o', 'gpt-4o-mini', or 'ollama_chat/qwen3:8b'.";
 
 def cfg_set_persona(text: str) -> str { return configure("persona", text); }
@@ -768,28 +786,6 @@ sem cfg_set_persona.text = "The new persona description.";
 def cfg_set_prompt_mode(mode: str) -> str { return configure("prompt_mode", mode); }
 sem cfg_set_prompt_mode = "Set how much context wraps the agent: 'full', 'minimal', or 'none'.";
 sem cfg_set_prompt_mode.mode = "One of: full | minimal | none.";
-
-def cfg_remember(fact: str) -> str { return teach(fact, "fact"); }
-sem cfg_remember = "Store a durable fact the agent should remember about the user or their work.";
-sem cfg_remember.fact = "The fact to remember, as one short sentence.";
-
-sem chat_reply = "You are the user's own Sigil agent. Chat with them in your persona (given in ABOUT) — concise, warm, direct. When they ask you to change a setting (a model tier, your persona, the prompt mode) or to remember something, CALL the matching tool and then confirm what you changed in one short sentence. Otherwise, just reply — do not call a tool.";
-def chat_reply(message: str, about: str) -> str by small(
-    stream=True, conversation=chat_history,
-    tools=[cfg_set_model, cfg_set_persona, cfg_set_prompt_mode, cfg_remember]
-);
-sem chat_reply.message = "What the user just said.";
-sem chat_reply.about = "Who you are — your persona and operating principles.";
-
-def chat_context() -> str {
-    # the "about you" the chat model speaks from — persona + principles, from the graph
-    soul = awaken();
-    parts: list = ["Persona: " + (soul.persona if soul.persona else "a pragmatic, helpful agent")];
-    if soul.ethos { parts.append("Principles: " + "; ".join([str(e) for e in soul.ethos])); }
-    return "\n".join(parts);
-}
-
-def chat_reset() { global chat_history; chat_history = []; }
 
 # --- Tool policy (allow / deny / groups / profile) --------------------------
 def tool_group_set(name: str, csv: str) -> str {

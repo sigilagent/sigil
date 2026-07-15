@@ -24,8 +24,8 @@ noted, not built).
 | System prompt assembly (`full`/`minimal`/`none` modes) | crystallizer contract + ethos woven into AG-IR authoring | 🔶 |
 | Sessions (dm scope, daily reset, transcripts) | **`Session` nodes** — per-`dm_scope` transcripts, daily reset, `session show/reset/list` | ✅ |
 | Compaction / pruning (prompt-cache economics) | byLLM history primitive; memory injected at run-time not baked in | 🔶 |
-| Command queue (steer/queue/followup), streaming | single serialized `solve`; token stream via Observatory | 🔶 |
-| Multi-agent / bindings / sub-agents | `walker:priv` per-user root; crystallized sub-procedures | 🔶 |
+| Command queue (steer/queue/followup), streaming | conversational `chat` loop with a LIVE per-tool-call trace + inline approvals | 🔶 |
+| Multi-agent / bindings / sub-agents | **`spawn_parallel` / `spawn_subagent`** — concurrent `SubAgent` walkers via Jac `flow`/`wait` over `root spawn`; plus `walker:priv` per-user root | ✅ |
 | Standing orders / commitments | cron `task` = the standing order; `Memory` = commitments | 🔶 |
 
 ## Automation / Cron  ✅ (explicit ask — fully built)
@@ -52,17 +52,18 @@ noted, not built).
 | `message send/broadcast` | `message_send(channel, peer, text)` | ✅ |
 | Webhook channel | **`api_inbound` HTTP endpoint** (ready webhook) | ✅ |
 | dm scope routing (main/per-peer) | `Channel.dm_scope` | ✅ |
-| 27 concrete adapters (discord/slack/telegram/whatsapp/matrix/imessage/…) | any adapter POSTs to `inbound()` / delivers `outbound` | 🔶 (the plug-in long tail) |
+| 27 concrete adapters (discord/slack/telegram/whatsapp/matrix/imessage/…) | any adapter POSTs to **`api_inbound`** / delivers `outbound`; **guided setup** for discord/telegram/whatsapp/slack (`channel setup`/`connect`, `sigil_channels_setup.jac`) | ✅ (contract + guides) 🔶 (adapter long tail) |
 | Reactions / threads / polls / edits | **`react` / `edit` + `Message.thread_id`/`mid`** on the graph (polls 📋) | ✅ |
 
 ## Tools / "superpowers"
 
 | OpenClaw | Sigil | Status |
 |---|---|---|
-| Tool registration (`registerTool`) | AG-IR tool nodes + byLLM `tools=[…]` slots | ✅ |
-| MCP tools (bundle plugins) | **byLLM `McpClient`** + `add-mcp` + rung-0 dispatch | ✅ |
-| `exec`/`bash` + approval gate | `check_exec` gate (`approvals.jac`) + embodied command tools | ✅ (gate) / 🔶 (runner) |
-| web_search / web_fetch | embodiment rung-0 `_live_tool` (real HTTP) + MCP search servers | 🔶 |
+| Tool registration (`registerTool`) | AG-IR tool nodes + byLLM `tools=[…]` slots; **chat-mode ReAct tool-belt** (`chat_agent.jac`) | ✅ |
+| MCP tools (bundle plugins) | **byLLM `McpClient`** + `add-mcp` + rung-0 dispatch; `mcp_call` chat tool | ✅ |
+| `exec`/`bash` + approval gate | **`ws_exec`** — `check_exec` gate + sandboxed runner (`jail`/`docker`), inline chat approvals | ✅ |
+| file read/write/edit (sandbox-aware) | **`ws_read/ws_write/ws_edit/ws_list`** — jailed to the workspace (`sigil_workspace.jac`) | ✅ |
+| web_search / web_fetch | **`web_search`** (keyless) + **`web_fetch`** (real HTTP, SSRF-guarded) chat tools | ✅ |
 | Tool groups + `allow`/`deny`/`profile` | **policy on `Soul`** (allow/deny/groups/profile); enforced at crystallizer binding + run-time dispatch | ✅ |
 | browser, image/video/music gen, pdf, tts | via MCP servers or a provider plugin | 🔶 |
 | ACP harnesses (Claude Code/Codex/Cursor) | crystallized OSP agents are the harness; ACP bridge 📋 | 🔶 |
@@ -74,7 +75,7 @@ noted, not built).
 | exec-approvals (`deny`/`allowlist`/`full` × `off`/`on-miss`/`always`) | **`approvals.jac`** — `ExecPolicy` + allowlist + pending-approval flow | ✅ |
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
 | Elevated / break-glass | **`approvals elevate <min>` / `deescalate`** — time-boxed bypass on `ExecPolicy`, every allow audited (`approvals audit`) | ✅ |
-| Sandbox (docker/ssh/openshell) | crystallized runs isolated in a **subprocess** (graph-state isolation, not a security sandbox) | 🔶 |
+| Sandbox (docker/ssh/openshell) | **workspace jail** (file tools path-confined) + **`sandbox_mode` = jail \| docker \| off** (`docker` = `--network none --cap-drop ALL --pids-limit`), on top of the exec gate; crystallized runs also subprocess-isolated | ✅ |
 | Secrets / SecretRefs | **`SecretRef` nodes** (name -> env; value never stored) + `secret:` resolve at run-time + `redact_secrets` | ✅ |
 | Gateway auth (token/password/trusted-proxy) | jac-cloud `walker:priv` + JWT; token/proxy modes 📋 | 🔶 |
 | SSRF / egress proxy | 📋 | 📋 |
@@ -114,7 +115,7 @@ noted, not built).
 | OpenClaw | Sigil | Status |
 |---|---|---|
 | Gateway process (one per host, WS + HTTP) | `jac start observatory.jac` (jac-cloud) — API + client on one port | ✅ |
-| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/…) + **interactive `chat` REPL** and **`config` settings editor** (`sigil_chat.jac`, rich + prompt_toolkit) | ✅ |
+| CLI (~50 commands) | `main.jac` (solve/library/soul/configure/teach/recall/mcp/register-skill/cron/channel/…) + a **conversational tool-using `chat` agent** (full tool-belt, live tool trace, inline approvals) and **`config` editor** (`sigil_chat.jac`, rich + prompt_toolkit) | ✅ |
 | Web Control UI | **Observatory** — live agent-graph + 100% token observability | ✅ |
 | OpenAI-compatible `/v1/chat/completions`, `/tools/invoke` | **`api_chat_completions` + `api_models` + `api_tools_invoke`** (`walker:pub`, OpenAI shape) | ✅ |
 | Bonjour/mDNS discovery, tailscale, multiple gateways | jac-cloud deploy features; discovery 📋 | 🔶 |
@@ -127,7 +128,10 @@ noted, not built).
 
 - **Built graph-native + tested (✅):** the agent loop, Soul/config, three-layer memory,
   crystallized skills, MCP tools, **cron** (with a native binary), **channels** (the
-  inbound→reply loop), **hooks**, **exec-approvals**, the Observatory Control-UI.
+  inbound→reply loop + guided provider setup), **hooks**, **exec-approvals**, the
+  Observatory Control-UI, and — new — a **conversational chat-mode agent**: a sandboxed
+  workspace (jailed file tools + gated/sandboxed `ws_exec`), SSRF-guarded web tools,
+  cron/memory/skill tools usable from chat, and **parallel sub-agents via `flow`/`wait`**.
 - **Rides an existing mechanism (🔶):** all 52 providers + local models (byLLM/litellm),
   tools (MCP + embodiment), the 27 channel adapters (each just calls `inbound()`), plugins
   (skills + MCP + Jac modules). These are *plugins* in OpenClaw too — not core.
