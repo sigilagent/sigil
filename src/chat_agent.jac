@@ -158,7 +158,10 @@ Guidance:
 - Files & shell: use ws_read/ws_write/ws_edit/ws_list and ws_exec — only for real file or
   program work, never to echo text. Everything is jailed to the workspace; shell is
   approval-gated, so don't send trivial commands through it — if a command is blocked, say so.
-- Web: use web_search then web_fetch to get current information.
+- Web: web_search covers the open web (it needs a provider key — if it reports one is
+  missing, say so). web_fetch reads a specific URL, INCLUDING keyless JSON APIs — for
+  "new PRs/issues in a repo" fetch GitHub's API directly, e.g.
+  web_fetch("https://api.github.com/repos/<org>/<repo>/pulls?state=open"), no key needed.
 - Recurring or future work: use schedule_task (cron). "every morning", "in 2 hours",
   "on a cron" all map to it. Use list_scheduled / cancel_scheduled to manage jobs.
 - Memory: remember_fact for durable facts the user will want later; recall_memory to
