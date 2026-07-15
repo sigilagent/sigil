@@ -131,6 +131,24 @@ $JAC channel connect tg telegram     # registers the Channel node + a token Secr
 Supported guides: **discord · telegram · whatsapp · slack** (each rides the same
 `api_inbound` contract; the per-provider adapter is the only glue).
 
+## Documentation
+
+The reference lives in [`docs/reference/`](docs/reference/) — plain markdown, browsable
+here on GitHub, and **loaded at runtime by the agent itself**, so what you read is exactly
+what Sigil reads to answer questions about itself:
+
+- [overview](docs/reference/overview.md) · [configuration](docs/reference/configuration.md)
+  · [chat & tools](docs/reference/chat-and-tools.md)
+  · [workspace & sandbox](docs/reference/workspace-and-sandbox.md)
+- [automation & cron](docs/reference/automation-and-cron.md)
+  · [channels](docs/reference/channels.md)
+  · [memory & skills](docs/reference/memory-and-skills.md)
+  · [models](docs/reference/models.md)
+
+Ask in chat ("how does the sandbox work?") and Sigil answers from these via its
+`read_docs` tool; or read them from the CLI with `sigil docs [<topic>]` (in the REPL,
+`/docs`).
+
 ## Layout
 
 The two entrypoints live at the repo root; the agent itself is the `src/` package.
@@ -145,6 +163,7 @@ src/                     the agent package
   sigil_workspace.jac      the sandbox: jailed file tools, gated exec, SSRF-guarded web
   sigil_subagents.jac      parallel sub-agents (flow/wait over root-spawned SubAgent walkers)
   sigil_channels_setup.jac channel connection guides + one-call graph bootstrap
+  sigil_docs.jac           self-docs loader — serves docs/reference to the read_docs tool + CLI
   sigil_runtime.jac        disk + OS glue: persist a lowered module, run it isolated
   sigil_mcp.jac            adapter over byLLM's native McpClient — discovery + rung-0 dispatch
   agent.jac                run_task hook bus + the OpenAI-compatible walkers (api_*)

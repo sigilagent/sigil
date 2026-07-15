@@ -21,6 +21,7 @@ import from .agent { run_task }
 import from .cron { cron_add, cron_list, cron_remove }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
+import from .sigil_docs { list_docs, read_doc }
 import from .sigil_mcp { dispatch }
 import from .sigil_workspace {
     ws_read, ws_write, ws_edit, ws_list, ws_exec, web_fetch, web_search,
@@ -129,6 +130,17 @@ def setup_channel(name: str, kind: str) -> str {
     return "registered channel '" + str(r["name"]) + "' (token env " + str(r["token_env"]) + ", set=" + str(r["token_set"]) + ")\n\n" + str(r["guide"]);
 }
 
+sem doc_index = "List Sigil's own reference topics (its documentation about how Sigil works). Call this to see what self-documentation is available.";
+def doc_index() -> str { _trace("docs", "index"); return list_docs(); }
+
+sem read_docs = """Read one of Sigil's reference docs to answer a question about how SIGIL
+ITSELF works — its configuration keys, tools, the sandbox, cron, channels, memory, skills,
+or models. Prefer this over guessing when the user asks about the agent's own capabilities
+or settings. Topics: overview, configuration, chat-and-tools, workspace-and-sandbox,
+automation-and-cron, channels, memory-and-skills, models (fuzzy match is fine).""";
+sem read_docs.topic = "The reference topic to read (e.g. 'sandbox', 'configuration', 'models').";
+def read_docs(topic: str) -> str { _trace("docs", topic); return read_doc(topic); }
+
 sem send_message = "Send a message to a peer on a configured channel (e.g. deliver a result out-of-band).";
 sem send_message.channel = "The channel name.";
 sem send_message.peer = "The recipient/peer id on that channel.";
@@ -169,6 +181,10 @@ Guidance:
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
 - Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
 - External tools: mcp_call for connected MCP servers.
+- About YOURSELF: when the user asks how Sigil works, what a config key/tool does, or
+  about the sandbox/cron/channels/memory/models, call read_docs (or doc_index) and answer
+  from the reference — don't guess. For the user's CURRENT settings, use what you already
+  know from your standing context (persona, workspace, sandbox mode) rather than the docs.
 
 Reply in concise GitHub-flavored markdown. Report what you actually did, including
 paths and command results. If a tool fails, say what failed and what you'll try next.""";
@@ -180,7 +196,7 @@ def chat_agent(message: str) -> str by chat_llm(
         remember_fact, recall_memory, learn_skill, list_skills,
         mcp_call, send_message, connect_channel, setup_channel,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
-        spawn_subagent, spawn_parallel
+        doc_index, read_docs, spawn_subagent, spawn_parallel
     ],
     conversation=CHAT_HISTORY,
     incl_info=CHAT_INFO,
