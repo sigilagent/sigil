@@ -1,24 +1,32 @@
-"""Sigil interactive CLI — a Claude-style chat REPL and an interactive settings
-editor. Both drive the SAME persistent graph as the one-shot commands, so a task
-solved in chat crystallizes a skill you can reuse from `solve`, and edits made in
-`config` persist on the Soul node. Run them inside a session:
+"""Sigil interactive chat — a conversational, tool-using REPL you can run the whole
+agent from. Unlike the one-shot `solve`, this drives `chat_agent`: a single ReAct
+loop with the full tool-belt (workspace files + shell, web, cron, memory, skills,
+MCP, channels, parallel sub-agents), holding a running conversation.
 
     jac run main.jac -s sigil.session -- chat
     jac run main.jac -s sigil.session -- config
 
-Rendering uses `rich`; line editing/history uses `prompt_toolkit` when stdin is a
-real terminal, falling back to builtin input() when piped (so it stays scriptable).
+The REPL renders replies as markdown, streams a LIVE trace of every tool the agent
+calls, and prompts inline to approve any shell command the exec policy gates. All of
+it drives the SAME persistent graph as the one-shot commands, so a fact remembered or
+a job scheduled in chat is there for `solve`, cron, and the Observatory too.
+
+Rendering uses `rich`; line editing/history uses `prompt_toolkit` in a real terminal,
+falling back to builtin input() when piped (so it stays scriptable).
 """
 
 import sys;
 import os;
-import sys;
-import from .sigil { describe_soul, configure, library, recollect, teach, chat_reply, chat_context, chat_reset }
-import from .agent { run_task }
+import from .sigil { describe_soul, configure, library, recollect, teach }
+import from .chat_agent { chat_turn, chat_reset }
+import from .cron { cron_list }
+import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
+import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
 import from rich.console { Console }
 import from rich.panel { Panel }
 import from rich.table { Table }
 import from rich.text { Text }
+import from rich.markdown { Markdown }
 
 # ---------------------------------------------------------------------------
 # input plumbing — prompt_toolkit in a TTY (history + arrows), input() otherwise
@@ -44,35 +52,108 @@ def _to_int(s: str, dflt: int) -> int {
 # ---------------------------------------------------------------------------
 # rendering helpers
 # ---------------------------------------------------------------------------
-def _banner(console: any, s: dict) {
-    fm = str(s["frontier_model"]) if s["frontier_model"] else "unset";
-    sm = str(s["small_model"]) if s["small_model"] else "unset";
+def _banner(console: any) {
+    s = describe_soul();
+    wi = workspace_info();
+    cm = str(s["chat_model"]) if s["chat_model"] else "unset";
     console.print();
-    console.print("[bold magenta]  ◆ sigil[/bold magenta] [dim]· self-evolving agent[/dim]");
-    console.print("  [dim]frontier[/dim] " + fm + "  [dim]small[/dim] " + sm + "  [dim]skills[/dim] " + str(s["skills"]));
-    console.print("  [dim]talk to it, or ask it to change a setting · /solve for a task · /help · /exit[/dim]");
+    console.print("[bold magenta]  ◆ sigil[/bold magenta] [dim]· chat — the whole agent, from one conversation[/dim]");
+    console.print("  [dim]model[/dim] " + cm + "  [dim]workspace[/dim] " + str(wi["root"]) + "  [dim]sandbox[/dim] " + str(wi["sandbox_mode"]) + "  [dim]skills[/dim] " + str(s["skills"]));
+    console.print("  [dim]just say what you want — files, shell, web, cron, memory, sub-agents. /help · /exit[/dim]");
     console.print();
 }
 
 def _help(console: any) {
     rows = [
-        ["/solve <task>", "run a task (crystallize + execute a skill)"],
-        ["/reset", "start a fresh conversation"],
+        ["/help", "show this help"],
         ["/soul", "identity, models, skills & memory"],
         ["/config", "edit settings interactively"],
-        ["/model <tier> <name>", "set frontier|small|router model"],
-        ["/library", "list crystallized skills"],
-        ["/teach <fact>", "store a durable memory"],
+        ["/tools", "the tool-belt the agent can use"],
+        ["/workspace", "show the sandboxed workspace"],
+        ["/sandbox <jail|docker|off>", "set exec sandbox mode"],
+        ["/cron", "list scheduled jobs"],
+        ["/channels", "channels: supported + configured"],
+        ["/connect <kind>", "how to connect discord|telegram|whatsapp|slack"],
+        ["/skills", "list crystallized skills"],
+        ["/model <tier> <name>", "set frontier|small|router|chat model"],
+        ["/remember <fact>", "store a durable memory"],
         ["/recall <query>", "search memories"],
+        ["/reset", "clear the conversation (keeps graph)"],
         ["/clear", "clear the screen"],
-        ["/help", "show this help"],
         ["/exit", "quit (also Ctrl-D)"]
     ];
     console.print();
     console.print("[bold]commands[/bold]");
-    for r in rows { console.print("  [cyan]" + r[0].ljust(22) + "[/cyan] [dim]" + r[1] + "[/dim]"); }
-    console.print("  [dim]just talk to it — it replies live, and can change its own settings when you ask.[/dim]");
+    for r in rows { console.print("  [cyan]" + r[0].ljust(28) + "[/cyan] [dim]" + r[1] + "[/dim]"); }
+    console.print("  [dim]anything else is a message to the agent — it will use its tools to act.[/dim]");
     console.print();
+}
+
+def _tool_style(tool: str) -> str {
+    warm = ["exec", "write", "edit", "schedule", "unschedule", "message", "learn"];
+    return "yellow" if tool in warm else "cyan";
+}
+
+def _show_tools(console: any) {
+    groups = [
+        ["files", "ws_list · ws_read · ws_write · ws_edit"],
+        ["shell", "ws_exec  (sandboxed + approval-gated)"],
+        ["web", "web_search · web_fetch  (SSRF-guarded)"],
+        ["cron", "schedule_task · list_scheduled · cancel_scheduled"],
+        ["memory", "remember_fact · recall_memory"],
+        ["skills", "learn_skill · list_skills"],
+        ["sub-agents", "spawn_subagent · spawn_parallel  (flow/wait, concurrent)"],
+        ["external", "mcp_call · send_message"]
+    ];
+    t = Table(show_header=True, header_style="dim", box=None, pad_edge=False);
+    t.add_column("group"); t.add_column("tools");
+    for g in groups { t.add_row("[cyan]" + g[0] + "[/cyan]", "[dim]" + g[1] + "[/dim]"); }
+    console.print(); console.print(t); console.print();
+}
+
+def _show_workspace(console: any) {
+    wi = workspace_info();
+    console.print();
+    console.print("[bold]workspace[/bold] " + str(wi["root"]));
+    console.print("  [dim]sandbox_mode[/dim] " + str(wi["sandbox_mode"]) + "   [dim]docker[/dim] " + ("available" if wi["docker"] else "n/a") + "   [dim]items[/dim] " + str(wi["items"]));
+    console.print("  [dim]file tools are jailed here; shell runs approval-gated" + (" in docker" if wi["sandbox_mode"] == "docker" else " cwd-confined") + "[/dim]");
+    console.print();
+}
+
+def _show_channels(console: any) {
+    ov = channels_overview();
+    console.print();
+    console.print("[bold]channels[/bold]");
+    console.print("  [dim]supported[/dim]  " + ", ".join([str(k) for k in list(ov["supported"])]));
+    configured = list(ov["configured"]);
+    if configured {
+        t = Table(show_header=True, header_style="dim", box=None, pad_edge=False);
+        t.add_column("name"); t.add_column("kind"); t.add_column("on"); t.add_column("msgs", justify="right");
+        for c in configured { t.add_row(str(c["name"]), str(c["kind"]), ("on" if c["enabled"] else "off"), str(c["messages"])); }
+        console.print(t);
+    } else {
+        console.print("  [dim](none configured — /connect <kind> for setup steps)[/dim]");
+    }
+    console.print();
+}
+
+def _show_connect(console: any, kind: str) {
+    if not kind { console.print("[dim]  usage: /connect <discord|telegram|whatsapp|slack>[/dim]"); return; }
+    console.print();
+    console.print(Panel(Text(channel_setup_guide(kind)), title="[dim]connect " + kind + "[/dim]",
+                        title_align="left", border_style="grey37", padding=(0, 1)));
+    console.print();
+}
+
+def _show_cron(console: any) {
+    js = cron_list();
+    if not js { console.print("[dim]  (no scheduled jobs)[/dim]"); return; }
+    t = Table(show_header=True, header_style="dim", box=None, pad_edge=False);
+    t.add_column("name"); t.add_column("when"); t.add_column("on"); t.add_column("runs", justify="right"); t.add_column("task");
+    for j in js {
+        t.add_row(str(j["name"]), str(j["kind"]) + " " + str(j["spec"]), ("on" if j["enabled"] else "off"), str(j["runs"]), str(j["task"]));
+    }
+    console.print(); console.print(t); console.print();
 }
 
 def _show_soul(console: any) {
@@ -80,8 +161,8 @@ def _show_soul(console: any) {
     console.print();
     console.print("[bold magenta]soul[/bold magenta] " + str(s["name"]));
     console.print("  [dim]persona [/dim] ", Text(str(s["persona"]) if s["persona"] else "(unset)"));
-    console.print("  [dim]frontier[/dim] " + str(s["frontier_model"]) + "  [dim]small[/dim] " + str(s["small_model"]) + "  [dim]router[/dim] " + str(s["router_model"]));
-    console.print("  [dim]auto-eval[/dim] " + ("on" if s["auto_eval"] else "off") + "  [dim]threshold[/dim] " + str(s["eval_threshold"]) + "  [dim]skills[/dim] " + str(s["skills"]));
+    console.print("  [dim]models  [/dim] chat=" + str(s["chat_model"]) + "  frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
+    console.print("  [dim]sandbox [/dim] " + str(s["sandbox_mode"]) + "   [dim]workspace[/dim] " + str(s["workspace"]) + "   [dim]skills[/dim] " + str(s["skills"]));
     eth = list(s["ethos"]);
     if eth {
         console.print("  [dim]ethos[/dim]");
@@ -107,47 +188,31 @@ def _show_library(console: any) {
     console.print(t);
 }
 
-def _status_line(trace: str) -> str {
-    # one compact line describing what routing did, derived from the run trace
-    verb = "";
-    if "MISS -> crystallized" in trace { verb = "crystallized a new skill"; }
-    elif "PARTIAL -> mutated" in trace { verb = "adapted an existing skill"; }
-    elif "HIT " in trace { verb = "reused a crystallized skill"; }
-    if "small-model FAIL" in trace { verb += " · recovered a failed run"; }
-    if "relearn" in trace { verb += " · relearned"; }
-    if ("DONE ok" not in trace) and verb { verb += " · [red]did not complete[/red]"; }
-    return verb;
+# ---------------------------------------------------------------------------
+# live tool trace + inline exec approver (wired into the workspace tools)
+# ---------------------------------------------------------------------------
+def _install_hooks(console: any, session: any) {
+    def sink(tool: str, detail: str, ok: bool) {
+        mark = "✓" if ok else "✗";
+        col = _tool_style(tool) if ok else "red";
+        console.print("  [dim]" + mark + "[/dim] [" + col + "]" + tool.ljust(11) + "[/" + col + "] [dim]" + str(detail) + "[/dim]");
+    }
+    def approver(command: str) -> bool {
+        console.print("  [yellow]⚠ approve shell[/yellow] [dim]" + command + "[/dim]");
+        try { ans = str(_prompt(session, "    run this? [y/N] ")).strip().lower(); }
+        except Exception as e { return False; }
+        return ans in ["y", "yes"];
+    }
+    set_trace_sink(sink);
+    set_approver(approver);
 }
 
-def _run_and_render(console: any, task: str) {
-    r: dict = {};
-    with console.status("[dim]thinking…[/dim]", spinner="dots") as _st {
-        r = run_task(task, "");
-    }
-    st = _status_line(str(r["trace"]));
-    if st { console.print("[dim]  " + st + "[/dim]"); }
-    console.print(Panel(Text(str(r["result"])), title="[dim]" + str(r["signature"]) + "[/dim]",
-                        title_align="left", border_style="grey37", padding=(0, 1)));
+def _run_and_render(console: any, message: str) {
+    r = chat_turn(message);
     console.print();
-}
-
-def _stream_chat(console: any, message: str) {
-    # a streaming, tool-using conversational turn — tokens are rendered live as they
-    # arrive; if the user asks to change config or remember something, the model calls
-    # a tool (which mutates the graph) mid-stream and confirms.
-    about = chat_context();
-    sys.stdout.write("\n  ◆ ");
-    sys.stdout.flush();
-    try {
-        for tok in chat_reply(message, about) {
-            sys.stdout.write(str(tok));
-            sys.stdout.flush();
-        }
-    } except Exception as e {
-        console.print("[red]  (chat error: " + str(e)[:140] + ")[/red]");
-    }
-    sys.stdout.write("\n\n");
-    sys.stdout.flush();
+    try { console.print(Markdown(str(r["reply"]))); }
+    except Exception as e { console.print(Text(str(r["reply"]))); }
+    console.print();
 }
 
 # ---------------------------------------------------------------------------
@@ -161,16 +226,21 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb in ["/help", "/?", "/h"] { _help(console); }
     elif verb == "/soul" { _show_soul(console); }
     elif verb == "/config" { config_menu(); }
-    elif verb == "/library" { _show_library(console); }
+    elif verb == "/tools" { _show_tools(console); }
+    elif verb == "/workspace" { _show_workspace(console); }
+    elif verb == "/cron" { _show_cron(console); }
+    elif verb == "/channels" { _show_channels(console); }
+    elif verb == "/connect" { _show_connect(console, rest); }
+    elif verb in ["/skills", "/library"] { _show_library(console); }
     elif verb == "/clear" { console.clear(); }
-    elif verb in ["/solve", "/do"] {
-        if rest { _run_and_render(console, rest); }
-        else { console.print("[dim]  usage: /solve <task> — run a task (crystallize + execute)[/dim]"); }
+    elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }
+    elif verb == "/sandbox" {
+        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox_mode", rest)) + "[/dim]"); }
+        else { console.print("[dim]  usage: /sandbox <jail|docker|off>[/dim]"); }
     }
-    elif verb == "/reset" { chat_reset(); console.print("[dim]  (conversation cleared)[/dim]"); }
-    elif verb == "/teach" {
+    elif verb in ["/remember", "/teach"] {
         if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); }
-        else { console.print("[dim]  usage: /teach <fact>[/dim]"); }
+        else { console.print("[dim]  usage: /remember <fact>[/dim]"); }
     }
     elif verb == "/recall" {
         ms = recollect(rest, 8);
@@ -180,7 +250,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/model" {
         mp = rest.split(" ", 1);
         if len(mp) == 2 { console.print("[green]  ✓[/green] [dim]" + str(configure(str(mp[0]).strip() + "_model", str(mp[1]).strip())) + "[/dim]"); }
-        else { console.print("[dim]  usage: /model <frontier|small|router> <name>[/dim]"); }
+        else { console.print("[dim]  usage: /model <frontier|small|router|chat> <name>[/dim]"); }
     }
     else { console.print("[dim]  unknown command " + verb + " — /help[/dim]"); }
     return False;
@@ -192,7 +262,8 @@ def _handle_slash(console: any, cmd: str) -> bool {
 def chat_repl() {
     console = Console();
     session = _make_session();
-    _banner(console, describe_soul());
+    _install_hooks(console, session);
+    _banner(console);
     while True {
         line = "";
         try {
@@ -210,16 +281,13 @@ def chat_repl() {
             if _handle_slash(console, cmd) { break; }
             continue;
         }
-        _stream_chat(console, cmd);
+        _run_and_render(console, cmd);
     }
     console.print("[dim]bye ◆[/dim]");
 }
 
 # ---------------------------------------------------------------------------
-# interactive settings editor
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# first-run setup wizard — a few guided questions to get going
+# first-run setup wizard — a few questions to configure the model tiers + persona
 # ---------------------------------------------------------------------------
 def setup_wizard() {
     console = Console();
@@ -228,6 +296,7 @@ def setup_wizard() {
     console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
     console.print();
     steps = [
+        ["chat_model", "Which model powers chat mode? (the one you'll talk to)", "gpt-4o-mini"],
         ["frontier_model", "Which model should build new skills? (the smart one)", "gpt-4o"],
         ["small_model", "Which model runs skills day-to-day? (cheap or fully local)", "ollama_chat/qwen3:8b"],
         ["persona", "In a line, how should your agent describe itself? (optional)", ""]
@@ -245,20 +314,26 @@ def setup_wizard() {
         console.print();
     }
     s = describe_soul();
-    console.print("[bold]  You're set.[/bold] [dim]frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "[/dim]");
-    console.print("  [dim]Try:  [/dim][cyan]sigil solve \"…\"[/cyan][dim]   or   [/dim][cyan]sigil chat[/cyan]");
+    console.print("[bold]  You're set.[/bold] [dim]chat=" + str(s["chat_model"]) + "  frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "[/dim]");
+    console.print("  [dim]Try:  [/dim][cyan]sigil chat[/cyan][dim]   or   [/dim][cyan]sigil solve \"…\"[/cyan]");
     console.print();
 }
 
+# ---------------------------------------------------------------------------
+# interactive settings editor
+# ---------------------------------------------------------------------------
 def config_menu() {
     console = Console();
     session = _make_session();
     fields = [
         ["name", "agent name"],
         ["persona", "voice / character it speaks with"],
+        ["chat_model", "conversational model — powers chat mode & sub-agents"],
         ["frontier_model", "expensive model — crystallizes new skills"],
         ["small_model", "cheap model — executes crystallized skills"],
         ["router_model", "model that routes a task to a skill"],
+        ["workspace", "sandboxed directory the file tools are jailed to"],
+        ["sandbox_mode", "exec containment: jail | docker | off"],
         ["auto_eval", "self-check each run, on/off"],
         ["eval_threshold", "auto-relearn below this score (0-100)"]
     ];
@@ -266,8 +341,10 @@ def config_menu() {
         s = describe_soul();
         cur = {
             "name": str(s["name"]), "persona": str(s["persona"]),
+            "chat_model": str(s["chat_model"]),
             "frontier_model": str(s["frontier_model"]), "small_model": str(s["small_model"]),
             "router_model": str(s["router_model"]),
+            "workspace": str(s["workspace"]), "sandbox_mode": str(s["sandbox_mode"]),
             "auto_eval": ("on" if s["auto_eval"] else "off"),
             "eval_threshold": str(s["eval_threshold"])
         };

@@ -26,6 +26,7 @@ import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
+import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
 import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
 import from src.agent { run_task }
@@ -228,6 +229,24 @@ with entry:__main__ {
         elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
         elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])); }
         elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("reply: " + str(r["reply"]) + "  (in=" + str(r["in_mid"]) + " out=" + str(r["out_mid"]) + " thread=" + str(r["thread_id"]) + ")"); }
+        elif sub == "setup" {
+            # channel setup <discord|telegram|whatsapp|slack> — print connection guidance
+            k = _arg(argv, 2);
+            if not k { print("supported: " + ", ".join(channel_kinds())); print("usage: channel setup <" + "|".join(channel_kinds()) + ">"); }
+            else { print(channel_setup_guide(k)); }
+        }
+        elif sub == "connect" {
+            # channel connect <name> <kind> — register the Channel node + token SecretRef, then print next steps
+            nm = _arg(argv, 2); k = _arg(argv, 3) if _arg(argv, 3) else _arg(argv, 2);
+            if not nm { print("usage: channel connect <name> <discord|telegram|whatsapp|slack>"); }
+            else {
+                r = channel_bootstrap(nm, k, "");
+                print("connected channel '" + str(r["name"]) + "'  kind=" + str(r["kind"]) + "  token-env=" + str(r["token_env"]) + " (set=" + str(r["token_set"]) + ")");
+                print("inbound endpoint: " + str(r["endpoint"]));
+                print("");
+                print(str(r["guide"]));
+            }
+        }
         elif sub == "react" { print(react(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
         elif sub == "edit" { print(edit(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4))); }
         elif sub == "history" {
@@ -240,7 +259,7 @@ with entry:__main__ {
                 print(line + "  " + str(m["text"]));
             }
         }
-        else { print("usage: channel add|list|rm|send|inbound|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
+        else { print("usage: channel add|list|rm|send|inbound|setup <kind>|connect <name> <kind>|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
     } elif cmd == "hook" {
         sub = _arg(argv, 1);
         if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }
@@ -369,8 +388,11 @@ with entry:__main__ {
         }
     } else {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
-        print("  chat                        streaming chat — talk to your agent; it can change its own settings");
+        print("  chat                        conversational tool-using REPL — run the whole agent from chat");
+        print("                              (sandboxed files+shell, web, cron, memory, sub-agents, channels)");
         print("  setup                       first-run wizard to configure models & persona");
+        print("  channel setup <kind>        how to connect discord|telegram|whatsapp|slack");
+        print("  channel connect <name> <kind>   register a channel + its token secret, print next steps");
         print("  config [<key> <value>]      interactive settings editor (or set one key)");
         print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
         print("  library                     list crystallized procedures (skills)");

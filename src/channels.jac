@@ -152,3 +152,21 @@ def channel_history(channel: str, n: int = 20) -> list {
     }
     return [];
 }
+
+# ---------------------------------------------------------------------------
+# Webhook endpoint — the ready-made inbound surface every channel adapter POSTs
+# to. A Discord bot / Telegram webhook / Slack Events app forwards each message
+# here as {channel, peer, text[, thread_id]}; the agent's reply comes back in the
+# body so the adapter can deliver it on the originating thread.
+#   POST /walker/api_inbound   {"channel":"tg","peer":"123","text":"hi"}
+# ---------------------------------------------------------------------------
+walker:pub api_inbound {
+    has channel: str = "webhook";
+    has peer: str = "anon";
+    has text: str = "";
+    has thread_id: str = "";
+    can run with Root entry {
+        r = inbound(self.channel, self.peer, self.text, self.thread_id);
+        report r;
+    }
+}
