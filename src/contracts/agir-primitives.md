@@ -57,7 +57,7 @@ intent allows.**
 
 | Node | Meaning | Jac form |
 |------|---------|----------|
-| `ROUTE` | branch on a condition | code: `if … { visit [-->][?:Target]; }` · model: `visit [-->] by llm(incl_info=…)` |
+| `ROUTE` | branch on a condition | code: `if … { visit [-->][?:Target]; }` · model: `visit [-->] by llm(intent=…, incl_info=…)` |
 | `LOOP` | repeat/pipeline until a guard holds | walker `while` + an `EXTRACT` verdict + revise body |
 | `SPAWN` | launch a subagent in an independent context (parallel) | `spawn` additional walkers; `flow … spawn …` + `wait task` |
 | `CALL` | expand another AG-IR inline, same context (composition) | same walker visiting a sub-region / a named sub-walker |
@@ -305,7 +305,7 @@ calls during LOWER, the IR was underspecified; fix the IR, not the Jac.
 | `edges[]` | `++>` connections built in `run()` |
 | `walker.carries` | `walker { has <field>: <T> = <default>; }` |
 | node action / `mandatory` edge | `can <n> with <Node> entry { … visit [-->]; }` ability |
-| `route` (code / model) | `if … { visit [-->][?:Target]; }` / `visit [-->] by llm(incl_info=…)` |
+| `route` (code / model) | `if … { visit [-->][?:Target]; }` / `visit [-->] by llm(intent=…, incl_info=…)` |
 | `SPAWN` | `spawn` additional walkers |
 | `autonomy.tools` | `by llm(tools=[…])` on the slot |
 | the agent / entrypoint | a `walker`; `def run(task, model, skill) -> str { global llm; llm = model; … }` |
