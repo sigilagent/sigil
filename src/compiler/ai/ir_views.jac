@@ -164,4 +164,15 @@ obj LiftResult {
     has spec_issues: list[str] = [];
     has spine_issues: list[str] = [];
     has assemble_issues: list[str] = [];
+    has gate_issues: list[str] = [];
+    has repairs: list[str] = [];
 }
+
+obj StructCov {
+    has gated: list[str] = [];
+    has slotted: list[str] = [];
+    has monolithic: list[str] = [];
+    has missing: list[str] = [];
+    has issues: list[str] = [];
+}
+sem StructCov = "STRUCT-COV: per MANDATORY rule, HOW the compiled agent realizes it — gated (owner=code ability, guaranteed by construction), slotted (a dedicated model slot), monolithic (folded into another slot — model-dependent, same risk as prose), or missing. monolithic/missing name exactly where to strengthen the graph.";

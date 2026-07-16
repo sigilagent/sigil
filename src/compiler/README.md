@@ -9,10 +9,20 @@ src/compiler/
     compiler.jac       transpile_ir(ir_text, name) -> .jac source
     assets/            runtime helpers injected verbatim into generated modules
   ai/                the LIFT front-end — authors the AG-IR under a faithfulness constraint
-    types.jac          Rule / RuleSet / verdicts — the typed vocabulary
+    lift_types.jac     Rule / RuleSet / verdicts — the typed vocabulary
+    ir_views.jac       the four AG-IR views (nodes/edges, carries, residency, tools, HIL)
     spec_loop.jac      Stage 1: SKILL.md -> frozen RuleSet (the convergence loop)
-    gates.jac          the gate battery (seeded with G4, the compile oracle)
+    workflow.jac       Stage 2: the WorkFlow spine (CFG view) + its code validator
+    flows.jac          Stage 3: IO/Context/Knowledge/HIL flows — flow/wait SPAWN fan-out
+    assemble.jac       Stage 4: the rule-id join + reflexive 5d -> AG-IR YAML
+    gates.jac          G1 standalone · G4 compile oracle · G5 STRUCT-COV
+    repair.jac         per-error-class repair (view repair + scoped repair_ir loop)
+    lift.jac           the public entrypoint: lift(skill, name) -> LiftResult
 ```
+
+Opt-in wiring: `SIGIL_AI_LIFT=1 sigil register-skill ./SKILL.md` routes the md
+path through the gated LIFT (a gate failure raises — fail loud — rather than
+persisting an unfaithful skill); unset, the legacy one-shot `lift_skill` runs.
 
 **The mechanical half** lowers an AG-IR exactly as written — every IR construct
 has one Jac form; if lowering ever needs a judgment call, the IR was

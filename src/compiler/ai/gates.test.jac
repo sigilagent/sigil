@@ -2,6 +2,9 @@
 AG-IR through mechanical.transpile_ir + a real `jac check` subprocess. The
 failure paths must return routed verdicts, never raise."""
 
+import from .lift_types { Rule }
+import from .ir_views { AgirNode, ToolDef, KnowledgeItem, KnowledgeView }
+
 glob GOOD_IR: str = """---
 name: note-writer
 description: Write a short note to a file.
@@ -52,4 +55,44 @@ test "transpile without check still requires a run() entrypoint" {
     v = compile_gate(GOOD_IR, "note_writer_nocheck", check=False);
     assert v.ok;
     assert "def run(" in v.module_src;
+}
+
+test "G1 standalone: embodied views pass; pointers and empty tools are flagged" {
+    good = ViewBundle(kn=KnowledgeView(
+        tools=[ToolDef(name="write", sig="(x) -> path", serves=["emit"], body="return 'out.txt'")],
+        knowledge=[KnowledgeItem(key="rules", content="The output must include a header row naming every column of the table.")]
+    ));
+    assert gate_standalone(good) == [];
+
+    bad = ViewBundle(kn=KnowledgeView(
+        tools=[ToolDef(name="magic", sig="(x) -> y", serves=["emit"])],
+        knowledge=[KnowledgeItem(key="forms", content="See FORMS.md for details.")]
+    ));
+    issues = gate_standalone(bad);
+    assert len([i for i in issues if "'magic'" in i and "prose-pointer" in i]) == 1;
+    assert len([i for i in issues if "'forms'" in i and "pointer" in i]) == 1;
+}
+
+test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
+    spec = RuleSet(rules=[
+        Rule(id="r1", quote="parse", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="write", kind=RuleKind.IO, modality=Modality.MANDATORY),
+        Rule(id="r3", quote="verify", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    wf = WorkflowView(nodes=[
+        AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE, traces_to=["r1"]),
+        AgirNode(id="write", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=["r2"])
+        # r3 traced by nothing -> missing
+    ]);
+    src_slotted = "can n_parse with X entry {}\ncan n_write with Y entry {}\ndef write(data: str) -> str by llm;";
+    sc = gate_struct_cov(spec, wf, src_slotted);
+    assert sc.gated == ["r1"];
+    assert sc.slotted == ["r2"];
+    assert sc.missing == ["r3"];
+    assert len([i for i in sc.issues if "'r3'" in i]) == 1;
+
+    src_monolith = "can n_parse with X entry {}\ncan n_write with Y entry {}";   # no dedicated slot for write
+    sc2 = gate_struct_cov(spec, wf, src_monolith);
+    assert sc2.monolithic == ["r2"];
+    assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }

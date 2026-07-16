@@ -17,7 +17,8 @@ import traceback;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
 import from src.compiler.mechanical.compiler { transpile_ir }
-import from .lift_types { CompileVerdict }
+import from .lift_types { CompileVerdict, RuleSet, Modality, RuleKind }
+import from .ir_views { NodeType, Owner, AgirNode, WorkflowView, ViewBundle, StructCov }
 
 def _jac_bin() -> str {
     env = os.environ.get("SIGIL_JAC", "");
@@ -28,6 +29,100 @@ def _jac_bin() -> str {
     if os.path.isfile(home) { return home; }
     return "jac";
 }
+
+# ---------------------------------------------------------------------------
+# G1 — the standalone gate (delete-SKILL.md), mechanical
+# ---------------------------------------------------------------------------
+
+glob _POINTER_SMELLS: list = ["see ", "refer to ", "as described in ", "per the skill"];
+
+def gate_standalone(vb: ViewBundle) -> list[str] {
+    # Delete SKILL.md: could the IR still lower to a working agent? Every tool
+    # must be EMBODIED (verbatim body or exact command); every knowledge item
+    # must carry its content, not a pointer to where the content lives.
+    issues: list = [];
+    for td in vb.kn.tools {
+        if (not td.body.strip()) and (not td.command.strip()) {
+            issues.append("G1: tool '" + td.name + "' is a prose-pointer (no body, no command) — embody it");
+        }
+    }
+    for ki in vb.kn.knowledge {
+        c = ki.content.strip();
+        if not c {
+            issues.append("G1: knowledge '" + ki.key + "' has no content — embody it");
+            continue;
+        }
+        low = c.casefold();
+        if len(c) < 80 {
+            for sm in _POINTER_SMELLS {
+                if low.startswith(str(sm)) {
+                    issues.append("G1: knowledge '" + ki.key + "' looks like a pointer ('" + c[:40] + "...') — embody the referenced content verbatim");
+                    break;
+                }
+            }
+        }
+    }
+    return issues;
+}
+
+# ---------------------------------------------------------------------------
+# G5 — STRUCT-COV / no-monolith, static on the COMPILED module
+# ---------------------------------------------------------------------------
+
+def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructCov {
+    # For each MANDATORY STEP/IO rule: how does the compiled agent realize it?
+    #   gated      owner=code ability  -> guaranteed by construction
+    #   slotted    dedicated model slot -> observable, model executes it
+    #   monolithic folded into another slot -> model-dependent (prose-grade risk)
+    #   missing    no realization at all -> a structural gap
+    # monolithic/missing are ISSUES naming exactly which node to strengthen.
+    sc = StructCov();
+    node_by_rule: dict[str, list[AgirNode]] = {};
+    for n in wf.nodes {
+        for t in n.traces_to {
+            cur: list[AgirNode] = list(node_by_rule.get(t, []));
+            cur.append(n);
+            node_by_rule[t] = cur;
+        }
+    }
+    for r in spec.rules {
+        if r.modality != Modality.MANDATORY { continue; }
+        if (r.kind != RuleKind.STEP) and (r.kind != RuleKind.IO) { continue; }
+        owners: list[AgirNode] = list(node_by_rule.get(r.id, []));
+        if not owners {
+            sc.missing.append(r.id);
+            sc.issues.append("G5: MANDATORY rule '" + r.id + "' has NO realization in the graph");
+            continue;
+        }
+        best = "";
+        for n2 in owners {
+            nid = re.sub(r"[^0-9a-zA-Z_]", "_", str(n2.id));
+            has_ability = ("can n_" + nid) in module_src;
+            if not has_ability { continue; }
+            if n2.owner == Owner.CODE {
+                best = "gated";
+                break;
+            }
+            if (("def " + nid + "(") in module_src) or (("def gen_" + nid + "(") in module_src) {
+                if best != "gated" { best = "slotted"; }
+            } elif not best { best = "monolithic"; }
+        }
+        if best == "gated" { sc.gated.append(r.id); }
+        elif best == "slotted" { sc.slotted.append(r.id); }
+        elif best == "monolithic" {
+            sc.monolithic.append(r.id);
+            sc.issues.append("G5: rule '" + r.id + "' realized MONOLITHICALLY (node '" + owners[0].id + "' has no dedicated slot) — split it or add a code gate");
+        } else {
+            sc.missing.append(r.id);
+            sc.issues.append("G5: rule '" + r.id + "' traced to node(s) that never lowered to an ability — structural gap");
+        }
+    }
+    return sc;
+}
+
+# ---------------------------------------------------------------------------
+# G4 — the compile oracle
+# ---------------------------------------------------------------------------
 
 def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict {
     # G4: the AG-IR must lower mechanically and type-check with zero errors.

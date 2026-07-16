@@ -563,6 +563,25 @@ def register_skill(source: str, kind: str) -> dict {
         sig = agir_name(source);
         path = install_osp(source, sig, WORKDIR);
         tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
+    } elif os.environ.get("SIGIL_AI_LIFT", "") not in ["", "0", "false"] {
+        # source is SKILL.md text — the AI compiler runs the full gated LIFT:
+        # spec convergence loop -> spine -> annotator flows -> assemble ->
+        # G1/G4/G5 gates + bounded repair. Opt-in via SIGIL_AI_LIFT=1; a gate
+        # failure raises (fail loud) rather than persisting an unfaithful skill.
+        # LAZY import: a top-level import of the ai package changes the module
+        # topology under multi-file `jac test` and trips the slot-__globals__
+        # runtime bug (see ci.yml) — load it only when the flag path runs.
+        import from .compiler.ai.lift { lift, pin_all_lift_llms }
+        pin_all_lift_llms(frontier);
+        sig = agir_name(source);
+        lr = lift(source, sig);
+        if not lr.ok {
+            gaps = "; ".join(lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues)[:600];
+            ce = (" | compile: " + lr.compile_errors[:300]) if lr.compile_errors else "";
+            raise RuntimeError("AI lift failed for '" + sig + "': " + gaps + ce);
+        }
+        path = write_module(lr.module_src, sig, 1, WORKDIR);
+        tg = _persist(reg, sig, "lifted from SKILL.md (AI compiler)", lr.ir_text, path, "lifted-skill-ai", 1);
     } else {
         # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
         agir = lift_skill(source, ETHOS, digest(mcp_servers()), CONTRACT);
