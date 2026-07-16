@@ -111,6 +111,12 @@ def _slot_name(nid: any, carries: any) -> str {
     return s;
 }
 
+# SPAWN worker-slot name (the by-llm slot one sibling walker runs). Derived from
+# the node id only, so _emit_slots and _emit_walker agree without threading state.
+def _spawn_worker(nid: any) -> str {
+    return _safe(str(nid)) + "_worker";
+}
+
 def _q(s: any) -> str {
     t = "" if s is None else str(s);
     t = t.replace("\\", "\\\\");
@@ -795,6 +801,23 @@ def _emit_slots(ir: any) -> str {
         if not isinstance(n, dict) { continue; }
         nt = str(n.get("type", ""));
         no = str(n.get("owner", ""));
+        # SPAWN fans out to sibling walkers; each runs ONE worker slot over its
+        # sub-task string. Emit that worker here (its own scoped by-llm cognition,
+        # optionally with the node's autonomy tools).
+        if nt == "SPAWN" {
+            wname = _spawn_worker(n["id"]);
+            wtools = "";
+            wau = _dict(n.get("autonomy"));
+            if isinstance(wau, dict) and wau.get("tools") {
+                wreal = [tt for tt in _list(wau.get("tools")) if tt != "SENSE"];
+                if wreal { wtools = f"(tools=[{_j(', ', [_safe(tt) for tt in wreal])}])"; }
+            }
+            out.append(f"def {wname}(task: str) -> str by llm{wtools};");
+            wdoc = str(n.get("doc") or "").strip();
+            wsem = (wdoc + " " if wdoc else "") + "You are ONE parallel worker handling a single sub-task from a larger fan-out. Do just this sub-task fully and return a short result of what you did and where any output landed.";
+            out.append(f"sem {wname} = {_q(wsem)};");
+            continue;
+        }
         # Emit a by-llm slot for every node the walker invokes as cognition: all
         # Mind nodes, CALL sub-agents, and owner=model Boundary/Flow nodes that
         # PRODUCE a carry and have no bound code-tool.
@@ -1038,6 +1061,7 @@ def _emit_walker(ir: any) -> list {
         if (base in types) and types[base].get("kind") == "enum" { route_field = str(kv3[0]); break; }
     }
 
+    spawn_sibs: list = [];   # [[sibling_walker_name, worker_slot_name], …] emitted after the main walker
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
         nid = n["id"];
@@ -1254,7 +1278,42 @@ def _emit_walker(ir: any) -> list {
                 body.append(f"        # LOOP {nid}");
             }
         } elif ntype == "SPAWN" {
-            body.append(f"        # SPAWN {nid} — fork subagent walkers (TODO)");
+            # Fork one sibling walker per sub-task, run them CONCURRENTLY via Jac's
+            # flow/wait over `root spawn` (the sigil_subagents mechanism), then join
+            # and aggregate their results into the write carry. Real parallelism for
+            # I/O-bound worker cognition; N workers finish in ~1x wall-clock, not Nx.
+            sib_name = str(name) + _camel(nid) + "Sib";   # name is already CamelCase
+            worker = _spawn_worker(nid);
+            spawn_sibs.append([sib_name, worker]);
+            conc = _dict(n.get("concurrency"));
+            iso = str(conc.get("isolation") or "shared_read");
+            # Fan-out source: a list-typed read carry (data-parallel) > a literal
+            # concurrency.spawn list (fixed branches) > the task itself (degenerate).
+            list_src = "";
+            for r in reads {
+                if (r in ckeys) and str(carries[r].get("type") or "").strip().startswith("list") { list_src = str(r); break; }
+            }
+            if list_src {
+                tasks_expr = f"[str(_x) for _x in self.{_safe(list_src)}]";
+            } elif isinstance(conc.get("spawn"), list) and conc.get("spawn") {
+                tasks_expr = "[" + _j(", ", [_q(str(s)) for s in _list(conc.get("spawn"))]) + "]";
+            } else {
+                tasks_expr = "[self.task]";
+            }
+            body.append(f"        # SPAWN {nid}: fan out workers concurrently (isolation: {iso}; siblings write-isolated by idx, worktree isolation deferred to host runtime)");
+            body.append(f"        _tasks = {tasks_expr};");
+            body.append(f"        _futs = [flow (root spawn {sib_name}(task=_t, idx=_i)) for (_i, _t) in enumerate(_tasks)];");
+            body.append("        _sibs = [wait _f for _f in _futs];");
+            agg = str(writes[0]) if writes else "";
+            if agg and (agg in ckeys) {
+                if str(_jac_type(carries[agg].get("type"), types)[0]) == "str" {
+                    body.append(f"        self.{_safe(agg)} = \"\\n\\n\".join([str(_s.result) for _s in _sibs]);");
+                } else {
+                    body.append(_assign_carry(agg, "[_s.result for _s in _sibs]", carries, types));
+                }
+            } else {
+                body.append("        _spawn_results = [_s.result for _s in _sibs];");
+            }
         } elif ntype == "CODE" {
             stC = _node_tool(ir, nid, n);
             if stC {
@@ -1289,6 +1348,26 @@ def _emit_walker(ir: any) -> list {
         out.append("");
     }
     out.append("}");
+    # Sibling walkers for every SPAWN node: a focused worker spawned on `root`,
+    # runs its worker slot over one sub-task, exposes `result`/`ok` to the join.
+    for sp in spawn_sibs {
+        spp: any = sp;
+        out.append("");
+        out.append(f"walker {spp[0]} {{");
+        out.append("    has task: str;");
+        out.append("    has idx: int = 0;");
+        out.append("    has result: str = \"\";");
+        out.append("    has ok: bool = True;");
+        out.append("    can run with Root entry {");
+        out.append("        try {");
+        out.append(f"            self.result = str({spp[1]}(self.task));");
+        out.append("        } except Exception as _e {");
+        out.append("            self.result = \"spawn worker error: \" + str(_e)[:200];");
+        out.append("            self.ok = False;");
+        out.append("        }");
+        out.append("    }");
+        out.append("}");
+    }
     return [_j("\n", out), name];
 }
 
