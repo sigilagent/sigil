@@ -1152,7 +1152,19 @@ def _emit_walker(ir: any) -> list {
                 body.append(_assign_carry(writes[0], callR, carries, types));
             }
             if len(out_edges) > 1 {
-                body.append("        visit [-->] by llm(incl_info={\"task\": self.task});");
+                # LLM-guided traversal (byLLM `visit ... by llm`): `intent` steers the
+                # choice, `incl_info` injects the deciding context. Inject the intent
+                # from the ROUTE node's own semantic purpose (its IR `doc`) and widen
+                # incl_info from task-only to the node's read carries, so the model
+                # routes on the actual state — not just the task string.
+                rintent = str(n.get("doc") or "").strip();
+                if not rintent { rintent = "Choose the outgoing node that best fits the task and current state."; }
+                info_parts = ["\"task\": self.task"];
+                for r in reads {
+                    if (r in ckeys) and (r != "task") { info_parts.append(f"{_q(r)}: str(self.{_safe(str(r))})"); }
+                }
+                info = "{" + _j(", ", info_parts[:6]) + "}";
+                body.append(f"        visit [-->] by llm(intent={_q(rintent)}, incl_info={info});");
             } else {
                 body.append("        visit [-->];");
             }

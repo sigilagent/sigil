@@ -72,7 +72,10 @@ self.<writes[0]> = [str(...) if str carry]  _<tool>(<reads bound per §4>);
 
 - **ROUTE:** `reads` an enum/predicate carry; each out-edge carries a `guard`. Lowers to
   `if <guard> { visit [-->][?:Target]; } elif … else { visit [-->][?:Default]; }`. A total
-  `else` fallback is mandatory.
+  `else` fallback is mandatory. An **owner=model** ROUTE (the branch needs a guess, not a
+  code-decidable guard) instead lowers to byLLM LLM-guided traversal —
+  `visit [-->] by llm(intent=<node doc>, incl_info={<read carries>})` — where `intent` (the
+  node's semantic purpose) steers the choice and `incl_info` supplies the deciding state.
 - **LOOP:** a `body` slot + `cap` (max iters, counter carry) + `verdict` (typed pass/fail
   carry) + a back-edge. Lowers to a guarded re-visit: advance when verdict passes or cap hit,
   else back-edge. Never an unconditional self-`++>`.
