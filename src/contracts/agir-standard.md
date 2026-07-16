@@ -77,8 +77,13 @@ self.<writes[0]> = [str(...) if str carry]  _<tool>(<reads bound per §4>);
   carry) + a back-edge. Lowers to a guarded re-visit: advance when verdict passes or cap hit,
   else back-edge. Never an unconditional self-`++>`.
 - **CALL:** `target` sub-IR → a `by llm()` sub-slot (or inlined sub-walker) that writes its carries.
-- **SPAWN:** a `concurrency` block (`spawn: […]`, `isolation`: private_write / shared_read) →
-  an `AgentSlot` node + spawned walkers, results aggregated into the named carry.
+- **SPAWN:** fan-out. Source = a `list[…]` `reads` carry (data-parallel: one sibling per
+  element) or a literal `concurrency.spawn: […]`; `isolation`: private_write / shared_read.
+  Lowers to `flow`/`wait` over `root spawn <Sib>` — a self-contained sibling walker that runs
+  one worker slot (`<node>_worker`, its own scoped `by llm`) per sub-task — with results joined
+  back into the `writes` carry (a `list`, or newline-joined for a `str` carry). Real
+  parallelism for I/O-bound worker cognition (N finish in ~1× wall-clock); worktree isolation
+  is the host runtime's job.
 
 ## 3T. TERMINAL
 
