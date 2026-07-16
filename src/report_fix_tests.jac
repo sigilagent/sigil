@@ -12,7 +12,7 @@ import os, sys, subprocess as _subprocess, tempfile
 
 def _asset_checks():
     here = os.path.dirname(os.path.abspath(__file__))
-    src = open(os.path.join(here, "compiler", "assets", "osp_runtime.py.txt")).read()
+    src = open(os.path.join(here, "compiler", "mechanical", "assets", "osp_runtime.py.txt")).read()
     ns = {"os": os, "sys": sys, "_subprocess": _subprocess}
     exec(src, ns)
     exec_script = ns["_exec_script"]
