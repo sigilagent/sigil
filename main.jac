@@ -57,6 +57,49 @@ def cli_args(raw: list) -> list {
     return out;
 }
 
+glob _CV: dict = {"open": ""};   # current in-flight stage line
+
+def _cts(ev: dict) -> str {
+    # one-line completion summary per stage
+    s = str(ev["stage"]);
+    if s == "spec" {
+        m = "ok" if (ev["sound"] and ev["complete"] and not ev["drift"]) else "issues";
+        return str(ev["rules"]) + " rules · " + str(ev["rounds"]) + " rounds · " + m;
+    } elif s == "spine" {
+        return str(ev["nodes"]) + " nodes · " + str(ev["edges"]) + " edges · " + str(ev["rounds"]) + " rounds" + ((" · " + str(ev["issues"]) + " issues") if ev["issues"] else "");
+    } elif s == "flows" {
+        return str(ev["carries"]) + " carries · " + str(ev["tools"]) + " tools · " + str(ev["knowledge"]) + " knowledge · " + str(ev["hil"]) + " HIL";
+    } elif s == "assemble" {
+        return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
+    } elif s == "gates" {
+        return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
+    }
+    return "";
+}
+
+def _compile_ev(ev: dict) -> None {
+    # live build view: start opens the stage line, done rewrites it with counts
+    # + timing. Only ever touches the CURRENT line (portable ANSI).
+    names: dict = {"spec": "spec loop", "spine": "workflow spine", "flows": "annotator flows",
+                   "assemble": "assemble", "gates": "gates", "repair": "repair"};
+    label = str(names.get(str(ev["stage"]), str(ev["stage"])));
+    if str(ev.get("state")) == "start" {
+        if str(ev["stage"]) == "repair" {
+            sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views")) + chr(10));
+        } else {
+            sys.stdout.write("  " + chr(27) + "[38;5;135m" + chr(0x25D0) + chr(27) + "[0m " + label + " " + chr(27) + "[2m" + chr(0x2026) + chr(27) + "[0m");
+            _CV["open"] = label;
+        }
+        sys.stdout.flush();
+    } elif str(ev.get("state")) == "done" {
+        secs = float(ev.get("secs", 0.0));
+        tm = (str(int(secs // 60)) + "m " + str(int(secs % 60)) + "s") if secs >= 60.0 else ("%.1f" % secs) + "s";
+        sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + _cts(ev) + "  " + chr(27) + "[2m" + tm + chr(27) + "[0m" + chr(10));
+        _CV["open"] = "";
+        sys.stdout.flush();
+    }
+}
+
 def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
@@ -308,7 +351,11 @@ with entry:__main__ {
                 }
                 i += 1;
             }
-            r = compile_skill(open(path).read(), eject, eject_path);
+            _tty = False;
+            try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
+            if _tty { print(chr(10) + "  Compiling " + path); }
+            r = compile_skill(open(path).read(), eject, eject_path, _compile_ev if _tty else None);
+            if _tty { print(""); }
             if not r["ok"] {
                 print("compile FAILED for '" + str(r["signature"]) + "':");
                 for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
