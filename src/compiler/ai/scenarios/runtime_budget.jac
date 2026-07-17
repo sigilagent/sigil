@@ -58,9 +58,14 @@ edges:
 with entry:__main__ {
     v = compile_gate(LOOP_IR, "spin_probe", check=False);
     assert v.ok, v.errors;
-    with open("/tmp/spin_probe.jac", "w") as f { f.write(v.module_src); }
+    # ISOLATED dir, never /tmp: a generated module's _ensure_path stages its
+    # parent directory's contents into the cwd — a module written straight
+    # into /tmp vacuums every /tmp resident into the invoking repo.
+    import tempfile;
+    _d = tempfile.mkdtemp(prefix="sigil_spin_probe_");
+    with open(os.path.join(_d, "spin_probe.jac"), "w") as f { f.write(v.module_src); }
     import sys;
-    sys.path.insert(0, "/tmp");
+    sys.path.insert(0, _d);
     os.environ["AGIR_STEP_BUDGET"] = "25";
     import spin_probe;
     outs: list = ["q?", "unclear"] * 200;   # cognition never converges
