@@ -4,8 +4,18 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".github/scripts/build_docs.py"
+      - ".github/workflows/pages.yml"
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".github/scripts/build_docs.py"
+      - ".github/workflows/pages.yml" 
   workflow_dispatch:
 
 # One run per ref; a new push cancels the previous in-flight run.
@@ -29,8 +39,18 @@ jobs:
       # jaclang + byllm runtime, so there is nothing to `pip install`. The install
       # script drops it in $HOME/.local/bin; we add that to PATH for later steps.
       - name: Install native jac
+        # The install script queries the GitHub API for the latest release; on
+        # shared runner IPs the unauthenticated limit (60/hr) causes flaky
+        # failures. It honors GITHUB_TOKEN (5000/hr) — pass it, and retry for
+        # plain network flakes.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+          for i in 1 2 3; do
+            curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash && break
+            echo "install attempt $i failed; retrying in $((i*10))s..."
+            sleep $((i*10))
+          done
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Show jac version
