@@ -593,6 +593,36 @@ def register_skill(source: str, kind: str) -> dict {
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
 
+def compile_skill(source: str, eject: bool = False, eject_path: str = "") -> dict {
+    # `sigil compile SKILL.md [-e [out.jac]]` — the gated AI lift, always:
+    # spec loop -> spine -> flows -> assemble -> G1/G4/G5 + bounded repair.
+    # ok=False returns the issues (the CLI prints them; nothing is persisted).
+    # On success the skill is SET IN THE TREE (a TaskGraph on the Registry) and,
+    # with eject, ALSO written out as one self-contained runnable .jac program.
+    # LAZY imports — see the register_skill note on the jac-test topology bug.
+    import from .compiler.ai.lift { lift, pin_all_lift_llms }
+    import from .compiler.ai.eject { eject_program, write_program }
+    soul = awaken();
+    reg = [soul -->[?:Registry]][0];
+    pin_all_lift_llms(frontier);
+    sig = agir_name(source);
+    lr = lift(source, sig);
+    issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
+    if not lr.ok {
+        return {"ok": False, "signature": sig, "issues": issues,
+                "compile_errors": lr.compile_errors, "repairs": lr.repairs};
+    }
+    path = write_module(lr.module_src, sig, 1, WORKDIR);
+    tg = _persist(reg, sig, "compiled from SKILL.md (AI compiler)", lr.ir_text, path, "compiled-skill", 1);
+    ejected = "";
+    if eject {
+        ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
+        ejected = write_program(eject_program(lr.module_src, sig), ep);
+    }
+    return {"ok": True, "signature": tg.signature, "module": tg.module,
+            "issues": issues, "repairs": lr.repairs, "eject": ejected};
+}
+
 def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     # Small model executes the crystallized OSP. The crystallized PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run

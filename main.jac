@@ -17,7 +17,7 @@ same persistent graph as the one-shot commands above.
 import sys;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
-    add_mcp, remove_mcp, mcp_status, register_skill,
+    add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info,
     tool_group_set, tool_allowed, tools_policy_info
@@ -229,6 +229,40 @@ with entry:__main__ {
             r = register_skill(src, kind);
             print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
         }
+    } elif cmd == "compile" {
+        # compile <SKILL.md> [-e|--eject [out.jac]] — the gated AI lift: spec
+        # loop -> spine -> flows -> assemble -> G1/G4/G5 gates + repair. Sets
+        # the skill on the graph; -e also ejects one runnable .jac program.
+        path = _arg(argv, 1);
+        if (not path) or path.startswith("-") {
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]]");
+        } else {
+            eject = False; eject_path = "";
+            i = 2;
+            while i < len(argv) {
+                flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
+                if (flg == "-e") or (flg == "--eject") {
+                    eject = True;
+                    nxt = _arg(argv, i + 1);
+                    if nxt and (not nxt.startswith("-")) { eject_path = nxt; i += 1; }
+                }
+                i += 1;
+            }
+            r = compile_skill(open(path).read(), eject, eject_path);
+            if not r["ok"] {
+                print("compile FAILED for '" + str(r["signature"]) + "':");
+                for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
+                if r["compile_errors"] { print("  compile: " + str(r["compile_errors"])[:400]); }
+                for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+            } else {
+                print("compiled skill: " + str(r["signature"]) + "  [compiled-skill]  -> " + str(r["module"]));
+                for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+                if r["eject"] {
+                    print("ejected runnable: " + str(r["eject"]));
+                    print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");
+                }
+            }
+        }
     } elif cmd == "channel" {
         sub = _arg(argv, 1);
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
@@ -418,6 +452,7 @@ with entry:__main__ {
         print("  remove-mcp <name>           unregister an MCP server");
         print("  mcp                         list registered MCP servers + their tools");
         print("  register-skill <path> [md|agir|osp]   add a skill (SKILL.md lifted / AG-IR / OSP)");
+        print("  compile <SKILL.md> [-e [out.jac]]     gated AI-compile onto the graph; -e ejects a standalone runnable .jac");
         print("  (add  -s sigil.session  to persist the graph across runs)");
     }
 }
