@@ -71,7 +71,7 @@ def _version() -> str {
             if t.startswith("version") and ("=" in t) { return t.split("=")[1].strip().strip('"').strip("'"); }
         }
     } except Exception as e {}
-    return "0.1.0";
+    return "?";   # jac.toml unreadable: show v? rather than lie with a stale number
 }
 
 def _banner(console: any) {

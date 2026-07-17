@@ -45,6 +45,24 @@ jobs:
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # The CLI banner reads its version from jac.toml, so a tag cut without bumping
+      # the manifest ships a lying banner (v0.1.0 was reported all the way to v0.2.0).
+      # Tag pushes fail hard on drift; manual dispatch only warns, so refreshing the
+      # assets of an already-published release stays possible.
+      - name: Check tag matches jac.toml version
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          v="$(sed -n 's/^version *= *"\(.*\)".*/\1/p' jac.toml | head -1)"
+          if [ "v$v" = "$TAG" ]; then
+            echo "jac.toml version ($v) matches tag $TAG"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error::jac.toml says version=$v but the tag is $TAG. Bump jac.toml (and commit) before tagging."
+            exit 1
+          else
+            echo "::warning::jac.toml version ($v) != $TAG — allowed for manual dispatch (asset refresh)."
+          fi
+
       # Never ship a broken pipe-to-bash installer: fail the release if it won't parse.
       - name: Validate installer
         run: |
@@ -61,7 +79,7 @@ jobs:
           set -euo pipefail
           notes="$(mktemp)"
           cat > "$notes" <<EOF
-          Release **Sigil $TAG** — a self-evolving object-spatial agent.
+          Release **Sigil $TAG**: the skill compiler. SKILL.md in, a typed runnable agent harness out.
 
           ## Install
 
