@@ -2,7 +2,7 @@
 
 Sigil can be reached over messaging channels. The contract is one webhook: an adapter
 forwards each inbound message to `POST /walker/api_inbound` as `{channel, peer, text}`,
-and delivers the reply that comes back. Expose it with `jac start observatory.jac` (add a
+and delivers the reply that comes back. Expose it with `sigil serve` (add a
 tunnel like ngrok for a public URL).
 
 ## Guided setup

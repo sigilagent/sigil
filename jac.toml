@@ -31,6 +31,19 @@ httpx = "latest"
 [plugins.byllm.model]
 default_model = "gpt-4o-mini"
 
+# One graph, two doors: `jac run main.jac` (CLI) persists to .jac/data/sigil.db
+# (the project-name default), and this points `jac start observatory.jac` at the
+# SAME file — so skills taught in the CLI show up live in the Observatory.
+# Overridden by MONGODB_URI if set (both sides then need it).
+[plugins.scale.database]
+shelf_db_path = ".jac/data/sigil.db"
+
+# The client's `sv import from src.sigil` makes `jac start` auto-detect a
+# microservice split (gateway + src.sigil subprocess). Sigil is one agent on one
+# graph — force the single-process server so the Observatory and API share it.
+[plugins.scale.microservices]
+enabled = false
+
 [dependencies.npm]
 react = "^18.2.0"
 react-dom = "^18.2.0"

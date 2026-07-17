@@ -108,7 +108,7 @@ def channel_setup_guide(kind: str) -> str {
     for s in list(g["wire"]) { lines.append("   • " + str(s)); }
     lines.append("");
     lines.append("Sigil's inbound webhook: POST <PUBLIC_URL>/walker/api_inbound  {channel, peer, text}");
-    lines.append("Expose it with `jac start observatory.jac` (add a tunnel like ngrok for a public URL).");
+    lines.append("Expose it with `sigil serve` (add a tunnel like ngrok for a public URL).");
     return "\n".join(lines);
 }
 
