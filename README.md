@@ -28,6 +28,14 @@ sigil compile ./SKILL.md -e agent.jac    # SKILL.md  →  one runnable agent
 SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
 ```
 
+<table align="center"><tr>
+<td width="50%"><img src="docs/assets/term-compile.svg" alt="sigil compile — the live build view: spec loop, workflow spine, annotator flows, assemble, gates, each with counts and timing"></td>
+<td width="50%"><img src="docs/assets/term-run.svg" alt="a compiled artifact run in a terminal: a live node path, timing, and the produced artifact"></td>
+</tr><tr>
+<td align="center"><sub><b>Compiling</b> is a live build view — every stage, with counts and timing.</sub></td>
+<td align="center"><sub><b>Running</b> a compiled skill is a terminal app — node-by-node, with its output.</sub></td>
+</tr></table>
+
 ## Why compile a skill?
 
 In every agent harness today, a skill is a **prompt**. The model *reads* the
