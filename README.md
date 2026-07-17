@@ -1,218 +1,273 @@
-# Sigil
+# Sigil — the skill compiler
 
-**A self-evolving agent that *is* an object-spatial graph.** A frontier model
-crystallizes each task into a typed procedure; a small model runs it; the
-procedures persist as the agent itself. No `SOUL.md`, no `SKILL.md`, no config
-files — the agent's identity, skills and memory are all nodes on one graph.
-
----
-
-## The idea
-
-Most "self-evolving" agents evolve *fuzzily*: they accumulate prompt/memory
-snippets and hope a big model reuses them. Sigil evolves *by construction*.
-The first time it sees a class of task, a **frontier model authors an AG-IR** —
-a typed graph contract for that task — which a **compiler lowers to a runnable
-OSP agent**. That compiled procedure is **persisted on the graph** and, from then
-on, executed by a **cheap model**. The expensive model is paid once, to build the
-harness; the cheap model rides it forever.
-
-```
-        ┌─────────────── the agent's persistent graph ───────────────┐
-        │                                                             │
- task ─▶ route ─┬─ HIT ──────▶ run crystallized OSP on the SMALL model │─▶ result
-        │       ├─ MISS ─────▶ FRONTIER: task → AG-IR → compile → persist ─┐
-        │       └─ PARTIAL ──▶ FRONTIER: mutate an existing procedure ──┐  │
-        │                                                     new version ◀┘  │
-        │        on small-model failure ─▶ FRONTIER mutate + retry (valve) ◀──┘
-        └─────────────────────────────────────────────────────────────┘
-```
-
-Why this matters: the crystallized procedure carries **structure a weak model
-cannot skip** (step order, embodied tools, grounded verification). So the cheap
-model isn't asked to *be* smart — it's asked to *follow* a smart procedure. That
-is where capability transfers from the frontier model to the cheap one.
-
-## Everything lives on the graph
-
-Inspired by OpenClaw's config-first *soul*, but with **nothing on disk**. There is
-no markdown to author. The agent is a graph rooted at `root`:
-
-```
-root ──Embodies──▶ Soul ──Knows──────▶ Spec         the AG-IR contract (seeded onto the graph)
-  │                 │  ╲──Remembers──▶ Memory       semantic memory — durable facts
-  │                 ╲───Owns─────────▶ Registry
-root ──Anchored──▶ Registry ──Crystallized──▶ TaskGraph      procedural memory — the skills
-                                    TaskGraph ──Ran────────▶ Attempt     episodic memory — runs
-                                    TaskGraph ──MutatedFrom─▶ TaskGraph  evolution lineage
-```
-
-- **Soul** — identity + config as *state you mutate in place*: persona, ethos,
-  model tiers, channels. `awaken()` rebinds the cognition (which model is
-  frontier/small/router, the ethos, the contract) *from the graph* on every run —
-  the way a compiled OSP agent rebinds its `llm` in `run()`.
-- **Three memory layers, all graph-native:**
-  - **procedural** — `TaskGraph` nodes: the crystallized skills themselves.
-  - **episodic** — `Attempt` nodes: every run, its outcome, a summary.
-  - **semantic** — `Memory` nodes: durable facts, retrieved by deterministic
-    lexical recall and injected as run-time context; grown automatically by
-    `distill`-ing durable facts from each completed task.
-
-The crystallized procedure is **class-general**; instance-specific memory is
-injected only at *execution* time, never baked into the procedure.
-
-## Bring your own tools & skills — at runtime, no restart
-
-Because config and skills are graph state, adding either is just a graph mutation that
-takes effect on the **next** `solve` (more dynamic than editing files + restarting):
+**Sigil compiles skills into agent harnesses.** You write a skill the way you
+already do — a plain-markdown `SKILL.md`. Sigil's compiler turns it into a
+typed, runnable program that the model executes *inside*: every step, rule and
+check in the skill becomes structure the model cannot skip.
 
 ```bash
-# BYO MCP server (drop-in tools) — via byLLM's native McpClient (stdio / sse / http)
-$JAC add-mcp github stdio gh-mcp                 # or: add-mcp search http http://localhost:9000/mcp
-$JAC mcp                                          # list registered servers + their discovered tools
-# its tools are now available to the crystallizer (bound by name) and to live runs (_live_tool)
-
-# BYO skills — three ingress forms, cheapest-effort to most-control
-$JAC register-skill ./my-skill/SKILL.md          # frontier lifts SKILL.md -> AG-IR -> compile
-$JAC register-skill ./procedure.agir  agir        # compile a hand-authored AG-IR (no model call)
-$JAC register-skill ./crystallized/foo_v1.jac osp # drop in a precompiled OSP module
+sigil compile ./SKILL.md -e agent.jac    # SKILL.md  →  one runnable agent
+./agent.jac "extract the tables from report.pdf"
+SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
 ```
 
-MCP servers are `McpServer` nodes on the `Soul`; skills are `TaskGraph`s in the `Registry`.
-A crystallized agent's live-tool calls (`_live_tool`) dispatch to whichever registered
-server exposes the tool; the frontier binds those tool names when it crystallizes. A *new*
-capability an *old* skill should use = a `mutate`. In server mode (`jac start`), the same
-operations are `walker:pub` endpoints — swap to `:priv` and each user gets an isolated graph
-(their own soul, skills, and MCP servers) with auth, for free.
+## Why compile a skill?
 
-## Chat mode — run the whole agent from one conversation
+In every agent harness today, a skill is a **prompt**. The model *reads* the
+instructions and you *hope* it follows them. A frontier model mostly does; a
+small model skips steps, ignores MUSTs, invents its own order, and forgets the
+verification you asked for. The skill's quality is capped by the model's
+obedience.
 
-`chat` is not a thin wrapper over `solve`; it's a **conversational, tool-using ReAct
-agent** (`chat_agent.jac`) that can do everything from a single conversation — the
-way you'd use OpenClaw, but graph-native.
+Sigil treats the skill as **source code**. The compiler reads `SKILL.md` and
+emits a program in which:
+
+- every mandatory step is a **node the execution must visit**, in the skill's
+  order — step order is control flow, not a suggestion;
+- every prohibition becomes a **constraint on a node**, never a path the run
+  can take;
+- code snippets in the skill are **embodied as runnable tool bodies** — the
+  agent runs the skill's prescribed code, it can't paraphrase it;
+- verification steps become **gates in the program**, with typed verdicts;
+- the model's judgment is confined to **typed slots** (`by llm`) at exactly the
+  points where the skill calls for judgment.
+
+The model isn't asked to *be* disciplined — the harness is the discipline. That
+is why a compiled skill runs faithfully on a small, cheap, even fully-local
+model: the structure a weak model would skip is no longer skippable.
+
+```mermaid
+flowchart LR
+    SKILL["SKILL.md<br/><i>plain-markdown instructions</i>"]
+    IR["AG-IR<br/><i>typed graph contract</i>"]
+    JAC["agent.jac<br/><i>runnable agent harness</i>"]
+    RUN["any model executes it<br/><i>small / local included</i>"]
+    SKILL -- "LIFT · AI front-end<br/>gated for faithfulness" --> IR
+    IR -- "LOWER · mechanical back-end<br/>zero judgment" --> JAC
+    JAC -- run --> RUN
+```
+
+## The architecture — a classic two-half compiler
+
+The pipeline splits exactly where a traditional compiler does: a **front-end**
+that owns all the judgment, and a **back-end** that owns none.
+
+```
+src/compiler/
+  ai/            LIFT — authors the AG-IR from SKILL.md, under a faithfulness constraint
+  mechanical/    LOWER — deterministically transpiles AG-IR → Jac (OSP) source
+src/contracts/   the AG-IR standard: primitives, authoring contract, lowering rules
+```
+
+### The IR in the middle: AG-IR
+
+The AG-IR (Agent Graph IR) is the analyzable middle between fuzzy prose and an
+executable agent — **one typed graph read four ways**: the step flowchart, the
+control-flow graph, the dataflow of typed *carries*, and the knowledge/tool
+residency map. Its primitives are small and closed:
+
+| family | primitives | owner |
+|---|---|---|
+| Mind (cognition) | `GEN-RAW` · `GEN-FILL` · `GEN-ENUM` · `GEN-EDIT` | model |
+| Boundary & Code (mechanism) | `SENSE` · `ACT·artifact` · `ACT·workspace` · `CODE` | code |
+| Flow (control) | `ROUTE` · `LOOP` · `CALL` · `SPAWN` | either |
+
+Every primitive has a fixed set of settable fields and **exactly one lowering**
+— that closed contract is what makes the back-end deterministic. The full
+standard lives in [`src/contracts/`](src/contracts/).
+
+### LIFT — the AI front-end, structured so it cannot drift
+
+Extracting a typed contract from prose takes model judgment. LIFT is built so
+that judgment can never silently corrupt the skill — the operating principle
+throughout is **the model proposes, code disposes**:
+
+```mermaid
+flowchart TD
+    S["SKILL.md"] --> L1["<b>Stage 1 · Spec loop</b><br/>extract rules, each pinned to a<br/>verbatim quote from the skill"]
+    L1 -- "frozen RuleSet<br/>sound ∧ complete ∧ no drift" --> L2["<b>Stage 2 · WorkFlow spine</b><br/>type every step, wire the CFG"]
+    L2 --> F1["IO flow<br/><i>dataflow / carries</i>"]
+    L2 --> F2["Context flow<br/><i>knowledge residency</i>"]
+    L2 --> F3["Knowledge flow<br/><i>tools vs. knowledge</i>"]
+    L2 --> F4["HIL flow<br/><i>human-in-the-loop gates</i>"]
+    F1 --> A["<b>Stage 4 · Assemble</b><br/>pure code — join the views<br/>on the rule-id spine"]
+    F2 --> A
+    F3 --> A
+    F4 --> A
+    A --> G["<b>Gate battery</b><br/>G1 standalone · G4 compile oracle<br/>G5 STRUCT-COV"]
+    G -- "fail → per-error-class repair,<br/>bounded, re-gated" --> A
+    G -- pass --> OUT["AG-IR"]
+```
+
+- **The Spec loop** ([`spec_loop.jac`](src/compiler/ai/spec_loop.jac)) is the
+  anchor. A model extracts candidate rules, but a **deterministic grounding
+  check** drops any rule whose quote is not verbatim in the skill — a
+  hallucinated rule cannot produce a matching span, so the loop can never
+  declare victory over an ungrounded spec. Three coverage critics hunt for
+  dropped obligations (self-filtered by the same grounding check), and a code
+  audit catches modality drift — e.g. a conditional quietly inflated into an
+  unconditional MUST. The loop exits only when the spec is sound ∧ complete ∧
+  drift-free; the frozen RuleSet is what every later stage is audited against.
+- **The spine and the four flows** type every step against that RuleSet and
+  annotate it from four angles. The flows are read-shared / write-isolated, so
+  they fan out **concurrently** — using the same `flow`/`wait` mechanism the
+  compiler itself emits for `SPAWN` nodes.
+- **The gates** ([`gates.jac`](src/compiler/ai/gates.jac)) are typed verdicts
+  that must be routed — never a silent success. **G4, the compile oracle**,
+  round-trips every candidate IR through the mechanical back-end and the `jac`
+  type-checker: a deterministic ground truth a hand-lifted skill never has.
+  **G5 STRUCT-COV** checks the *compiled module* realizes every mandate.
+- **Repair** is per-error-class and bounded: view-level issues route back to
+  the flow that owns the view; compile failures drive a scoped fix-only-this
+  edit loop. Exhaustion returns an honest failure with its errors attached.
+
+A gate failure **raises** — Sigil refuses to persist an unfaithful skill.
+
+### LOWER — the mechanical back-end
+
+[`mechanical/compiler.jac`](src/compiler/mechanical/compiler.jac) transpiles
+the AG-IR *as written* into a Jac **object-spatial program** — nodes, edges,
+and a walker that traverses them. Every IR construct has one Jac form; if
+lowering ever needs a judgment call, the IR was underspecified and the
+*front-end* is at fault. Some of the load-bearing lowerings:
+
+- a `GEN-*` node becomes a typed `by llm` slot: its `reads` are typed
+  parameters, its knowledge residents ride the `sem` prompt, its `writes` are
+  assigned — the model fills a slot, it doesn't improvise a step;
+- a model-owned `ROUTE` lowers to LLM-guided graph traversal
+  (`visit [-->] by llm(...)`) — the model picks the branch, the graph defines
+  the branches;
+- tool snippets are synthesized **runnable** (inline Python, subprocess'd
+  shell, `node` for JS…), wrapped param-driven — never pasted as prose;
+- `SPAWN` fans sub-agents out via Jac's `flow`/`wait` concurrency;
+- `FORBIDDEN` rules become node constraints — there is no edge to lower them
+  to, by design.
+
+### Eject — one file, no harness needed
+
+The generated module embeds its full runtime helper library, so `-e` packaging
+is just a `jac run` shebang plus a CLI shim:
 
 ```bash
-JAC="jac run main.jac --"
-$JAC chat            # a Claude-style REPL: markdown replies, a LIVE trace of every
-                     # tool call, and inline approval prompts for gated shell commands
+sigil compile ./SKILL.md                 # compile onto Sigil's graph
+sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runnable
+./agent.jac "run the skill"              # no sigil, no session, no graph needed
 ```
 
-One agent, one running conversation, the full tool-belt:
+The AG-IR provenance stays on Sigil's graph; the runnable carries none of it.
 
-- **Sandboxed workspace** — `ws_read/ws_write/ws_edit/ws_list` are **jailed** to one
-  directory (an escaping path is refused, not clamped); `ws_exec` runs only through the
-  **exec-approval gate** and, per `sandbox_mode`, in a cwd-confined subprocess (`jail`,
-  default) or a locked-down Docker container (`docker`, `--network none --cap-drop ALL`).
-- **Web** — `web_search` (keyless) + `web_fetch` with an **SSRF guard** (loopback /
-  private / link-local hosts refused).
-- **Its own cron** — `schedule_task` / `list_scheduled` / `cancel_scheduled`. "every
-  morning", "in 2 hours", "on a cron" all schedule real `CronJob` nodes from chat.
-- **Memory & skills** — `remember_fact` / `recall_memory`, and `learn_skill` to
-  crystallize a durable, reusable procedure (the frontier→AG-IR→OSP loop) mid-chat.
-- **Parallel sub-agents** — `spawn_parallel` fans independent sub-tasks out to
-  concurrent workers via Jac's **`flow`/`wait`** over `root spawn` (a `SubAgent` walker
-  per task); `spawn_subagent` delegates one. They finish in ~1× wall-clock, not N×.
-- **External** — `mcp_call` (any registered MCP tool) and `send_message` (any channel).
+### Replay — recorded runs as free regression tests
 
-Everything drives the **same persistent graph** as the one-shot commands, so a fact
-remembered or a job scheduled in chat is there for `solve`, cron, and the Observatory.
+Sigil's observability log records every LLM call's wire content. `replay`
+re-executes a recorded run's cognition through a (re)compiled module — no
+model, no cost, no nondeterminism. Change the compiler, replay the corpus:
+any expensive live failure becomes a permanent free test case.
 
-### Connect a messaging channel
+## The runtime around the compiler
 
-Sigil's messaging contract is one webhook: an adapter forwards each inbound message to
-`POST /walker/api_inbound` as `{channel, peer, text}` and delivers the reply. Ask in
-chat ("how do I connect Discord?") or use the guided commands:
+The compiler is the core; Sigil also ships a persistent agent built on it. The
+agent **is an object-spatial graph**: its skills are compiled `TaskGraph`s, its
+memory and config are nodes, and `solve` routes every task through them.
+
+```mermaid
+flowchart LR
+    T["task"] --> R{"route"}
+    R -- HIT --> X["run the compiled skill<br/>on the small model"]
+    R -- MISS --> C["frontier model:<br/>compile a new skill"] --> P["persist on the graph"] --> X
+    R -- PARTIAL --> M["frontier model:<br/>mutate an existing skill"] --> P
+    X -- "failure valve" --> M
+    X --> OUT["result"]
+```
+
+The expensive model is paid **once per class of task** — to compile the
+harness. The cheap model rides it forever; on a miss or a failure the frontier
+compiles or mutates, and the new version persists.
+
+```mermaid
+graph LR
+    root -- Embodies --> Soul["Soul<br/><i>persona · ethos · model tiers</i>"]
+    root -- Anchored --> Registry["Registry<br/><i>the skills</i>"]
+    Soul -- Knows --> Spec["Spec<br/><i>the AG-IR contract</i>"]
+    Soul -- Remembers --> Memory["Memory<br/><i>durable facts</i>"]
+    Soul -- Owns --> Registry
+    Registry -- Crystallized --> TG["TaskGraph<br/><i>a compiled skill</i>"]
+    TG -- Ran --> Attempt["Attempt<br/><i>every run</i>"]
+    TG -- MutatedFrom --> TG
+```
+
+Three memory layers, all graph-native: **procedural** (the compiled skills),
+**episodic** (`Attempt` nodes — every run and its outcome), **semantic**
+(`Memory` nodes — durable facts, injected at *execution* time, never baked
+into the compiled procedure, which stays class-general).
+
+Around that core, the usual agent surface — all driving the same graph:
+
+- **Chat** — a conversational, tool-using ReAct agent (`sigil chat`): jailed
+  workspace with an exec-approval gate, SSRF-guarded web tools, its own cron,
+  parallel sub-agents, and `learn_skill` to compile a skill mid-conversation.
+- **Skill ingress, three forms** — `register-skill ./SKILL.md` (the compiler),
+  `./procedure.agir agir` (hand-authored IR, no model call), `./foo_v1.jac osp`
+  (a precompiled module).
+- **MCP** — `add-mcp` registers any stdio/SSE/HTTP tool server; the compiler
+  binds those tool names when it compiles, and live runs dispatch to them.
+- **Channels** — Discord / Telegram / WhatsApp / Slack ride one webhook
+  contract (`POST /walker/api_inbound`).
+- **Cron** — real `CronJob` nodes on the graph, schedulable from chat.
+- **Observatory** — `sigil serve`: a live web UI over the graph with full
+  token observability on every run.
+
+Execution isolation: a compiled agent builds its own task-graph when it runs,
+so Sigil runs each compiled module in a **separate subprocess** — the run's
+throwaway graph never touches Sigil's own.
+
+## Install & use
 
 ```bash
-$JAC channel setup telegram          # step-by-step: token → env var → webhook wiring
-$JAC channel connect tg telegram     # registers the Channel node + a token SecretRef
+curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash
 ```
-
-Supported guides: **discord · telegram · whatsapp · slack** (each rides the same
-`api_inbound` contract; the per-provider adapter is the only glue).
-
-## Documentation
-
-The reference lives in [`docs/reference/`](docs/reference/) — plain markdown, browsable
-here on GitHub, and **loaded at runtime by the agent itself**, so what you read is exactly
-what Sigil reads to answer questions about itself:
-
-- [overview](docs/reference/overview.md) · [configuration](docs/reference/configuration.md)
-  · [chat & tools](docs/reference/chat-and-tools.md)
-  · [workspace & sandbox](docs/reference/workspace-and-sandbox.md)
-- [automation & cron](docs/reference/automation-and-cron.md)
-  · [channels](docs/reference/channels.md)
-  · [memory & skills](docs/reference/memory-and-skills.md)
-  · [models](docs/reference/models.md)
-
-Ask in chat ("how does the sandbox work?") and Sigil answers from these via its
-`read_docs` tool; or read them from the CLI with `sigil docs [<topic>]` (in the REPL,
-`/docs`).
-
-## Layout
-
-The two entrypoints live at the repo root; the agent itself is the `src/` package.
-
-```
-main.jac                 CLI entrypoint (chat / serve / solve / config / soul / channel / … )
-observatory.jac          full-stack server entrypoint (`sigil serve`, or `jac start`) — API + web UI
-jac.toml                 project + dependency manifest
-src/                     the agent package
-  sigil.jac                graph model + walkers + the two-tier cognition (crystallize/execute)
-  chat_agent.jac           the conversational ReAct agent — the full chat-mode tool-belt
-  sigil_workspace.jac      the sandbox: jailed file tools, gated exec, SSRF-guarded web
-  sigil_subagents.jac      parallel sub-agents (flow/wait over root-spawned SubAgent walkers)
-  sigil_channels_setup.jac channel connection guides + one-call graph bootstrap
-  sigil_docs.jac           self-docs loader — serves docs/reference to the read_docs tool + CLI
-  sigil_runtime.jac        disk + OS glue: persist a lowered module, run it isolated
-  sigil_mcp.jac            adapter over byLLM's native McpClient — discovery + rung-0 dispatch
-  agent.jac                run_task hook bus + the OpenAI-compatible walkers (api_*)
-  channels.jac             messaging surface + inbound→reply loop + reactions/threads/edits
-  cron.jac / sigil_cron.jac  scheduling (graph CronJob/CronRun; native due-time math)
-  hooks.jac                lifecycle hook bus (before/after_solve, message_received, …)
-  approvals.jac            exec-approval gate + allowlist + break-glass elevation
-  sigil_secrets.jac        SecretRef indirection (env-backed, redacted)
-  sigil_sessions.jac       per-dm_scope transcripts with daily reset
-  sigil_tasks.jac          background task ledger (Attempt + CronRun projection)
-  sigil_plugins.jac        openclaw.plugin.json manifest install
-  sigil_migrate.jac        OpenClaw export → graph migration
-  sigil_chat.jac           chat REPL (markdown, live tool trace, inline approvals) + setup/config
-  views.jac / sigil_observe.jac  Observatory graph + token-observability projections
-  compiler/                vendored AG-IR → OSP compiler (the LOWER engine) + runtime asset
-  contracts/               the AG-IR authoring contract (seed for the on-graph Spec node)
-  *.test.jac               unit-test annexes (run with `jac test src/<module>.jac`)
-  crystallized/            (runtime) lowered OSP modules — the agent's learned skills
-web/                     the Observatory browser client (cl)
-.jac/data/               (runtime) the persistent graph — one store shared by CLI and server
-```
-
-Execution isolation: a compiled OSP agent builds its *own* task-graph off `root`
-when it runs, so Sigil runs each crystallized module in a **separate
-subprocess** — the run's throwaway graph never touches Sigil's own.
-
-## Use
 
 ```bash
-# the graph persists in .jac/data/sigil.db across every invocation —
-# the same store `sigil serve` (the API + Observatory web UI) runs on
-JAC="jac run main.jac --"
-
-$JAC soul                                        # identity, config, skills & memory (all graph state)
-$JAC teach "the user always wants CSV with a header row"
-$JAC configure small_model ollama_chat/qwen3:8b  # mutate config on the graph — no file written
-$JAC solve "extract the tables from report.pdf as csv"   # crystallize → run → learn
-$JAC solve "pull the tables out of invoice.pdf"          # HIT: reuse the crystallized procedure
-$JAC library                                     # the crystallized skills, with run stats
+sigil compile ./SKILL.md -e agent.jac        # the compiler, end to end
+sigil solve "turn report.pdf into clean CSV" # the agent: compile on miss, reuse on hit
+sigil solve "pull the tables out of invoice.pdf"   # HIT — runs the compiled skill
+sigil library                                # the compiled skills, with run stats
+sigil soul                                   # identity, config, skills & memory
+sigil teach "always give me CSV with a header row"
 ```
 
 Cognition is configured on the graph (or seeded from env on first boot):
-`SIGIL_FRONTIER` (default `gpt-5`), `SIGIL_SMALL` (default `ollama_chat/qwen3:32b`),
-`SIGIL_ROUTER`. The frontier needs its provider key; the small model can be local.
+`SIGIL_FRONTIER` (the compiler's model, default `gpt-5`), `SIGIL_SMALL` (the
+execution model, default `ollama_chat/qwen3:32b`, can be fully local),
+`SIGIL_ROUTER`. An ejected runnable picks its model from `SIGIL_MODEL`.
+
+## Layout
+
+```
+main.jac                 CLI entrypoint (compile / solve / chat / serve / …)
+observatory.jac          full-stack server entrypoint — API + web UI
+src/
+  compiler/              THE COMPILER
+    ai/                    LIFT: spec_loop · workflow · flows · assemble · gates · repair · eject · replay
+    mechanical/            LOWER: the AG-IR → OSP transpiler + runtime assets
+  contracts/             the AG-IR standard (primitives · authoring contract)
+  sigil.jac              graph model + routing + the compile/execute cognition
+  chat_agent.jac         the conversational ReAct agent
+  sigil_workspace.jac    sandbox: jailed file tools, gated exec, SSRF-guarded web
+  agent.jac / channels.jac / cron.jac / hooks.jac / …   the runtime surface
+web/                     the Observatory browser client
+.jac/data/               (runtime) the persistent graph
+```
+
+Compiler deep-dive: [`src/compiler/README.md`](src/compiler/README.md). The
+user reference lives in [`docs/reference/`](docs/reference/) — loaded at
+runtime by the agent itself, so what you read is exactly what Sigil reads to
+answer questions about itself.
 
 ## Status
 
-The graph model, routing, the frontier→AG-IR→compile→persist pipeline, and the
-full soul/memory/config lifecycle are built and verified: the compile half lowers
-a real AG-IR to a working OSP `run()`; `jac check` is clean; and `teach` /
-`configure` / `recall` / `soul` persist across separate processes. The live
-`solve` loop needs the configured models (frontier provider key + a small model).
+The compiler is built and verified end to end: the gated LIFT converges on
+MockLLM-driven tests, G4 round-trips real AG-IRs through the mechanical half
+with a clean `jac check`, and ejected runnables execute standalone. The graph
+runtime (routing, soul/memory/config lifecycle, chat, cron, channels,
+Observatory) is built and tested; the live `solve` loop needs the configured
+models (a frontier provider key + a small model, which can be local).
