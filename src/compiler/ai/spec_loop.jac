@@ -74,7 +74,6 @@ glob lift_llm: any = Model(model_name="gpt-4o-mini");
 glob _LIFT_PINNED: bool = False;   # tests / embedders pin a model (e.g. MockLLM)
 
 def pin_lift_llm(m: any) -> None {
-    global lift_llm, _LIFT_PINNED;
     lift_llm = m;
     _LIFT_PINNED = True;
 }

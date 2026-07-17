@@ -104,7 +104,6 @@ glob flows_llm: any = Model(model_name="gpt-4o-mini");
 glob _FLOWS_PINNED: bool = False;
 
 def pin_flows_llm(m: any) -> None {
-    global flows_llm, _FLOWS_PINNED;
     flows_llm = m;
     _FLOWS_PINNED = True;
 }

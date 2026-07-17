@@ -1432,7 +1432,7 @@ def _emit_run(ir: any, walker_name: any) -> str {
     types = ir.get("types");
     edges = _list(ir.get("edges"));
     nodes = _list(ir.get("nodes"));
-    out: list = ["def run(task: str, model: Model, skill: str) -> str {", "    global llm;", "    llm = model;", ""];
+    out: list = ["def run(task: str, model: Model, skill: str) -> str {", "    llm = model;", ""];
     var: dict = {};
     for n in nodes {
         nid = n.get("id");

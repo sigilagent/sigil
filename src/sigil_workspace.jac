@@ -31,12 +31,11 @@ glob TRACE: list = [];        # [{tool, detail, ok}] — every tool call this pr
 glob _SINK: any = None;       # callback(tool, detail, ok) — live render hook
 glob _APPROVER: any = None;   # callback(command)->bool — inline approve of a pending exec
 
-def set_trace_sink(fn: any) -> None { global _SINK; _SINK = fn; }
-def set_approver(fn: any) -> None { global _APPROVER; _APPROVER = fn; }
-def drain_trace() -> list { global TRACE; out = list(TRACE); TRACE = []; return out; }
+def set_trace_sink(fn: any) -> None { _SINK = fn; }
+def set_approver(fn: any) -> None { _APPROVER = fn; }
+def drain_trace() -> list { out = list(TRACE); TRACE = []; return out; }
 
 def _trace(tool: str, detail: str, ok: bool = True) -> None {
-    global TRACE, _SINK;
     rec = {"tool": tool, "detail": detail[:200], "ok": ok};
     TRACE.append(rec);
     if _SINK is not None {
@@ -52,7 +51,6 @@ glob _WS_ROOT: str = "";
 def ws_root() -> str {
     # The single directory every file tool is confined to. Read from the Soul
     # (config on the graph), default ~/.sigil/workspace, created on first use.
-    global _WS_ROOT;
     soul = awaken();
     want = str(soul.workspace) if soul.workspace else os.path.expanduser("~/.sigil/workspace");
     want = os.path.abspath(os.path.expanduser(want));

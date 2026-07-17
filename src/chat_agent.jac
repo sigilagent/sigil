@@ -34,7 +34,7 @@ glob CHAT_HISTORY: list = [];
 glob CHAT_INFO: dict = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
 
-def set_token_sink(fn: any) -> None { global _TOKEN_SINK; _TOKEN_SINK = fn; }
+def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
 
 # ---------------------------------------------------------------------------
 # Bridge tools — thin wrappers over the graph-native subsystems, each with a
@@ -223,7 +223,6 @@ def chat_agent(message: str) -> str by chat_llm(
 def _refresh_info(message: str) -> None {
     # Rebuild CHAT_INFO IN PLACE (never reassign the glob) so byLLM's incl_info
     # sees the current soul every turn — persona, principles, workspace, memory.
-    global CHAT_INFO;
     s = describe_soul();
     wi = workspace_info();
     info: dict = {
@@ -246,7 +245,6 @@ def chat_turn(message: str) -> dict {
     # ReAct agent, and STREAMS the reply token-by-token: chat_agent is `stream=True`,
     # so it returns a generator; we emit each token to the token sink (the REPL renders
     # it live) while accumulating the full reply for history + the return value.
-    global chat_llm, CHAT_HISTORY;
     chat_llm = bind_chat_model();
     _refresh_info(message);
     drain_trace();   # clear any stale trace
@@ -266,7 +264,6 @@ def chat_turn(message: str) -> dict {
 }
 
 def chat_reset() -> str {
-    global CHAT_HISTORY;
     CHAT_HISTORY = [];
     return "conversation reset";
 }
