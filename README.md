@@ -92,7 +92,7 @@ agent** (`chat_agent.jac`) that can do everything from a single conversation —
 way you'd use OpenClaw, but graph-native.
 
 ```bash
-JAC="jac run main.jac -s sigil.session --"
+JAC="jac run main.jac --"
 $JAC chat            # a Claude-style REPL: markdown replies, a LIVE trace of every
                      # tool call, and inline approval prompts for gated shell commands
 ```
@@ -154,8 +154,8 @@ Ask in chat ("how does the sandbox work?") and Sigil answers from these via its
 The two entrypoints live at the repo root; the agent itself is the `src/` package.
 
 ```
-main.jac                 CLI entrypoint (chat / solve / config / soul / channel / tasks / … )
-observatory.jac          full-stack server entrypoint (`jac start`) — API + web UI
+main.jac                 CLI entrypoint (chat / serve / solve / config / soul / channel / … )
+observatory.jac          full-stack server entrypoint (`sigil serve`, or `jac start`) — API + web UI
 jac.toml                 project + dependency manifest
 src/                     the agent package
   sigil.jac                graph model + walkers + the two-tier cognition (crystallize/execute)
@@ -183,7 +183,7 @@ src/                     the agent package
   *.test.jac               unit-test annexes (run with `jac test src/<module>.jac`)
   crystallized/            (runtime) lowered OSP modules — the agent's learned skills
 web/                     the Observatory browser client (cl)
-*.session                (runtime) the persistent graph
+.jac/data/               (runtime) the persistent graph — one store shared by CLI and server
 ```
 
 Execution isolation: a compiled OSP agent builds its *own* task-graph off `root`
@@ -193,8 +193,9 @@ subprocess** — the run's throwaway graph never touches Sigil's own.
 ## Use
 
 ```bash
-# the graph persists in a session file across every invocation
-JAC="jac run main.jac -s sigil.session --"
+# the graph persists in .jac/data/sigil.db across every invocation —
+# the same store `sigil serve` (the API + Observatory web UI) runs on
+JAC="jac run main.jac --"
 
 $JAC soul                                        # identity, config, skills & memory (all graph state)
 $JAC teach "the user always wants CSV with a header row"

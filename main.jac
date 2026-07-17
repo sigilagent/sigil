@@ -1,20 +1,25 @@
 """Sigil CLI — the agent has no config files. Its soul, skills and memory
-all live on the graph; persist that graph across invocations with a session file:
+all live on the graph, persisted automatically in `.jac/data/sigil.db` across runs:
 
-    jac run main.jac -s sigil.session -- chat                 # interactive Claude-style REPL
-    jac run main.jac -s sigil.session -- config               # interactive settings editor
-    jac run main.jac -s sigil.session -- solve "extract tables from report.pdf as csv"
-    jac run main.jac -s sigil.session -- solve "..."     # reuses / evolves the graph
-    jac run main.jac -s sigil.session -- soul
-    jac run main.jac -s sigil.session -- configure small_model ollama_chat/qwen3:8b
-    jac run main.jac -s sigil.session -- teach "the user always wants CSV with a header row"
-    jac run main.jac -s sigil.session -- library
+    jac run main.jac -- chat                 # interactive Claude-style REPL
+    jac run main.jac -- config               # interactive settings editor
+    jac run main.jac -- solve "extract tables from report.pdf as csv"
+    jac run main.jac -- solve "..."          # reuses / evolves the graph
+    jac run main.jac -- soul
+    jac run main.jac -- configure small_model ollama_chat/qwen3:8b
+    jac run main.jac -- teach "the user always wants CSV with a header row"
+    jac run main.jac -- serve                # REST API + Observatory web UI
 
 `chat` and `config` live in sigil_chat.jac (rich + prompt_toolkit); both drive the
-same persistent graph as the one-shot commands above.
+same persistent graph as the one-shot commands above — and as `serve`, which
+exposes that very graph through the Observatory.
 """
 
+import os;
 import sys;
+import time;
+import sqlite3;
+import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
@@ -35,6 +40,7 @@ import from src.sigil_tasks { tasks_list, tasks_show }
 import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
+import from src.sigil_runtime { _jac_bin }
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 def cli_args(raw: list) -> list {
@@ -55,11 +61,65 @@ def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
+# The all-zeros superroot — the root every plain `jac run` executes against.
+glob SUPERROOT: str = "00000000000000000000000000000000";
+
+def _align_guest_root(data_dir: str) -> bool {
+    # In server mode, anonymous requests to `:pub` walkers run as the internal
+    # `__guest__` user, whose root defaults to a fresh anchor — a graph parallel
+    # to the CLI's. Point guest at the superroot so the CLI and the Observatory
+    # read and write ONE graph. Returns True once the auth store has been seen
+    # (aligned or already correct); False while it doesn't exist yet.
+    users = os.path.join(data_dir, "users.db");
+    if not os.path.exists(users) { return False; }
+    try {
+        conn = sqlite3.connect(users);
+        conn.execute(
+            "UPDATE identity_users SET root_id = ? WHERE identities LIKE '%__guest__%' AND root_id != ?",
+            (SUPERROOT, SUPERROOT)
+        );
+        conn.commit();
+        conn.close();
+        return True;
+    } except Exception {
+        return False;
+    }
+}
+
+def serve_observatory(port: str) {
+    # `sigil serve` — run the full-stack server (REST API + Observatory web UI)
+    # on the same graph as the CLI. jac.toml pins the server's SQLite store to
+    # `.jac/data/sigil.db` (the CLI's project db); this handles the root side.
+    proj = os.path.dirname(os.path.abspath(__file__));
+    data = os.path.join(proj, ".jac", "data");
+    aligned = _align_guest_root(data);
+    cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac")];
+    if port { cmdline.extend(["--port", port]); }
+    p = subprocess.Popen(cmdline, cwd=proj);
+    try {
+        # First-ever start: the server creates the auth store moments after
+        # boot; align the guest root as soon as it lands so run #1 shares the
+        # graph too. Bounded poll — worst case ~5 min covers a cold client build.
+        tries = 0;
+        while (not aligned) and (p.poll() is None) and (tries < 600) {
+            time.sleep(0.5);
+            aligned = _align_guest_root(data);
+            tries += 1;
+        }
+        p.wait();
+    } except KeyboardInterrupt {
+        p.terminate();
+        p.wait();
+    }
+}
+
 with entry:__main__ {
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
-    if cmd == "solve" {
+    if (cmd == "serve") or (cmd == "observatory") {
+        serve_observatory(_arg(argv, 1));
+    } elif cmd == "solve" {
         task = _arg(argv, 1);
         skill = _arg(argv, 2);
         if not task {
@@ -447,6 +507,8 @@ with entry:__main__ {
         print("Sigil — a self-evolving object-spatial agent (soul, skills & memory on the graph)");
         print("  chat                        conversational tool-using REPL — run the whole agent from chat");
         print("                              (sandboxed files+shell, web, cron, memory, sub-agents, channels)");
+        print("  serve [port]                start the server: REST API + Observatory web UI, on the");
+        print("                              same graph the CLI uses (alias: observatory)");
         print("  setup                       first-run wizard to configure models & persona");
         print("  channel setup <kind>        how to connect discord|telegram|whatsapp|slack");
         print("  channel connect <name> <kind>   register a channel + its token secret, print next steps");
@@ -470,6 +532,6 @@ with entry:__main__ {
         print("  register-skill <path> [md|agir|osp]   add a skill (SKILL.md lifted / AG-IR / OSP)");
         print("  compile <SKILL.md> [-e [out.jac]]     gated AI-compile onto the graph; -e ejects a standalone runnable .jac");
         print("  replay <agent.jac> <obs.jsonl> \"<task>\"   re-run recorded cognition through a module (free)");
-        print("  (add  -s sigil.session  to persist the graph across runs)");
+        print("  (the graph persists in .jac/data/sigil.db across runs — CLI and server share it)");
     }
 }
