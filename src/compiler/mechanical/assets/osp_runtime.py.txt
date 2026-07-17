@@ -39,6 +39,17 @@ _ensure_path()
 # ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
 def _progress(node):
     import os, json, time
+    # ---- step budget: a walker cycling a graph (an unanswered HIL loop, a bad
+    # route) must abort LOUDLY, not spin to the harness timeout. Budget is
+    # env-tunable; the abort names the node and the visit count. ----
+    g = globals()
+    g["_NVISITS"] = g.get("_NVISITS", 0) + 1
+    budget = int(os.environ.get("AGIR_STEP_BUDGET", "256") or 256)
+    if g["_NVISITS"] > budget:
+        raise RuntimeError(
+            "step budget exhausted: %d node visits (budget %d), last node '%s' — "
+            "likely a loop with no converging guard; raise AGIR_STEP_BUDGET or fix the route"
+            % (g["_NVISITS"], budget, node))
     p = os.environ.get("AGIR_PROGRESS", "")
     if not p:
         return
@@ -49,6 +60,39 @@ def _progress(node):
             f.flush()
     except Exception:
         pass
+
+# ---- human-in-the-loop channel: file-based Q&A (sigil chat/approvals attach it
+# via HIL_QA_FILE; the superpowers HIL session prototyped this). Batch-safe: with
+# no channel attached it returns an HONEST sentinel immediately — never blocks,
+# never fabricates a user. ----
+def _ask_user(question=None):
+    import os, time, json
+    qf = os.environ.get("HIL_QA_FILE", "")
+    if not qf:
+        return "[no human channel attached - proceeding without user input]"
+    af = qf + ".answers"
+    n = 0
+    try:
+        n = sum(1 for _ in open(qf))
+    except Exception:
+        pass
+    try:
+        with open(qf, "a") as f:
+            f.write(json.dumps({"i": n, "q": str(question)}) + "\n")
+            f.flush()
+    except Exception:
+        return "[human channel write failed]"
+    deadline = time.time() + int(os.environ.get("HIL_TIMEOUT", "600") or 600)
+    while time.time() < deadline:
+        try:
+            for line in open(af):
+                rec = json.loads(line)
+                if rec.get("i") == n:
+                    return str(rec.get("a", ""))
+        except Exception:
+            pass
+        time.sleep(2)
+    return "[human did not answer in time]"
 
 # ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
 def _strip_fences(code):
