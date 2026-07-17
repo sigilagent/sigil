@@ -1,6 +1,8 @@
 <div align="center">
-  <img src="docs/assets/logo.svg" width="110" alt="the Sigil mark — a compiled graph">
-  <h1>Sigil</h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-lockup.png">
+    <img src="docs/assets/logo-lockup-light.png" width="440" alt="SigilAgent">
+  </picture>
   <p><strong>The skill compiler — <code>SKILL.md</code> in, a typed agent harness out.</strong></p>
   <p>
     <a href="https://github.com/sigilagent/sigil/actions/workflows/ci.yml"><img src="https://github.com/sigilagent/sigil/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
