@@ -18,6 +18,7 @@ falling back to builtin input() when piped (so it stays scriptable).
 
 import sys;
 import os;
+import from .sigil_logo { BANNER_LOGO }
 import from .sigil { describe_soul, configure, library, recollect, teach }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
@@ -81,15 +82,7 @@ def _banner(console: any) {
     s = describe_soul();
     wi = workspace_info();
     cm = str(s["chat_model"]) if s["chat_model"] else "unset";
-    logo = (
-        "[#a78bfa]      ◆[/]\n"
-        + "[#8b5cf6]    ╱╱ ╲╲[/]\n"
-        + "[#a78bfa]  ◆  [/][#8b5cf6]╲[/][#22d3ee]▲[/][#8b5cf6]╱[/][#a78bfa]  ◆[/]\n"
-        + "[#8b5cf6]  ┃   [/][bold #22d3ee]◉[/][#8b5cf6]   ┃[/]\n"
-        + "[#a78bfa]  ◆  [/][#8b5cf6]╱ ╲[/][#a78bfa]  ◆[/]\n"
-        + "[#8b5cf6]    ╲╲ ╱╱[/]\n"
-        + "[#a78bfa]      ◆[/]"
-    );
+    logo = "\n".join(BANNER_LOGO);
     info = (
         "[bold #a78bfa]S I G I L[/]  [dim]v" + _version() + "[/]\n"
         + "[dim]the whole agent, from one conversation[/]\n\n"
@@ -99,7 +92,7 @@ def _banner(console: any) {
         + "[dim]skills   [/] " + str(s["skills"])
     );
     t = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2));
-    t.add_column(); t.add_column();
+    t.add_column(); t.add_column(vertical="middle");
     t.add_row(logo, info);
     console.print();
     console.print(t);
