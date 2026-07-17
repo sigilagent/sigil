@@ -555,7 +555,7 @@ with entry:__main__ {
         print("                            skills, config & memory all live on one graph.");
         print("");
         print("compile & run skills");
-        print("  compile <SKILL.md> [-e [out.jac]]   gated AI-compile onto the graph; -e ejects a standalone runnable .jac");
+        print("  compile <SKILL.md> [-e|--eject [out.jac]]   gated compile onto the graph; -e ejects a standalone runnable .jac");
         print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md lifted / hand-authored AG-IR / precompiled OSP)");
         print("  solve \"<task>\" [skill]              route a task: run a compiled skill (HIT), compile a new one (MISS), or adapt one (PARTIAL)");
         print("  library                             list compiled skills, with run stats");
