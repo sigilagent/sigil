@@ -10,12 +10,13 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | Topic | What it covers |
 |---|---|
 | [overview](overview.md) | What Sigil is and how a request flows through it |
+| [skill-compilation](skill-compilation.md) | The compiler: SKILL.md → AG-IR → runnable agent, the gates, eject & replay |
 | [configuration](configuration.md) | Every `configure` key and what it does |
 | [chat-and-tools](chat-and-tools.md) | Chat mode and the full tool-belt |
 | [workspace-and-sandbox](workspace-and-sandbox.md) | The sandboxed workspace, file jail, and exec gate |
 | [automation-and-cron](automation-and-cron.md) | Scheduling work the agent runs later |
 | [channels](channels.md) | Connecting Discord / Telegram / WhatsApp / Slack |
-| [memory-and-skills](memory-and-skills.md) | Durable memory and crystallized skills |
+| [memory-and-skills](memory-and-skills.md) | Durable memory and the compiled-skill library |
 | [models](models.md) | Model tiers, aliases, fallbacks, and providers |
 
 From the CLI: `sigil docs` lists topics, `sigil docs <topic>` prints one. In the chat

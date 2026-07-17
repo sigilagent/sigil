@@ -238,3 +238,4 @@ src/*_v[0-9]*.jac
 
 # native build artifacts (platform-specific)
 bin/
+_site/

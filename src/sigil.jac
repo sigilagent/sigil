@@ -1,4 +1,4 @@
-"""Sigil — a self-evolving agent that IS an object-spatial graph.
+"""Sigil — a skill compiler whose compiled skills, config and memory ARE one object-spatial graph.
 
     frontier model  --crystallize-->  AG-IR  --compile-->  OSP  --persist-->  a node
     small model     --execute-->      the crystallized node's OSP
@@ -402,7 +402,7 @@ def memory_context(mems: list[Memory]) -> str {
     return "What the agent remembers:\n" + "\n".join(["- " + m.content for m in mems]) + "\n";
 }
 
-# The self-evolving hook: distill durable facts from a completed task.
+# The learning hook: distill durable facts from a completed task.
 sem distill = """From a completed TASK and its RESULT, extract 0-3 DURABLE facts worth
 remembering for future tasks (stable preferences, environment facts, conventions the
 user relies on). Skip anything one-off or already obvious. Return a JSON list of short

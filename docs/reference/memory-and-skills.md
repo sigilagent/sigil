@@ -1,6 +1,6 @@
 # Memory and skills
 
-Sigil has three graph-native memory layers plus a library of crystallized skills.
+Sigil has three graph-native memory layers plus the library of **compiled skills**.
 
 ## The three memory layers
 
@@ -9,18 +9,21 @@ Sigil has three graph-native memory layers plus a library of crystallized skills
   are also grown automatically by distilling durable facts from completed tasks, and are
   injected into chat context each turn.
 - **Episodic** (`Attempt` nodes) — every run, its outcome, and a summary.
-- **Procedural** (`TaskGraph` nodes) — the crystallized skills themselves.
+- **Procedural** (`TaskGraph` nodes) — the compiled skills themselves.
 
 Retrieval mode is set by `recall_mode`: `lexical` (deterministic word overlap, no model),
 `vector` (litellm embeddings + cosine, needs `embed_model`), or `hybrid`.
 
-## Skills (crystallized procedures)
+## Skills (compiled procedures)
 
-The first time Sigil handles a class of task via `solve`, the **frontier model** authors a
-typed procedure (AG-IR), a compiler lowers it to a runnable OSP module, and it's persisted
-as a `TaskGraph`. Later requests of the same kind are a **HIT** and run on the cheap model;
-a near-match is a **PARTIAL** (the procedure is mutated/adapted); a new kind is a **MISS**
-(authored fresh).
+A skill enters the library two ways: explicitly — `sigil compile ./SKILL.md`
+runs the full gated pipeline (see [skill-compilation](skill-compilation.md)) —
+or at runtime via `solve`, where "crystallizing" is the same compiler applied on
+demand: the **frontier model** authors the typed procedure (AG-IR), the
+mechanical half lowers it, and the result persists as a `TaskGraph`. Later
+requests of the same kind are a **HIT** and run on the cheap model; a near-match
+is a **PARTIAL** (the procedure is recompiled to cover it); a new kind is a
+**MISS** (compiled fresh).
 
 In chat, `learn_skill(task)` crystallizes a reusable skill on demand; use it only when you
 want a durable, repeatable procedure rather than a one-off action.

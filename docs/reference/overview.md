@@ -1,27 +1,36 @@
 # Overview
 
-Sigil is a self-evolving agent that **is** an object-spatial graph. Its identity,
-configuration, skills, and memory are all nodes on one persistent graph rooted at
-`root` — there are no `SOUL.md` / `SKILL.md` / config files on disk.
+Sigil is a **skill compiler**. You write a skill as plain markdown; Sigil
+compiles it into a typed agent harness — a program the model runs *inside*, so
+every step, rule, and check in the skill is enforced by structure rather than
+hoped for in a prompt. See [skill-compilation](skill-compilation.md) for the
+pipeline.
 
-## The two-tier idea
+Everything the compiler produces and needs lives on one persistent
+object-spatial graph — compiled skills, configuration, memory — there are no
+config files on disk.
 
-The first time Sigil sees a class of task, a **frontier model** authors a typed
-procedure (an AG-IR), a compiler lowers it to a runnable OSP agent, and that procedure
-is persisted on the graph. From then on a **cheap/small model** executes it. You pay the
-expensive model once to build the harness; the cheap model rides it forever.
+## The two-tier economics
+
+A **frontier model** is paid once, at compile time, to author the typed
+procedure (the AG-IR) that the compiler lowers and gate-checks. From then on a
+**cheap, small, even fully-local model** executes the compiled harness — the
+structure a weak model would skip is no longer skippable.
 
 ## How a request flows
 
-- **Chat mode** (`sigil chat`) — a conversational agent that holds a running
-  conversation and uses tools directly: files, shell, web, cron, memory, skills, MCP,
-  channels, and parallel sub-agents. This is the primary way to use Sigil. See
-  [chat-and-tools](chat-and-tools.md).
-- **`solve "<task>"`** — the one-shot crystallize→execute→learn loop: route the task to a
-  known skill (HIT), author a new one (MISS), or adapt an existing one (PARTIAL). See
+- **`sigil compile ./SKILL.md [-e out.jac]`** — the explicit path: compile a
+  skill onto the graph; `-e` also ejects one self-contained runnable program.
+- **`sigil solve "<task>"`** — the compiler applied at runtime: route the task
+  against the compiled-skill library (**HIT** — run it on the cheap model),
+  compile a new skill for a new class of task (**MISS**), or recompile an
+  existing one to cover a near-match (**PARTIAL**). See
   [memory-and-skills](memory-and-skills.md).
+- **Chat mode** (`sigil chat`) — a conversational agent over the same graph:
+  files, shell, web, cron, memory, skills, MCP, channels, parallel sub-agents.
+  See [chat-and-tools](chat-and-tools.md).
 
-## The graph (the "soul")
+## The graph (the compiler's persistent memory)
 
 ```
 root ──Embodies──▶ Soul ──Knows──────▶ Spec       the AG-IR contract
