@@ -7,6 +7,7 @@ on:
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
+      - ".github/scripts/build_docs.py"
   workflow_dispatch:
 
 # Allow the workflow to publish to Pages.
@@ -34,10 +35,17 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload docs/ artifact
+      # Render every reference doc to its own styled page (plus an index);
+      # the .md sources ship alongside — they stay the agent's own self-docs.
+      - name: Build docs pages
+        run: |
+          pip install --quiet markdown
+          python3 .github/scripts/build_docs.py
+
+      - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

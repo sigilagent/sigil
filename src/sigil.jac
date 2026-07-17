@@ -1,12 +1,12 @@
-"""Sigil — a self-evolving agent that IS an object-spatial graph.
+"""Sigil — a skill compiler whose compiled skills, config and memory ARE one object-spatial graph.
 
-    frontier model  --crystallize-->  AG-IR  --compile-->  OSP  --persist-->  a node
-    small model     --execute-->      the crystallized node's OSP
+    frontier model  --compile-->  AG-IR  --compile-->  OSP  --persist-->  a node
+    small model     --execute-->      the compiled node's OSP
     frontier model  --mutate-->       a new version node (lineage on the graph)
 
 The agent's *memory* and its *capability* are the same graph. A task routes
-through it: a HIT re-runs a crystallized procedure on a cheap model; a MISS
-crystallizes a new one with the frontier model; a partial match MUTATES an
+through it: a HIT re-runs a compiled procedure on a cheap model; a MISS
+compiles a new one with the frontier model; a partial match MUTATES an
 existing procedure into a new version. What persists is the *procedure* — the
 typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 """
@@ -23,7 +23,7 @@ import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
 
 # ---------------------------------------------------------------------------
-# The two-tier cascade. Frontier crystallizes (expensive, rare); small executes
+# The two-tier cascade. Frontier compiles (expensive, rare); small executes
 # (cheap, hot); router classifies (cheap). Names are env-overridable so the same
 # graph runs against gpt-5 + qwen3 locally or any pair.
 # ---------------------------------------------------------------------------
@@ -39,17 +39,17 @@ glob router: any   = Model(model_name=ROUTER_NAME);
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
 glob ETHOS: str    = "";   # the soul's operating principles, rebound from the graph at awaken()
-glob PROMPT_MODE: str = "full";  # full | minimal | none — how much context wraps the crystallizer/run
+glob PROMPT_MODE: str = "full";  # full | minimal | none — how much context wraps the compiler/run
 
 # ---------------------------------------------------------------------------
 # Cognition — the ONLY model calls in the system. Everything else is graph
 # mechanics + deterministic compile/run.
 # ---------------------------------------------------------------------------
-sem classify = """Route a TASK against the agent's KNOWN crystallized task-type
+sem classify = """Route a TASK against the agent's KNOWN compiled task-type
 signatures. Return EXACTLY one of:
-  - a signature from KNOWN, if the crystallized procedure already covers this task;
+  - a signature from KNOWN, if the compiled procedure already covers this task;
   - 'MUTATE:<signature>' if a known type is close but must be extended to fit;
-  - 'NONE' if no known type fits and a new procedure must be crystallized.
+  - 'NONE' if no known type fits and a new procedure must be compiled.
 Judge by the *class* of task, not surface wording.""";
 def classify(task: str, known: list[str]) -> str by router();
 
@@ -58,7 +58,7 @@ of task (never this one instance): e.g. 'pdf-extract', 'slack-digest',
 'invoice-parse', 'csv-to-chart'. Two tasks of the same kind must get the same name.""";
 def name_signature(task: str) -> str by router();
 
-sem author_agir = """You are the frontier crystallizer. Emit a COMPLETE AG-IR (the
+sem author_agir = """You are the frontier compiler. Emit a COMPLETE AG-IR (the
 YAML-with-frontmatter contract below) that a compiler lowers to a runnable OSP agent
 covering the whole CLASS of task the INTENT names — not merely this instance.
 
@@ -111,12 +111,12 @@ def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: 
 #                                        TaskGraph --MutatedFrom--> TaskGraph  (lineage)
 # ---------------------------------------------------------------------------
 edge Embodies {}       # root -> Soul       (the agent's identity/config, on the graph)
-edge Knows {}          # Soul -> Spec       (the crystallizer's contract, on the graph)
+edge Knows {}          # Soul -> Spec       (the compiler's contract, on the graph)
 edge Provides {}       # Soul -> McpServer  (registered external tool servers)
 edge Remembers {}      # Soul -> Memory     (semantic memory)
 edge Owns {}           # Soul -> Registry
 edge Anchored {}       # root -> Registry   (the skill library, hung off the persistent root)
-edge Crystallized {}   # Registry -> TaskGraph
+edge Crystallized {}   # Registry -> TaskGraph (legacy edge name — persisted on existing graphs)
 edge Ran {}            # TaskGraph -> Attempt
 edge MutatedFrom {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
 
@@ -124,7 +124,7 @@ edge MutatedFrom {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
 node Soul {
     has name: str = "sigil";
     has persona: str = "";        # voice / character
-    has ethos: list[str] = [];    # operating principles, woven into crystallization
+    has ethos: list[str] = [];    # operating principles, woven into compilation
     has frontier_model: str = ""; # cognition config — lives on the graph, not env
     has small_model: str = "";
     has router_model: str = "";
@@ -147,7 +147,7 @@ node Soul {
 
 node Spec {
     has kind: str = "agir-contract";
-    has body: str = "";           # the crystallizer's contract text, seeded onto the graph
+    has body: str = "";           # the compiler's contract text, seeded onto the graph
 }
 
 # --- External MCP servers the user registers (BYO tools), config on the graph
@@ -197,15 +197,15 @@ node Attempt {
 # ---------------------------------------------------------------------------
 # Graph operations (deterministic — no model calls except the byLLM defs above).
 # ---------------------------------------------------------------------------
-def latest_by_sig(crystals: list[TaskGraph]) -> list[TaskGraph] {
+def latest_by_sig(compiled_lib: list[TaskGraph]) -> list[TaskGraph] {
     # Keep only the highest-version TaskGraph per signature.
     best: dict = {};
-    for c in crystals {
+    for c in compiled_lib {
         cur = best.get(c.signature);
         if (cur is None) or (c.version > cur.version) { best[c.signature] = c; }
     }
     out: list[TaskGraph] = [];
-    for c in crystals {
+    for c in compiled_lib {
         if best.get(c.signature) is c { out.append(c); }
     }
     return out;
@@ -241,9 +241,9 @@ def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
 
 def bind_chat_model() -> any {
     # The model that powers chat-mode + sub-agents. Chat is the user-facing surface and
-    # has no crystallized procedure to lean on, so it wants the STRONG model: the `chat`
+    # has no compiled procedure to lean on, so it wants the STRONG model: the `chat`
     # tier falls back to `frontier` (not `small` — the small tier is for executing
-    # already-crystallized skills). Rebound from the graph so `configure chat_model` takes
+    # already-compiled skills). Rebound from the graph so `configure chat_model` takes
     # effect next turn. Returns a Model, or a ModelPool when a fallback chain is set.
     soul = awaken();
     name = soul.chat_model if soul.chat_model else (soul.frontier_model if soul.frontier_model else "gpt-4o");
@@ -282,12 +282,12 @@ def awaken() -> Soul {
     } else {
         soul = Soul(
             name="sigil",
-            persona="A pragmatic operator that crystallizes tasks into reliable, minimal procedures and runs them cheaply.",
+            persona="A pragmatic operator that compiles tasks into reliable, minimal procedures and runs them cheaply.",
             ethos=[
                 "Prefer mechanized structure over prose.",
                 "Never leave a step unembodied.",
                 "Ground verification in the real artifact, not a proxy.",
-                "Reuse a crystallized procedure before authoring a new one."
+                "Reuse a compiled procedure before authoring a new one."
             ],
             frontier_model=os.getenv("SIGIL_FRONTIER", "gpt-5"),
             small_model=os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"),
@@ -308,8 +308,8 @@ def awaken() -> Soul {
     ETHOS = "\n".join(["- " + e for e in soul.ethos]);
     router = model_for(soul.router_model if soul.router_model else soul.small_model);
     PROMPT_MODE = soul.prompt_mode if soul.prompt_mode else "full";
-    # ethos is woven into crystallization only in full mode; minimal/none keep the
-    # crystallizer to the structural contract (contract is always required for valid AG-IR).
+    # ethos is woven into compilation only in full mode; minimal/none keep the
+    # compiler to the structural contract (contract is always required for valid AG-IR).
     ETHOS = ("\n".join(["- " + e for e in soul.ethos])) if PROMPT_MODE == "full" else "";
     specs = [soul -->[?:Spec]];
     if specs { CONTRACT = specs[0].body; }
@@ -402,7 +402,7 @@ def memory_context(mems: list[Memory]) -> str {
     return "What the agent remembers:\n" + "\n".join(["- " + m.content for m in mems]) + "\n";
 }
 
-# The self-evolving hook: distill durable facts from a completed task.
+# The learning hook: distill durable facts from a completed task.
 sem distill = """From a completed TASK and its RESULT, extract 0-3 DURABLE facts worth
 remembering for future tasks (stable preferences, environment facts, conventions the
 user relies on). Skip anything one-off or already obvious. Return a JSON list of short
@@ -410,7 +410,7 @@ strings; return [] if nothing is worth keeping.""";
 def distill(task: str, result: str) -> list[str] by router();
 
 # Grounded verification — the quality gate the bare ok/success counter cannot give.
-# A crystallized run can EXIT ok yet be WRONG (empty, echoed input, off-task). The
+# A compiled run can EXIT ok yet be WRONG (empty, echoed input, off-task). The
 # grader judges the actual artifact against the task and scores it.
 obj EvalVerdict {
     has score: int = 0;        # 0-100: how well RESULT accomplishes TASK
@@ -435,7 +435,7 @@ def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origi
 
 def _lower(agir: str, sig: str) -> dict {
     # Compile the AG-IR; on a compile/parse failure, let the frontier REPAIR it and
-    # retry (self-healing crystallization). Returns {ok, osp, agir}.
+    # retry (self-healing compilation). Returns {ok, osp, agir}.
     cur = agir;
     err = "";
     for i in range(3) {
@@ -449,9 +449,9 @@ def _lower(agir: str, sig: str) -> dict {
     return {"ok": False, "osp": "", "agir": cur, "error": err};
 }
 
-def _crystallize_fresh(reg: Registry, sig: str, intent: str, task: str, version: int, origin: str) -> TaskGraph {
+def _compile_fresh(reg: Registry, sig: str, intent: str, task: str, version: int, origin: str) -> TaskGraph {
     # Author a FRESH AG-IR with the frontier for a KNOWN signature/version — the reusable
-    # core behind first crystallization AND relearn (which discards a degraded procedure
+    # core behind first compilation AND relearn (which discards a degraded procedure
     # and re-authors from scratch, rather than revising it like mutate does).
     tools = digest(mcp_servers());
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
@@ -459,17 +459,17 @@ def _crystallize_fresh(reg: Registry, sig: str, intent: str, task: str, version:
     if not low["ok"] {
         # Don't persist an empty module: it would later "run" as a no-op and surface
         # as a confusing small-model failure. Fail loudly with the real compile error.
-        raise RuntimeError("crystallize '" + sig + "': AG-IR did not compile to a runnable procedure: " + str(low.get("error", "unknown")));
+        raise RuntimeError("compile '" + sig + "': AG-IR did not compile to a runnable procedure: " + str(low.get("error", "unknown")));
     }
     path = write_module(str(low["osp"]), sig, version, WORKDIR);
     return _persist(reg, sig, intent, str(low["agir"]), path, origin, version);
 }
 
-def crystallize(reg: Registry, intent: str, task: str) -> TaskGraph {
+def compile_task(reg: Registry, intent: str, task: str) -> TaskGraph {
     # Frontier builds an AG-IR for the task CLASS (binding any registered MCP tools),
     # compiler lowers it (repairing on failure), we persist it as v1.
     sig = name_signature(task);
-    return _crystallize_fresh(reg, sig, intent, task, 1, "frontier");
+    return _compile_fresh(reg, sig, intent, task, 1, "frontier");
 }
 
 def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
@@ -488,7 +488,7 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
 }
 
 # ---------------------------------------------------------------------------
-# BYO MCP servers — registered on the graph (config), exposed to crystallized
+# BYO MCP servers — registered on the graph (config), exposed to compiled
 # agents via byLLM's native McpClient. Adding one takes effect on the next run.
 # ---------------------------------------------------------------------------
 def mcp_servers() -> list {
@@ -622,8 +622,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "") -> dic
             "issues": issues, "repairs": lr.repairs, "eject": ejected};
 }
 
-def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
-    # Small model executes the crystallized OSP. The crystallized PROCEDURE is
+def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
+    # Small model executes the compiled OSP. The compiled PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run
     # time, as a context preamble on the task — never baked into the procedure.
     # The user's registered MCP servers are exposed to the run's live tools.
@@ -636,30 +636,30 @@ def run_crystal(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     return res;
 }
 
-def select_target(reg: Registry, crystals: list[TaskGraph], verdict: str, task: str) -> TaskGraph {
-    # HIT -> existing procedure; PARTIAL -> mutate it; MISS -> crystallize a new one.
-    if (verdict == "NONE") or (not crystals) {
-        return crystallize(reg, task, task);
+def select_target(reg: Registry, compiled_lib: list[TaskGraph], verdict: str, task: str) -> TaskGraph {
+    # HIT -> existing procedure; PARTIAL -> mutate it; MISS -> compile a new one.
+    if (verdict == "NONE") or (not compiled_lib) {
+        return compile_task(reg, task, task);
     }
     if verdict.startswith("MUTATE:") {
         sig = verdict.split(":", 1)[1].strip();
-        for c in crystals { if c.signature == sig {
+        for c in compiled_lib { if c.signature == sig {
             return mutate(reg, c, task, "router flagged partial coverage");
         } }
-        return crystallize(reg, task, task);
+        return compile_task(reg, task, task);
     }
-    for c in crystals { if c.signature == verdict { return c; } }
-    return crystallize(reg, task, task);
+    for c in compiled_lib { if c.signature == verdict { return c; } }
+    return compile_task(reg, task, task);
 }
 
 def route_note(verdict: str, tg: TaskGraph) -> str {
-    if verdict == "NONE" { return "MISS -> crystallized " + tg.signature + " (frontier)\n"; }
+    if verdict == "NONE" { return "MISS -> compiled " + tg.signature + " (frontier)\n"; }
     if verdict.startswith("MUTATE:") { return "PARTIAL -> mutated " + tg.signature + " v" + str(tg.version) + " (frontier)\n"; }
     return "HIT " + tg.signature + " -> run on small model\n";
 }
 
 # ---------------------------------------------------------------------------
-# The one entry walker. Route -> (hit: run | miss: crystallize+run | partial:
+# The one entry walker. Route -> (hit: run | miss: compile+run | partial:
 # mutate+run), then escalate on a small-model failure (frontier mutate + retry).
 # ---------------------------------------------------------------------------
 walker solve {
@@ -684,21 +684,21 @@ walker solve {
         self.trace += "prompt-mode: " + PROMPT_MODE + "\n";
 
         # --- route through the procedural library ---------------------------
-        crystals: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
-        known = [c.signature for c in crystals];
+        compiled_lib: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
+        known = [c.signature for c in compiled_lib];
         verdict = classify(self.task, known) if known else "NONE";
         self.trace += "route -> " + verdict + "\n";
 
-        tg: TaskGraph = select_target(reg, crystals, verdict, self.task);
+        tg: TaskGraph = select_target(reg, compiled_lib, verdict, self.task);
         self.trace += route_note(verdict, tg);
         self.signature = tg.signature;
-        res = run_crystal(tg, self.task, ctx, self.skill);
+        res = run_compiled(tg, self.task, ctx, self.skill);
 
         # --- escalation valve: cheap model fails -> frontier mutate + retry --
         if not res["ok"] {
             self.trace += "small-model FAIL -> frontier mutate + retry\n";
             tg = mutate(reg, tg, self.task, str(res["error"]));
-            res = run_crystal(tg, self.task, ctx, self.skill);
+            res = run_compiled(tg, self.task, ctx, self.skill);
             self.signature = tg.signature;
         }
 
@@ -715,10 +715,10 @@ walker solve {
                 if ev.score < soul.eval_threshold {
                     self.trace += "eval FAIL -> relearn (frontier) + retry\n";
                     prev = tg;
-                    tg = _crystallize_fresh(reg, prev.signature, prev.intent, self.task, prev.version + 1, "relearn");
+                    tg = _compile_fresh(reg, prev.signature, prev.intent, self.task, prev.version + 1, "relearn");
                     tg +>:MutatedFrom:+> prev;
                     self.signature = tg.signature;
-                    res = run_crystal(tg, self.task, ctx, self.skill);
+                    res = run_compiled(tg, self.task, ctx, self.skill);
                 }
             } except Exception as e {
                 self.trace += "eval skipped (" + str(e)[:80] + ")\n";
@@ -752,7 +752,7 @@ def solve_task(task: str, skill: str = "") -> dict {
 }
 
 def library() -> list {
-    # The agent's crystallized capability, latest version per signature.
+    # The agent's compiled capability, latest version per signature.
     reg = [root -->][?:Registry];
     if not reg { return []; }
     out = [];
@@ -869,7 +869,7 @@ def tools_policy_info() -> dict {
 }
 
 def _publish_tool_policy(soul: Soul) {
-    # expand the Soul policy into env the run subprocess + crystallizer binding both read
+    # expand the Soul policy into env the run subprocess + compiler binding both read
     eff = _expand_policy(soul);
     os.environ["SIGIL_TOOL_ALLOW"] = ",".join([str(x) for x in eff["allow"]]);
     os.environ["SIGIL_TOOL_DENY"] = ",".join([str(x) for x in eff["deny"]]);
@@ -895,7 +895,7 @@ def eval_skill(signature: str, probe: str = "") -> dict {
     tg = _find_skill(reg, signature);
     if tg is None { return {"ok": False, "error": "no such skill: " + signature}; }
     task = probe if probe else tg.intent;
-    res = run_crystal(tg, task, "", "");
+    res = run_compiled(tg, task, "", "");
     ev = judge_result(task, str(res["report"]));
     tg.last_score = ev.score;
     tg.last_eval = ev.reason;
@@ -907,7 +907,7 @@ def eval_skill(signature: str, probe: str = "") -> dict {
 }
 
 def relearn(signature: str, hint: str = "") -> dict {
-    # Discard the current (degraded) procedure and re-crystallize it FROM SCRATCH with
+    # Discard the current (degraded) procedure and recompile it FROM SCRATCH with
     # the frontier — same signature, bumped version, lineage kept. Manual counterpart
     # to the solve loop's automatic eval-triggered relearn.
     awaken();
@@ -915,13 +915,13 @@ def relearn(signature: str, hint: str = "") -> dict {
     tg = _find_skill(reg, signature);
     if tg is None { return {"ok": False, "error": "no such skill: " + signature}; }
     intent = (tg.intent + "\nExtra guidance: " + hint) if hint else tg.intent;
-    nt = _crystallize_fresh(reg, signature, intent, tg.intent, tg.version + 1, "relearn");
+    nt = _compile_fresh(reg, signature, intent, tg.intent, tg.version + 1, "relearn");
     nt +>:MutatedFrom:+> tg;
     return {"ok": True, "signature": signature, "version": nt.version, "origin": "relearn", "module": nt.module};
 }
 
 def forget(signature: str) -> dict {
-    # Remove a crystallized skill entirely — every version, its attempts, and the
+    # Remove a compiled skill entirely — every version, its attempts, and the
     # lowered module files on disk. Clears a stale/degenerate procedure.
     reg = [root -->][?:Registry][0];
     removed = 0;
@@ -992,7 +992,7 @@ def graph_snapshot() -> VGraph {
             by_id[jid(tg)] = tid;
             g.nodes.append(VNode(id=tid, label=tg.signature + " v" + str(tg.version), group="skill",
                                  detail=tg.origin + " · " + str(tg.successes) + "/" + str(tg.runs) + " ok"));
-            g.edges.append(VEdge(src="registry", kind="crystallized", dst=tid));
+            g.edges.append(VEdge(src="registry", kind="compiled", dst=tid));
         }
         for tg in skills {
             tid = str(by_id[jid(tg)]);

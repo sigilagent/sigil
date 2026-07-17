@@ -3,19 +3,19 @@
 byLLM ships `McpClient`/`McpTool` (jaclang.byllm.lib): a client connects to an MCP server
 (stdio / sse / streamable-http via the `mcp` package) and `get_tools()` returns
 `McpTool`s that are drop-in tools for `by llm(tools=[...])`. We reuse that instead
-of speaking JSON-RPC ourselves — the crystallized agent gets the same MCP stack
+of speaking JSON-RPC ourselves — the compiled agent gets the same MCP stack
 byLLM uses everywhere.
 
 This module does two jobs for Sigil:
-  - `dispatch(name, args)` — deterministic embodiment: a crystallized agent's
+  - `dispatch(name, args)` — deterministic embodiment: a compiled agent's
     `_live_tool(name, ...)` routes a bare tool name to whichever registered server
     exposes it (servers come from the `SIGIL_MCP` env Sigil sets per run).
   - `digest(servers)` / `tools_for(servers)` — discovery: list the tools a set of
-    servers expose, so the frontier can bind real tool names when it crystallizes,
+    servers expose, so the frontier can bind real tool names when it compiles,
     and so the ReAct/scoped-author slots can be handed the live `McpTool`s.
 
 Everything is non-raising: an unreachable server yields no tools / a typed error,
-never an exception — a crystallized run degrades to an honest sentinel.
+never an exception — a compiled run degrades to an honest sentinel.
 """
 
 import json;
@@ -64,7 +64,7 @@ def _safe_tools(srv: any) -> list {
 def _tool_permitted(name: str) -> bool {
     # Tool-policy gate (deny wins, then allow-list). The effective allow/deny lists are
     # expanded from the Soul policy in the main process and passed via env, so BOTH the
-    # crystallizer binding (below) and run-time dispatch (isolated subprocess) honor it.
+    # compiler binding (below) and run-time dispatch (isolated subprocess) honor it.
     deny = [x.strip() for x in os.getenv("SIGIL_TOOL_DENY", "").split(",") if x.strip()];
     allow = [x.strip() for x in os.getenv("SIGIL_TOOL_ALLOW", "").split(",") if x.strip()];
     if (name in deny) or ("*" in deny) { return False; }
@@ -74,7 +74,7 @@ def _tool_permitted(name: str) -> bool {
 
 def tools_for(servers: list) -> list {
     # Live McpTool objects across the given servers — pass straight to by llm(tools=).
-    # Policy-denied tools are dropped here so the crystallizer never binds them.
+    # Policy-denied tools are dropped here so the compiler never binds them.
     out = [];
     for srv in servers or [] {
         if not srv.get("enabled", True) {
@@ -86,7 +86,7 @@ def tools_for(servers: list) -> list {
 }
 
 def digest(servers: list) -> str {
-    # Human/LLM-readable catalogue of registered tools, for the crystallizer prompt.
+    # Human/LLM-readable catalogue of registered tools, for the compiler prompt.
     lines = [];
     for srv in servers or [] {
         if not srv.get("enabled", True) {

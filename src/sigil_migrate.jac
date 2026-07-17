@@ -2,7 +2,7 @@
 
 Reads an OpenClaw agent export directory and folds it onto the graph: SOUL.md
 (persona + rules/ethos) into the `Soul`, channels + model tiers from a config
-JSON, and any `*.agir` procedures registered as crystallized skills (SKILL.md
+JSON, and any `*.agir` procedures registered as compiled skills (SKILL.md
 files are lifted by the frontier on demand via `register_skill`). Idempotent:
 re-running updates in place rather than duplicating.
 """
@@ -61,7 +61,7 @@ def migrate_openclaw(path: str) -> dict {
         }
     }
 
-    # crystallized procedures: register hand-authored AG-IR (model-free); SKILL.md
+    # compiled procedures: register hand-authored AG-IR (model-free); SKILL.md
     # lifts via the frontier when one is configured.
     skdir = os.path.join(path, "skills");
     if os.path.isdir(skdir) {

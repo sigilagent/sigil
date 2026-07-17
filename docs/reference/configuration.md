@@ -13,12 +13,12 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 | `name` | text | The agent's name. |
 | `persona` | text | Voice/character the agent speaks with. |
 | `chat_model` | model name | The **user-facing** model for chat and sub-agents — use a strong one. Falls back to `frontier_model`. |
-| `frontier_model` | model name | Expensive model that **crystallizes** new skills. |
-| `small_model` | model name | Cheap model that **executes** crystallized skills. |
+| `frontier_model` | model name | Expensive model that **compiles** new skills. |
+| `small_model` | model name | Cheap model that **executes** compiled skills. |
 | `router_model` | model name | Model that routes a task to a skill. Falls back to `small_model`. |
 | `workspace` | path | The sandboxed directory the file tools are jailed to. Default `~/.sigil/workspace`. |
 | `sandbox_mode` | `jail` \| `docker` \| `off` | How `ws_exec` is contained. See [workspace-and-sandbox](workspace-and-sandbox.md). |
-| `prompt_mode` | `full` \| `minimal` \| `none` | How much context (ethos + memory) wraps the crystallizer/run. |
+| `prompt_mode` | `full` \| `minimal` \| `none` | How much context (ethos + memory) wraps the compiler/run. |
 | `auto_eval` | on/off | Grounded-eval valve: judge each skill run and relearn if it fails. |
 | `eval_threshold` | 0–100 | A run scoring below this auto-triggers a relearn + retry. |
 | `recall_mode` | `lexical` \| `vector` \| `hybrid` | How semantic memory is retrieved. See [memory-and-skills](memory-and-skills.md). |

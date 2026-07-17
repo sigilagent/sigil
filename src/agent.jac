@@ -1,6 +1,6 @@
 """Agent coordinator — the one place that fires the lifecycle hook bus around a solve.
 
-`run_task` wraps the crystallize→execute→learn loop with `before_solve` / `after_solve`
+`run_task` wraps the compile→execute→learn loop with `before_solve` / `after_solve`
 hooks (and surfaces `solve_failed`). Channels, cron, and the CLI route through here so
 hooks are load-bearing on every path — without a circular import (this module imports
 sigil + hooks; neither imports this one).
@@ -21,7 +21,7 @@ def run_task(task: str, skill: str = "") -> dict {
 # ---------------------------------------------------------------------------
 # OpenAI-compatible endpoint — any OpenClaw channel / OpenAI client can point at
 # Sigil as a "model" (POST /walker/api_chat_completions). The last user
-# message becomes the task; the crystallize->execute reply comes back in the
+# message becomes the task; the compile->execute reply comes back in the
 # OpenAI chat-completion shape.
 # ---------------------------------------------------------------------------
 walker:pub api_chat_completions {
@@ -39,7 +39,7 @@ walker:pub api_chat_completions {
     }
 }
 
-# GET-style: list the tiers + each crystallized skill as an OpenAI "model" so a
+# GET-style: list the tiers + each compiled skill as an OpenAI "model" so a
 # client can discover what Sigil can route to (POST /walker/api_models).
 walker:pub api_models {
     can run with Root entry {

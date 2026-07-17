@@ -3,7 +3,7 @@
 This is what makes Sigil *fully usable from chat alone*. A single byLLM agent holds
 a running conversation and can, in one turn, chain any of its tools: read/write/edit
 files and run shell in the sandboxed workspace, search & fetch the web, schedule its
-own cron jobs, remember & recall facts, crystallize a reusable skill, call MCP tools,
+own cron jobs, remember & recall facts, compile a reusable skill, call MCP tools,
 send messages on channels, and fan work out to parallel sub-agents.
 
 Continuity comes from `conversation=CHAT_HISTORY` (byLLM appends each turn in place).
@@ -79,21 +79,21 @@ def recall_memory(query: str) -> str {
     return "\n".join(["(" + str(m["kind"]) + ") " + str(m["content"]) for m in ms]);
 }
 
-sem learn_skill = """Crystallize a REUSABLE skill for a class of task: the frontier
+sem learn_skill = """Compile a REUSABLE skill for a class of task: the frontier
 model authors a typed procedure, runs it, and persists it so future requests of the
 same kind are handled cheaply. Use this only when the user wants a durable, repeatable
 procedure — for a one-off, just do the work with the other tools.""";
-sem learn_skill.task = "A representative task describing the class of work to crystallize into a skill.";
+sem learn_skill.task = "A representative task describing the class of work to compile into a skill.";
 def learn_skill(task: str) -> str {
     _trace("learn", task);
     r = run_task(task, "");
     return "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
 }
 
-sem list_skills = "List the crystallized (learned) skills with their run stats.";
+sem list_skills = "List the compiled (learned) skills with their run stats.";
 def list_skills() -> str {
     lib = library();
-    if not lib { return "(no crystallized skills yet)"; }
+    if not lib { return "(no compiled skills yet)"; }
     return "\n".join([str(e["signature"]) + " v" + str(e["version"]) + " [" + str(e["origin"]) + "] runs=" + str(e["runs"]) + " ok=" + str(e["successes"]) for e in lib]);
 }
 
@@ -231,7 +231,7 @@ def _refresh_info(message: str) -> None {
         "principles": [str(e) for e in list(s["ethos"])],
         "workspace": str(wi["root"]),
         "sandbox_mode": str(wi["sandbox_mode"]),
-        "crystallized_skills": int(s["skills"])
+        "compiled_skills": int(s["skills"])
     };
     mems = recollect(message, 4);
     if mems { info["relevant_memory"] = [str(m["content"]) for m in mems]; }

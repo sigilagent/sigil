@@ -1,4 +1,4 @@
-"""Regression tests for the crystallized-run report convention.
+"""Regression tests for the compiled-run report convention.
 
 The bug: `_exec_script` discarded the authored script's stdout and returned the
 script path, so a run's report was a filename (e.g. `op.py`) instead of the answer —

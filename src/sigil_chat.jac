@@ -118,7 +118,7 @@ def _help(console: any) {
         ["/channels", "channels: supported + configured"],
         ["/connect <kind>", "how to connect discord|telegram|whatsapp|slack"],
         ["/docs [topic]", "Sigil's reference — how it works, config, tools"],
-        ["/skills", "list crystallized skills"],
+        ["/skills", "list compiled skills"],
         ["/model <tier> <name>", "set frontier|small|router|chat model"],
         ["/remember <fact>", "store a durable memory"],
         ["/recall <query>", "search memories"],
@@ -234,7 +234,7 @@ def _show_soul(console: any) {
 
 def _show_library(console: any) {
     lib = library();
-    if not lib { console.print("[dim]  (no crystallized skills yet)[/dim]"); return; }
+    if not lib { console.print("[dim]  (no compiled skills yet)[/dim]"); return; }
     t = Table(show_header=True, header_style="dim", box=None, pad_edge=False);
     t.add_column("skill"); t.add_column("v"); t.add_column("origin");
     t.add_column("runs", justify="right"); t.add_column("ok", justify="right");
@@ -408,7 +408,7 @@ def setup_wizard() {
     steps = [
         ["chat_model", "Which model do you TALK to in chat? (use a strong one)", "gpt-4o"],
         ["frontier_model", "Which model builds new skills? (also strong)", "gpt-4o"],
-        ["small_model", "Which cheap/local model RUNS crystallized skills?", "gpt-4o-mini"],
+        ["small_model", "Which cheap/local model RUNS compiled skills?", "gpt-4o-mini"],
         ["persona", "In a line, how should your agent describe itself? (optional)", ""]
     ];
     for st in steps {
@@ -439,8 +439,8 @@ def config_menu() {
         ["name", "agent name"],
         ["persona", "voice / character it speaks with"],
         ["chat_model", "conversational model — powers chat mode & sub-agents"],
-        ["frontier_model", "expensive model — crystallizes new skills"],
-        ["small_model", "cheap model — executes crystallized skills"],
+        ["frontier_model", "expensive model — compiles new skills"],
+        ["small_model", "cheap model — executes compiled skills"],
         ["router_model", "model that routes a task to a skill"],
         ["workspace", "sandboxed directory the file tools are jailed to"],
         ["sandbox_mode", "exec containment: jail | docker | off"],
