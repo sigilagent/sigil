@@ -12,6 +12,9 @@
     <a href="https://sigilagent.com"><img src="https://img.shields.io/badge/site-sigilagent.com-22d3ee" alt="website"></a>
     <a href="https://sigilagent.com/reference/"><img src="https://img.shields.io/badge/docs-reference-22d3ee" alt="docs"></a>
   </p>
+  <p>
+    <a href="https://www.jaseci.org/"><img src="docs/assets/jaseci-logo.png" height="26" alt="Jaseci" align="middle"> &nbsp;<b>built with Jac</b></a>
+  </p>
 </div>
 
 **Sigil compiles skills into agent harnesses.** You write a skill the way you
