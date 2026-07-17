@@ -12,7 +12,7 @@
   <!-- dashed orbit rings -->
   <g fill="none" stroke="#8b5cf6" stroke-width="2.5" opacity=".85">
     <circle cx="256" cy="256" r="238" stroke-dasharray="10 12"/>
-    <circle cx="256" cy="256" r="208" stroke-dasharray="7 11" opacity=".8"/>
+    <circle cx="256" cy="256" r="180" stroke-dasharray="7 11" opacity=".8"/>
   </g>
   <!-- the graph: hexagon + spokes, fine lines -->
   <g fill="none" stroke="#8b5cf6" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round">
