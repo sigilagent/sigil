@@ -324,6 +324,7 @@
     .nav-toggle{display:flex;margin-left:auto;background:none;border:1px solid var(--line-strong);border-radius:8px;width:38px;height:38px;align-items:center;justify-content:center;cursor:pointer}
     .nav-toggle svg{width:20px;height:20px;stroke:var(--text)}
   }
+  @media (max-width:760px){#see .wrap>div{grid-template-columns:1fr !important}}
   @media (max-width:640px){
     /* stack the compilation loop vertically; point the arrows downward */
     .loop-row{flex-direction:column;align-items:stretch}
@@ -369,6 +370,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
     <div class="nav-links" id="navlinks">
+      <a href="#see">See it</a>
       <a href="#idea">The compiler</a>
       <a href="#graph">The runtime</a>
       <a href="#features">Features</a>
@@ -461,6 +463,26 @@
     </div>
   </div>
 </header>
+
+<!-- ============ SEE IT ============ -->
+<section id="see" style="padding-top:8px">
+  <div class="wrap">
+    <div class="section-head" style="text-align:center">
+      <div class="kicker" style="color:var(--violet)">See it</div>
+      <h2 class="section-title">Compile it, then run it — both are terminal-native.</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;max-width:1040px;margin:0 auto">
+      <figure style="margin:0">
+        <img src="assets/term-compile.svg" alt="sigil compile — the live build view" style="width:100%;border-radius:14px;display:block"/>
+        <figcaption style="text-align:center;color:var(--muted);font-size:14px;margin-top:12px"><b style="color:var(--text)">Compiling</b> is a live build view — every stage, with counts and timing.</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <img src="assets/term-run.svg" alt="a compiled artifact, run in a terminal" style="width:100%;border-radius:14px;display:block"/>
+        <figcaption style="text-align:center;color:var(--muted);font-size:14px;margin-top:12px"><b style="color:var(--text)">Running</b> a compiled skill is a terminal app — node-by-node, with its output.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
 
 <hr class="divider"/>
 

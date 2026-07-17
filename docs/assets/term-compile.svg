@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 354" width="780" height="354" role="img" aria-label="sigil compile — the live build view">
+  <rect x="1" y="1" width="778" height="352" rx="14" fill="#0d0d16" stroke="rgba(255,255,255,.12)"/>
+  <circle cx="26" cy="24" r="6" fill="#3a3a4a"/><circle cx="48" cy="24" r="6" fill="#3a3a4a"/><circle cx="70" cy="24" r="6" fill="#3a3a4a"/>
+  <text x="390.0" y="29" text-anchor="middle" font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#63637a">sigil compile — the live build view</text>
+  <line x1="1" y1="46" x2="779" y2="46" stroke="rgba(255,255,255,.07)"/>
+<text x="26" y="74" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">$ </tspan><tspan fill="#e8e8f0">sigil compile skills/brainstorming/SKILL.md</tspan></text>
+<text x="26" y="98" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0"></tspan></text>
+<text x="26" y="122" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0">  Compiling skills/brainstorming/SKILL.md</tspan></text>
+<text x="26" y="146" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔ </tspan><tspan fill="#e8e8f0">spec loop       </tspan><tspan fill="#e8e8f0">80 rules · 3 rounds · ok</tspan><tspan fill="#63637a">   17m 25s</tspan></text>
+<text x="26" y="170" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔ </tspan><tspan fill="#e8e8f0">workflow spine  </tspan><tspan fill="#e8e8f0">28 nodes · 37 edges · 3 rounds</tspan><tspan fill="#63637a">   10m 10s</tspan></text>
+<text x="26" y="194" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔ </tspan><tspan fill="#e8e8f0">annotator flows </tspan><tspan fill="#e8e8f0">34 carries · 17 knowledge · 4 HIL</tspan><tspan fill="#63637a">   2m 11s</tspan></text>
+<text x="26" y="218" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔ </tspan><tspan fill="#e8e8f0">assemble        </tspan><tspan fill="#e8e8f0">clean</tspan><tspan fill="#63637a">   1.8s</tspan></text>
+<text x="26" y="242" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#a78bfa">  ⟳ </tspan><tspan fill="#e8e8f0">repair  round 1: 3 issues → views</tspan></text>
+<text x="26" y="266" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔ </tspan><tspan fill="#e8e8f0">gates           </tspan><tspan fill="#e8e8f0">compile ✓</tspan><tspan fill="#63637a">   52s</tspan></text>
+<text x="26" y="290" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0"></tspan></text>
+<text x="26" y="314" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0">  compiled skill: </tspan><tspan fill="#22d3ee">brainstorming</tspan><tspan fill="#e8e8f0">  → </tspan><tspan fill="#e8e8f0">brainstorming.jac</tspan></text>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 474" width="780" height="474" role="img" aria-label="a compiled artifact, run in a terminal">
+  <rect x="1" y="1" width="778" height="472" rx="14" fill="#0d0d16" stroke="rgba(255,255,255,.12)"/>
+  <circle cx="26" cy="24" r="6" fill="#3a3a4a"/><circle cx="48" cy="24" r="6" fill="#3a3a4a"/><circle cx="70" cy="24" r="6" fill="#3a3a4a"/>
+  <text x="390.0" y="29" text-anchor="middle" font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#63637a">a compiled artifact, run in a terminal</text>
+  <line x1="1" y1="46" x2="779" y2="46" stroke="rgba(255,255,255,.07)"/>
+<text x="26" y="74" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">$ </tspan><tspan fill="#e8e8f0">./note_writer.jac "write a haiku about compilers to haiku.txt"</tspan></text>
+<text x="26" y="98" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0"></tspan></text>
+<text x="26" y="122" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#a78bfa">  ◆ </tspan><tspan fill="#e8e8f0">note-writer</tspan></text>
+<text x="26" y="146" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">    write a haiku about compilers to haiku.txt</tspan></text>
+<text x="26" y="170" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0"></tspan></text>
+<text x="26" y="194" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#a78bfa">  ◆ </tspan><tspan fill="#e8e8f0">draft</tspan><tspan fill="#63637a">  1.3s</tspan></text>
+<text x="26" y="218" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#a78bfa">  ◆ </tspan><tspan fill="#e8e8f0">emit</tspan><tspan fill="#63637a">   0.0s</tspan></text>
+<text x="26" y="242" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#a78bfa">  ◆ </tspan><tspan fill="#e8e8f0">done</tspan><tspan fill="#63637a">   0.0s</tspan></text>
+<text x="26" y="266" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0"></tspan></text>
+<text x="26" y="290" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">  ✔</tspan><tspan fill="#63637a">  1.3s total</tspan></text>
+<text x="26" y="314" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">  ──────────────────────────</tspan></text>
+<text x="26" y="338" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0">  Compilers translate,</tspan></text>
+<text x="26" y="362" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#e8e8f0">  code whispers to machine's heart.</tspan></text>
+<text x="26" y="386" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">  ──────────────────────────</tspan></text>
+<text x="26" y="410" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#63637a">  artifacts:</tspan></text>
+<text x="26" y="434" font-family="SF Mono,Menlo,Consolas,monospace" font-size="14.5" xml:space="preserve"><tspan fill="#22d3ee">    haiku.txt</tspan></text>
+</svg>
