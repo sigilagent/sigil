@@ -263,6 +263,22 @@ with entry:__main__ {
                 }
             }
         }
+    } elif cmd == "replay" {
+        # replay <agent.jac> <observability.jsonl> "<task>" [workdir] — re-run a
+        # RECORDED run's cognition through the (re)compiled module: no model, no
+        # cost; regression-test compiler changes against real runs.
+        modp = _arg(argv, 1); obsp = _arg(argv, 2); rtask = _arg(argv, 3);
+        rwd = _arg(argv, 4) if len(argv) > 4 else ".";
+        if (not modp) or (not obsp) or (not rtask) {
+            print("usage: replay <agent.jac> <observability.jsonl> \"<task>\" [workdir]");
+        } else {
+            import from src.compiler.ai.replay { replay_run }
+            rr = replay_run(modp, obsp, rtask, rwd);
+            print("replay: " + str(rr["calls_used"]) + "/" + str(rr["calls_recorded"])
+                  + " recorded calls, " + str(rr["nodes"]) + " nodes visited");
+            if rr["error"] { print("  error: " + str(rr["error"])); }
+            print("  report: " + str(rr["report"])[:400]);
+        }
     } elif cmd == "channel" {
         sub = _arg(argv, 1);
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
@@ -453,6 +469,7 @@ with entry:__main__ {
         print("  mcp                         list registered MCP servers + their tools");
         print("  register-skill <path> [md|agir|osp]   add a skill (SKILL.md lifted / AG-IR / OSP)");
         print("  compile <SKILL.md> [-e [out.jac]]     gated AI-compile onto the graph; -e ejects a standalone runnable .jac");
+        print("  replay <agent.jac> <obs.jsonl> \"<task>\"   re-run recorded cognition through a module (free)");
         print("  (add  -s sigil.session  to persist the graph across runs)");
     }
 }

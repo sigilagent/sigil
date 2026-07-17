@@ -62,15 +62,21 @@ def _extract_message(resp) -> dict:
         reasoning = get("reasoning_content")
         tcs = get("tool_calls") or []
         tool_calls = []
+        tool_args = []
         for t in tcs:
             fn = (t.get("function") if isinstance(t, dict) else getattr(t, "function", None)) or {}
             name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
             tool_calls.append(name or "?")
+            # arguments too (truncated): with them a recording is fully
+            # REPLAYABLE (compiler.ai.replay) — without, tool rounds are a gap
+            args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
+            tool_args.append(str(args or "")[:2000])
         return {
             "content": (content or "")[:600],
             "content_len": len(content or ""),
             "reasoning_content": (reasoning or "")[:600] if reasoning else None,
             "tool_calls": tool_calls,
+            "tool_args": tool_args,
         }
     except Exception:
         return {"content": "", "content_len": 0, "reasoning_content": None, "tool_calls": []}
