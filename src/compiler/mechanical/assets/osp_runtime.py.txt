@@ -57,6 +57,7 @@ def _progress(node):
             "step budget exhausted: %d node visits (budget %d), last node '%s' — "
             "likely a loop with no converging guard; raise AGIR_STEP_BUDGET or fix the route"
             % (g["_NVISITS"], budget, node))
+    _tui_node(node)
     p = os.environ.get("AGIR_PROGRESS", "")
     if not p:
         return
@@ -68,6 +69,76 @@ def _progress(node):
     except Exception:
         pass
 
+# ---- artifact TUI: a compiled skill run IS a terminal experience. Pure ANSI,
+# zero dependencies (the ejected artifact stays self-contained). Auto-on when
+# stdout is a TTY; AGIR_TUI=0 forces off, AGIR_TUI=1 forces on (tests). Batch
+# and harness runs (captured stdout) are byte-identical to before. ----
+_TUI = {"last": None, "t0": None, "start": None}
+
+def _tui_on():
+    import os, sys
+    v = os.environ.get("AGIR_TUI", "")
+    if v == "0":
+        return False
+    if v == "1":
+        return True
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+_V = "\033[38;5;135m"   # violet
+_C = "\033[38;5;51m"    # cyan
+_D = "\033[2m"          # dim
+_R = "\033[0m"
+
+def _tui_banner(name, task):
+    import sys, time
+    if not _tui_on():
+        return
+    _TUI["start"] = time.time()
+    sys.stdout.write(_V + "\n  \u25c6 " + _R + str(name) + "\n")
+    sys.stdout.write(_D + "    " + str(task)[:120] + _R + "\n\n")
+    sys.stdout.flush()
+
+def _tui_node(node):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    if _TUI["last"] is not None:
+        dt = now - (_TUI["t0"] or now)
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
+                         + _D + "  %.1fs" % dt + _R + "\n")
+    sys.stdout.write("  " + _V + "\u25c6 " + _R + str(node) + _D + " \u2026" + _R)
+    sys.stdout.flush()
+    _TUI["last"] = node
+    _TUI["t0"] = now
+
+def _tui_finish(report, artifacts=None):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    if _TUI["last"] is not None:
+        dt = now - (_TUI["t0"] or now)
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
+                         + _D + "  %.1fs" % dt + _R + "\n")
+    total = now - (_TUI["start"] or now)
+    rep = str(report or "")
+    bad = rep.startswith("INCOMPLETE") or not rep
+    mark = "\033[31m\u2716" if bad else _C + "\u2714"
+    sys.stdout.write("\n  " + mark + _R + _D + "  %.1fs total" % total + _R + "\n")
+    sys.stdout.write("  " + ("\u2500" * 56) + "\n")
+    for line in (rep or "(no report)").splitlines()[:14]:
+        sys.stdout.write("  " + line[:110] + "\n")
+    if artifacts:
+        sys.stdout.write("  " + ("\u2500" * 56) + "\n  " + _D + "artifacts:" + _R + "\n")
+        for a in artifacts[:10]:
+            sys.stdout.write("    " + _C + str(a) + _R + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
 # ---- human-in-the-loop channel: file-based Q&A (sigil chat/approvals attach it
 # via HIL_QA_FILE; the superpowers HIL session prototyped this). Batch-safe: with
 # no channel attached it returns an HONEST sentinel immediately — never blocks,
@@ -76,6 +147,16 @@ def _ask_user(question=None):
     import os, time, json
     qf = os.environ.get("HIL_QA_FILE", "")
     if not qf:
+        # in a terminal, the human IS here: ask inline (the compiled skill's
+        # clarify loops and review gates become a real conversation)
+        if _tui_on():
+            import sys
+            sys.stdout.write("\r\033[2K\n  " + _C + "? " + _R + str(question) + "\n")
+            sys.stdout.flush()
+            try:
+                return input("  \u203a ")
+            except (EOFError, KeyboardInterrupt):
+                return "[user closed the prompt]"
         return "[no human channel attached - proceeding without user input]"
     af = qf + ".answers"
     n = 0
