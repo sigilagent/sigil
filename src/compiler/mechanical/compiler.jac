@@ -316,7 +316,20 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
     # Surface each delivered carry's CONTENT (via _artifact_text), not its file path —
     # delivery ops return the path of what the script wrote; the caller wants the answer.
     for d in deliv[:4] { parts.append(str(d) + "={_artifact_text(self." + _safe(str(d)) + ")}"); }
-    if (not enumc) and (not deliv) { return "f\"" + str(name) + " done\""; }
+    if (not enumc) and (not deliv) {
+        # NEVER a bare constant (standard 3T): serialize the produced carries so
+        # the report carries evidence of what the run actually made. Empty-handed
+        # runs then LOOK empty-handed instead of reporting "done".
+        prod: list = [];
+        for kv2 in _items(carries) {
+            c2 = kv2[1];
+            if isinstance(c2, dict) and c2.get("produced_by") and (str(kv2[0]) != "report") { prod.append(str(kv2[0])); }
+        }
+        if not prod { return "f\"" + str(name) + " done\""; }
+        parts2: list = [str(name)];
+        for d2 in prod[:5] { parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:300]}"); }
+        return "f\"" + _j(" | ", parts2) + "\"";
+    }
     return "f\"" + _j(" ", parts) + "\"";
 }
 
@@ -1439,6 +1452,12 @@ def _emit_run(ir: any, walker_name: any) -> str {
     out.append("");
     if first {
         out.append(f"    agent = {var[first]} spawn {walker_name}(task=task);");
+        out.append("    if not agent.report {");
+        out.append("        # loud, not silent: an empty report means the walker stopped at a");
+        out.append("        # dead-end/escape-hatch node without reaching TERMINAL (see the");
+        out.append("        # AGIR_PROGRESS trace for the exact node).");
+        out.append("        return \"INCOMPLETE: traversal ended without reaching TERMINAL — no deliverable was produced\";");
+        out.append("    }");
         out.append("    return agent.report;");
     } else {
         out.append("    return \"\";");

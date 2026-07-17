@@ -62,3 +62,4 @@ jobs:
           jac run src/compiler/ai/scenarios/spec_loop.jac
           jac run src/compiler/ai/scenarios/workflow_loop.jac
           jac run src/compiler/ai/scenarios/lift_e2e.jac
+          jac run src/compiler/ai/scenarios/runtime_budget.jac

@@ -39,6 +39,17 @@ _ensure_path()
 # ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
 def _progress(node):
     import os, json, time
+    # ---- step budget: a walker cycling a graph (an unanswered HIL loop, a bad
+    # route) must abort LOUDLY, not spin to the harness timeout. Budget is
+    # env-tunable; the abort names the node and the visit count. ----
+    g = globals()
+    g["_NVISITS"] = g.get("_NVISITS", 0) + 1
+    budget = int(os.environ.get("AGIR_STEP_BUDGET", "256") or 256)
+    if g["_NVISITS"] > budget:
+        raise RuntimeError(
+            "step budget exhausted: %d node visits (budget %d), last node '%s' — "
+            "likely a loop with no converging guard; raise AGIR_STEP_BUDGET or fix the route"
+            % (g["_NVISITS"], budget, node))
     p = os.environ.get("AGIR_PROGRESS", "")
     if not p:
         return
