@@ -75,19 +75,20 @@ def _version() -> str {
 }
 
 def _banner(console: any) {
-    # The hexagonal graph mark from the website (purple #a78bfa outline, cyan #22d3ee
-    # center node), the SIGIL wordmark, version, and the base config — side by side.
+    # The hexagonal graph mark from the website: 6 nodes, spokes converging on the
+    # cyan triangle-and-core (the 'compiled graph'), the SIGIL wordmark, version, and
+    # base config — side by side.
     s = describe_soul();
     wi = workspace_info();
     cm = str(s["chat_model"]) if s["chat_model"] else "unset";
     logo = (
-        "[#a78bfa]    ◆    [/]\n"
-        + "[#a78bfa]   ╱ ╲   [/]\n"
-        + "[#a78bfa]  ◆   ◆  [/]\n"
-        + "[#a78bfa]  │ [/][bold #22d3ee]◉[/][#a78bfa] │  [/]\n"
-        + "[#a78bfa]  ◆   ◆  [/]\n"
-        + "[#a78bfa]   ╲ ╱   [/]\n"
-        + "[#a78bfa]    ◆    [/]"
+        "[#a78bfa]      ◆[/]\n"
+        + "[#8b5cf6]    ╱╱ ╲╲[/]\n"
+        + "[#a78bfa]  ◆  [/][#8b5cf6]╲[/][#22d3ee]▲[/][#8b5cf6]╱[/][#a78bfa]  ◆[/]\n"
+        + "[#8b5cf6]  ┃   [/][bold #22d3ee]◉[/][#8b5cf6]   ┃[/]\n"
+        + "[#a78bfa]  ◆  [/][#8b5cf6]╱ ╲[/][#a78bfa]  ◆[/]\n"
+        + "[#8b5cf6]    ╲╲ ╱╱[/]\n"
+        + "[#a78bfa]      ◆[/]"
     );
     info = (
         "[bold #a78bfa]S I G I L[/]  [dim]v" + _version() + "[/]\n"
