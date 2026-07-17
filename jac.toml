@@ -1,7 +1,7 @@
 [project]
 name = "sigil"
-version = "0.1.0"
-description = "A self-evolving object-spatial agent: the frontier model crystallizes tasks into AG-IR graphs that a small model executes, and the task-graphs persist as the agent itself."
+version = "0.2.0"
+description = "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction."
 entry-point = "observatory.jac"
 
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
