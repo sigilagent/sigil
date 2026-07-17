@@ -17,8 +17,11 @@ import traceback;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
 import from src.compiler.mechanical.compiler { transpile_ir }
-import from .lift_types { CompileVerdict, RuleSet, Modality, RuleKind }
-import from .ir_views { NodeType, Owner, AgirNode, WorkflowView, ViewBundle, StructCov }
+import from .lift_types { CompileVerdict, Modality, RuleKind }
+import from .spec_loop { RuleSet }
+import from .ir_views { NodeType, Owner, StructCov }
+import from .workflow { AgirNode, WorkflowView }
+import from .flows { ViewBundle }
 
 def _jac_bin() -> str {
     env = os.environ.get("SIGIL_JAC", "");

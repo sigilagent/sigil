@@ -25,7 +25,50 @@ backstop the loop; on exhaustion the spec is returned WITH its honest verdict
 
 import re;
 import from jaclang.byllm.lib { Model }
-import from .lift_types { Rule, RuleSet, ExtractVerdict, SpecResult, Modality, RuleKind, Cohesion }
+import from .lift_types { Modality, RuleKind, Cohesion }
+
+# NOTE: objs that ride a `by llm` slot's return schema are defined IN the
+# slot's module — byllm's schema builder cannot resolve a nested obj from
+# another module ("'str' object has no attribute 'fields'"); cross-module
+# ENUMS are fine.
+
+obj Rule {
+    has id: str = "";
+    has quote: str = "";
+    has kind: RuleKind = RuleKind.STEP;
+    has modality: Modality = Modality.MANDATORY;
+    has condition: str = "";
+    has cohesion: Cohesion = Cohesion.ATOMIC;
+}
+
+sem Rule = "One atomic obligation extracted from the skill text.";
+sem Rule.id = "Stable short id (r1, r2, ...). Keep ids stable across revision rounds.";
+sem Rule.quote = "The VERBATIM span from the skill text this rule comes from, copied character-for-character (whitespace may be collapsed). NEVER paraphrase, summarize, or invent — a quote that does not appear in the skill gets the rule mechanically dropped.";
+sem Rule.condition = "If the span is conditional or exemplary ('when uncertain...', 'if the task...', 'e.g. ...'), the condition VERBATIM. Empty only when the span is genuinely unconditional. Hardening a conditional into an unconditional mandate is a faithfulness violation.";
+
+obj RuleSet {
+    has skill_name: str = "";
+    has rules: list[Rule] = [];
+    has sub_resources: list[str] = [];
+}
+sem RuleSet = "The complete extracted spec of a skill: every obligation the prose states — nothing added, nothing dropped, nothing re-modalized.";
+sem RuleSet.sub_resources = "Sibling bundle files the skill itself delegates to (FORMS.md, REFERENCE.md, ...).";
+
+obj ExtractVerdict {
+    has sound: bool = False;
+    has complete: bool = False;
+    has drift: bool = True;
+    has ungrounded: list[str] = [];
+    has uncovered: list[str] = [];
+    has drift_notes: list[str] = [];
+    has changed: bool = True;
+    has rounds: int = 0;
+}
+
+obj SpecResult {
+    has spec: RuleSet = RuleSet();
+    has verdict: ExtractVerdict = ExtractVerdict();
+}
 
 glob lift_llm: any = Model(model_name="gpt-4o-mini");
 glob _LIFT_PINNED: bool = False;   # tests / embedders pin a model (e.g. MockLLM)
@@ -203,3 +246,4 @@ def extract_spec(skill: str, name: str, max_rounds: int = 5) -> SpecResult {
     }
     return SpecResult(spec=prior, verdict=verdict);
 }
+

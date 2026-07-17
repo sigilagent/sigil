@@ -27,6 +27,9 @@ import yaml;
 
 glob GEN_TYPES: list = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
 
+# guard values that mean "unconditional" — never lower as a literal condition
+glob GUARD_SENTINELS: list = ["", "otherwise", "default", "else", "always", "true", "_"];
+
 # Embodiment-ladder rung-3 fallbacks recorded during a transpile: tools with no
 # runnable body that were lowered to the scoped GEN-RAW author-run envelope instead
 # of a silent `pass`. Reset per _transpile; reported by _main (loud, not silent).
@@ -80,6 +83,12 @@ def _j(sep: str, items: any) -> str {
     return sep.join([str(x) for x in items]);
 }
 
+def _toolfn_prefix(nm: any) -> str {
+    # an IR tool named `_progress` must not become `__progress` — a double
+    # leading underscore triggers python name-mangling inside the walker class
+    return "_" + str(_safe(nm)).lstrip("_");
+}
+
 def _camel(s: any) -> str {
     parts = [p for p in re.split(r"[^0-9a-zA-Z]+", str(s)) if p];
     out = "";
@@ -130,7 +139,11 @@ def _block_lit(s: any) -> str {
     t = "" if s is None else str(s);
     t = t.replace("\\", "\\\\");
     t = t.replace("\"\"\"", "\\\"\\\"\\\"");
-    return "\"\"\"" + t + "\"\"\"";
+    # a leading/trailing quote in the content abuts the triple-quote delimiter
+    # (\"\"\"\" -> unterminated string) — pad with a newline, harmless for sems/knowledge
+    lead = "\n" if t.startswith("\"") else "";
+    tail = "\n" if t.endswith("\"") else "";
+    return "\"\"\"" + lead + t + tail + "\"\"\"";
 }
 
 # Relaxer — the hand-authored .ir files use loose YAML (unquoted flow-map values
@@ -608,7 +621,7 @@ def _emit_tools(ir: any) -> str {
         # guards return a helpful message instead, so the model self-corrects.
         sig_params = _j(", ", [(_safe(p) + "=None") for p in params]) if params else "";
         out.append("");
-        out.append(f"def _{_safe(name)}({sig_params}):");
+        out.append("def " + _toolfn_prefix(name) + f"({sig_params}):");
         for fl in _body_lines(body) { out.append(fl); }
         serves = _list(t.get("serves"));
         if surf == "SENSE" { sense_tools.append([name, params, serves]); }
@@ -649,7 +662,7 @@ def _emit_tool_wrappers(ir: any) -> str {
         params = _parse_sig(t.get("sig"))[0] if isinstance(t, dict) else [];
         sig = _j(", ", [(_safe(p) + ": str") for p in params]);
         callargs = _j(", ", [_safe(p) for p in params]);
-        out.append(f"def {_safe(tn)}({sig}) -> str {{ return str(_{_safe(tn)}({callargs})); }}");
+        out.append(f"def {_safe(tn)}({sig}) -> str {{ return str(" + _toolfn_prefix(tn) + f"({callargs})); }}");
         doc = (t.get("doc") if isinstance(t, dict) else "") or ("invoke the " + str(tn) + " tool");
         out.append(f"sem {_safe(tn)} = {_q(doc)};");
     }
@@ -955,7 +968,7 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any) -> list {
     guarded: list = [];
     fwd_default = "";
     first_fwd = "";
-    sentinels = ["", "otherwise", "default", "else", "always", "true", "_"];
+    sentinels = GUARD_SENTINELS;
     for e in out_edges {
         ti = nidx.get(e.get("to"));
         if not ti { continue; }
@@ -1042,6 +1055,12 @@ def _emit_walker(ir: any) -> list {
         g0 = e0.get("guard");
         if not g0 { continue; }
         gm: any = re.match(r"\s*(\w+)\s*(?:in|==)\s", str(g0));
+        if not gm {
+            # bare-word (or negated bare-word) guards route on a flag carry the IR
+            # forgot to declare: `guard: accepted` -> self.accepted
+            gm = re.match(r"^\s*(?:not\s+)?([A-Za-z_]\w*)\s*$", str(g0));
+            if gm and (str(gm.group(1)).strip().lower() in GUARD_SENTINELS) { gm = None; }
+        }
         if gm {
             gf = _safe(gm.group(1));
             if (gf not in ckeys) and (gf not in gflds) and (gf != "task") { gflds.append(gf); }
@@ -1102,7 +1121,7 @@ def _emit_walker(ir: any) -> list {
                     runtool = "";
                     for tt in _list(au_fold.get("tools")) {
                         tl = str(tt).lower();
-                        if ("run" in tl) or ("exec" in tl) { runtool = "_" + _safe(str(tt)); }
+                        if ("run" in tl) or ("exec" in tl) { runtool = _toolfn_prefix(str(tt)); }
                     }
                     if runtool {
                         # Tool-owning author: byLLM lets the model EITHER return the
@@ -1153,8 +1172,9 @@ def _emit_walker(ir: any) -> list {
                 if not tinfo { continue; }
                 tgt2 = tinfo[0];
                 g = e.get("guard");
-                if g { branches.append([_guard_to_cond(g, member_to_enum), tgt2]); }
-                else { default_target = str(tgt2); }
+                if g and (str(g).strip().lower() not in GUARD_SENTINELS) {
+                    branches.append([_guard_to_cond(g, member_to_enum), tgt2]);
+                } else { default_target = str(tgt2); }
             }
             for (i, br) in enumerate(branches) {
                 brc: any = br;
@@ -1196,7 +1216,7 @@ def _emit_walker(ir: any) -> list {
             tgt3 = writes[0] if writes else None;
             st3 = _node_tool(ir, nid, n);
             if st3 {
-                expr3 = "_" + _safe(str(st3[0])) + "(" + _bind_args(st3[1], reads, carries, types) + ")";
+                expr3 = _toolfn_prefix(str(st3[0])) + "(" + _bind_args(st3[1], reads, carries, types) + ")";
                 body.append(_assign_carry(tgt3, expr3, carries, types));
             } elif can_dispatch and tgt3 and (tgt3 in ckeys) {
                 body.append(f"        self.{_safe(tgt3)} = _run_sense(self.{route_field}.name, self.args);");
@@ -1236,7 +1256,7 @@ def _emit_walker(ir: any) -> list {
             # (frames, builder, spec.width, …), realizing the IR's node separation.
             stA = _node_tool(ir, nid, n);
             if (not expr) and stA {
-                expr = "_" + _safe(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types) + ")";
+                expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types) + ")";
             }
             if (not expr) and (owner == "model") {
                 # ACT owner=model with no tool = a cognitive emit (e.g. report,
@@ -1280,7 +1300,7 @@ def _emit_walker(ir: any) -> list {
             # is lowered with the edges in Stage D). Emit the productive call.
             stL = _node_tool(ir, nid, n);
             if stL {
-                expr = "_" + _safe(str(stL[0])) + "(" + _bind_args(stL[1], reads, carries, types) + ")";
+                expr = _toolfn_prefix(str(stL[0])) + "(" + _bind_args(stL[1], reads, carries, types) + ")";
                 body.append(_assign_carry(writes[0] if writes else None, expr, carries, types));
             } elif owner == "model" {
                 slot = _slot_name(nid, carries);
@@ -1329,7 +1349,7 @@ def _emit_walker(ir: any) -> list {
         } elif ntype == "CODE" {
             stC = _node_tool(ir, nid, n);
             if stC {
-                expr = "_" + _safe(str(stC[0])) + "(" + _bind_args(stC[1], reads, carries, types) + ")";
+                expr = _toolfn_prefix(str(stC[0])) + "(" + _bind_args(stC[1], reads, carries, types) + ")";
                 body.append(_assign_carry(writes[0] if writes else None, expr, carries, types));
             } elif n.get("body") {
                 tgtC = writes[0] if writes else None;

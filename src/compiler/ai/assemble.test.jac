@@ -2,12 +2,11 @@
 prose-pointer precheck) plus the money test: the assembled IR round-trips LIVE
 through the mechanical half + jac check."""
 
-import from .lift_types { Rule, RuleSet, Modality, RuleKind }
-import from .ir_views {
-    NodeType, Owner, AgirNode, AgirEdge, WorkflowView,
-    Carry, IOView, Residency, ContextView, ToolDef, KnowledgeItem, KnowledgeView,
-    HILView, ViewBundle
-}
+import from .lift_types { Modality, RuleKind }
+import from .spec_loop { Rule, RuleSet }
+import from .ir_views { NodeType, Owner }
+import from .workflow { AgirNode, AgirEdge, WorkflowView }
+import from .flows { Carry, IOView, Residency, ContextView, ToolDef, KnowledgeItem, KnowledgeView, HILView, ViewBundle }
 import from .gates { compile_gate }
 
 def _spec() -> RuleSet {

@@ -17,10 +17,11 @@ the caller (lift) decides. Honest output, never a silent success.
 """
 
 import yaml;
-import from .lift_types { RuleSet, Modality, RuleKind }
-import from .ir_views {
-    NodeType, Owner, WorkflowView, ViewBundle, AssembleResult
-}
+import from .lift_types { Modality, RuleKind }
+import from .spec_loop { RuleSet }
+import from .ir_views { NodeType, Owner, AssembleResult }
+import from .workflow { WorkflowView }
+import from .flows { ViewBundle }
 
 def _ntype_str(t: NodeType) -> str {
     return t.name.replace("_", "-");
@@ -132,6 +133,9 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         if n.writes { nd["writes"] = list(n.writes); }
         if n.surface { nd["surface"] = "ACT·" + n.surface if not n.surface.startswith("ACT") else n.surface; }
         if n.autonomy_tools { nd["autonomy"] = {"tools": list(n.autonomy_tools)}; }
+        # persist the rule-id spine into the IR: node -> rule ids -> (spec.json) verbatim skill spans.
+        # The mechanical half ignores unknown keys; provenance rides for free.
+        if n.traces_to { nd["traces_to"] = list(n.traces_to); }
         nodes_out.append(nd);
     }
 

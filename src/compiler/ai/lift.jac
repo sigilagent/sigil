@@ -12,8 +12,7 @@ failures run the scoped repair_ir loop. `ok` is true only when every gate is
 clean — anything less rides the LiftResult, never swallowed.
 """
 
-import from .lift_types { RuleSet }
-import from .ir_views { LiftResult, ViewBundle }
+import from .ir_views { LiftResult }
 import from .spec_loop { extract_spec, pin_lift_llm }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }

@@ -15,9 +15,89 @@ whose outputs pop in call order, so tests need a deterministic order).
 """
 
 import from jaclang.byllm.lib { Model }
-import from .lift_types { RuleSet }
-import from .ir_views {
-    WorkflowView, IOView, ContextView, KnowledgeView, HILView, ViewBundle
+import from .spec_loop { RuleSet }
+import from .workflow { WorkflowView }
+
+# NOTE: objs that ride a `by llm` slot's return schema are defined IN the
+# slot's module — byllm's schema builder cannot resolve a nested obj from
+# another module ("'str' object has no attribute 'fields'"); cross-module
+# ENUMS are fine.
+
+obj Carry {
+    has name: str = "";
+    has ctype: str = "str";
+    has produced_by: str = "";
+    has role: str = "";
+    has traces_to: str = "";
+}
+
+sem Carry = "One MOVING datum: produced at one node, consumed downstream, carried by the walker.";
+sem Carry.ctype = "The carry's type: str | int | float | bool | list[str] | any.";
+sem Carry.produced_by = "The node id that writes this carry. Empty ONLY for role=input.";
+sem Carry.role = "'input' for data the harness supplies (the task); empty otherwise.";
+
+obj IOView {
+    has carries: list[Carry] = [];
+    has artifact_note: str = "";
+}
+sem IOView = "The dataflow view: every moving datum as a carry with its producer. Static data is NOT a carry — it belongs in knowledge.";
+sem IOView.artifact_note = "Which ACT crosses the user-interaction line (the deliverable) and its task-variant parameters (destination/name/format).";
+
+obj Residency {
+    has key: str = "";
+    has resident_on: list[str] = [];
+}
+
+obj ContextView {
+    has residency: list[Residency] = [];
+}
+sem ContextView = "The context-flow scoping: which knowledge key is visible to which nodes. A node gets EXACTLY the knowledge whose residency includes it — no more (cost), no less (faithfulness).";
+
+obj ToolDef {
+    has name: str = "";
+    has sig: str = "";
+    has surface: str = "";
+    has serves: list[str] = [];
+    has body: str = "";
+    has command: str = "";
+    has traces_to: str = "";
+}
+sem ToolDef = "An owner=code tool. EMBODY, don't point: `body` carries the runnable implementation VERBATIM (or `command` the exact command line). A tool with neither is a prose-pointer — the standalone gate rejects it.";
+sem ToolDef.sig = "The tool signature, e.g. \"(inputs, out) -> path\".";
+sem ToolDef.surface = "SENSE (read -> data) or ACT (writes an effect/artifact).";
+sem ToolDef.serves = "The node ids this tool fires for.";
+
+obj KnowledgeItem {
+    has key: str = "";
+    has content: str = "";
+    has resident_on: list[str] = [];
+    has traces_to: str = "";
+}
+sem KnowledgeItem = "STATIC know-how a node reads (a pattern, a template, rules). `content` is VERBATIM from the skill — never a summary, never a 'see X.md' pointer.";
+
+obj KnowledgeView {
+    has tools: list[ToolDef] = [];
+    has knowledge: list[KnowledgeItem] = [];
+}
+sem KnowledgeView = "The snippet sort (A.4): a snippet whose op is a function of its inputs becomes a TOOL (verbatim body, runs unchanged); a snippet that grounds an open-ended judgment stays KNOWLEDGE a GEN node reads.";
+
+obj HILPoint {
+    has node: str = "";
+    has kind: str = "CONFIRM";
+    has prompt: str = "";
+    has traces_to: str = "";
+}
+sem HILPoint = "A human-in-the-loop gate the skill demands: CONFIRM (proceed?), APPROVE (sign off on output), or INPUT (ask for data). Dropping one makes the agent violate the skill by construction.";
+
+obj HILView {
+    has points: list[HILPoint] = [];
+}
+
+obj ViewBundle {
+    has io: IOView = IOView();
+    has ctxv: ContextView = ContextView();
+    has kn: KnowledgeView = KnowledgeView();
+    has hil: HILView = HILView();
 }
 
 glob flows_llm: any = Model(model_name="gpt-4o-mini");
@@ -124,3 +204,4 @@ def gather_views(spec: RuleSet, ctx: str, parallel: bool = True) -> ViewBundle {
         kn=knowledge_view(spec, ctx), hil=hil_view(spec, ctx)
     );
 }
+

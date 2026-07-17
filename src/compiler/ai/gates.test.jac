@@ -2,8 +2,9 @@
 AG-IR through mechanical.transpile_ir + a real `jac check` subprocess. The
 failure paths must return routed verdicts, never raise."""
 
-import from .lift_types { Rule }
-import from .ir_views { AgirNode, ToolDef, KnowledgeItem, KnowledgeView }
+import from .spec_loop { Rule }
+import from .workflow { AgirNode }
+import from .flows { ToolDef, KnowledgeItem, KnowledgeView }
 
 glob GOOD_IR: str = """---
 name: note-writer

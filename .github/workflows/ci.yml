@@ -54,3 +54,11 @@ jobs:
       # src/report_fix_tests.jac). Runtime bug, process isolation sidesteps it.
       - name: Run AI-compiler test suite
         run: jac test src/compiler/ai/*.test.jac
+      # The two MockLLM convergence loops run under `jac run`: multi-module
+      # `jac test` resets a by-llm slot's __globals__ and the schema build dies
+      # with NameError on the slot's own types (same runtime bug as above).
+      - name: Run AI-compiler convergence scenarios
+        run: |
+          jac run src/compiler/ai/scenarios/spec_loop.jac
+          jac run src/compiler/ai/scenarios/workflow_loop.jac
+          jac run src/compiler/ai/scenarios/lift_e2e.jac

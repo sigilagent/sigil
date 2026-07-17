@@ -23,8 +23,61 @@ re-prompts with the validator's issues, bounded. The validator enforces:
 """
 
 import from jaclang.byllm.lib { Model }
-import from .lift_types { Rule, RuleSet, Modality, RuleKind, Cohesion }
-import from .ir_views { NodeType, Owner, AgirNode, AgirEdge, WorkflowView, SpineResult }
+import from .lift_types { Modality, RuleKind, Cohesion }
+import from .spec_loop { Rule, RuleSet }
+import from .ir_views { NodeType, Owner }
+
+# NOTE: objs that ride a `by llm` slot's return schema are defined IN the
+# slot's module — byllm's schema builder cannot resolve a nested obj from
+# another module ("'str' object has no attribute 'fields'"); cross-module
+# ENUMS are fine.
+
+obj AgirNode {
+    has id: str = "";
+    has ntype: NodeType = NodeType.GEN_RAW;
+    has owner: Owner = Owner.MODEL;
+    has doc: str = "";
+    has reads: list[str] = [];
+    has writes: list[str] = [];
+    has autonomy_tools: list[str] = [];
+    has surface: str = "";
+    has traces_to: list[str] = [];
+}
+
+sem AgirNode = "One action in the workflow graph.";
+sem AgirNode.id = "snake_case node id, unique in the graph.";
+sem AgirNode.doc = "The node's semantic purpose — becomes the slot sem / routing intent.";
+sem AgirNode.reads = "Carry names this node consumes (dataflow in).";
+sem AgirNode.writes = "Carry names this node produces (dataflow out).";
+sem AgirNode.autonomy_tools = "For an adaptive tool-using node (an INVOKE_UNIT rule): the tool names the model may ReAct over. Empty for single-shot nodes.";
+sem AgirNode.surface = "For ACT nodes only: 'artifact' (a deliverable the user interacts with — must be a tool) or 'workspace' (free scratch).";
+sem AgirNode.traces_to = "The spec rule ids this node realizes. NEVER empty — a node no rule demands is a hallucinated node (C1).";
+
+obj AgirEdge {
+    has src: str = "";
+    has dst: str = "";
+    has modality: Modality = Modality.MANDATORY;
+    has guard: str = "";
+    has traces_to: str = "";
+}
+sem AgirEdge = "A control-flow transition. FORBIDDEN rules never become edges — a forbidden path is an ABSENT path (it attaches as a node constraint instead).";
+sem AgirEdge.guard = "For a ROUTE branch: the condition (e.g. \"op == MERGE\"). Empty on unconditional transitions.";
+
+obj WorkflowView {
+    has nodes: list[AgirNode] = [];
+    has edges: list[AgirEdge] = [];
+    has spawn_note: str = "";
+    has constraints: list[str] = [];
+}
+sem WorkflowView = "The CFG view of the skill: every rule realized as nodes + modality-annotated edges, entry first, exactly one TERMINAL last.";
+sem WorkflowView.spawn_note = "Concurrency decision: if no SPAWN node exists, WHY not (never silently omit). E.g. 'sequential: every step consumes the prior step's output'.";
+sem WorkflowView.constraints = "FORBIDDEN-rule constraints as 'rule_id: <verbatim prohibition>' — enforced as slot sems, not transitions.";
+
+obj SpineResult {
+    has view: WorkflowView = WorkflowView();
+    has issues: list[str] = [];
+    has rounds: int = 0;
+}
 
 glob wf_llm: any = Model(model_name="gpt-4o-mini");
 glob _WF_PINNED: bool = False;
@@ -210,3 +263,4 @@ def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 3) -> SpineResul
     }
     return SpineResult(view=wf, issues=issues, rounds=rounds);
 }
+

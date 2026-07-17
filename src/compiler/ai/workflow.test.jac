@@ -102,16 +102,6 @@ test "a FORBIDDEN rule with no constraints entry is flagged" {
     assert len([i for i in issues if "'r4'" in i and "constraints" in i]) == 1;
 }
 
-test "the loop converges: round one's gaps are fixed in round two" {
-    bad = _good_view();
-    bad.nodes = [n for n in bad.nodes if n.id != "emit"];
-    bad.edges = [e for e in bad.edges if (e.src != "emit") and (e.dst != "emit")];
-    bad.edges.append(AgirEdge(src="explore", dst="done", modality=Modality.MANDATORY, traces_to="r2"));
-    bad.spawn_note = "";
-
-    pin_workflow_llm(MockLLM(model_name="mockllm", config={"outputs": [bad, _good_view()]}));
-    res = workflow_spine(_spec(), SKILL);
-    assert res.issues == [];
-    assert res.rounds == 2;
-    assert len(res.view.nodes) == 4;
-}
+# NOTE: the MockLLM convergence run lives in scenarios/workflow_loop.jac (run
+# via `jac run` in CI) — under multi-module `jac test` the runtime resets the
+# slot's __globals__ and the schema build dies (see ci.yml).
