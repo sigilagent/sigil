@@ -18,25 +18,25 @@ Retrieval mode is set by `recall_mode`: `lexical` (deterministic word overlap, n
 
 A skill enters the library two ways: explicitly — `sigil compile ./SKILL.md`
 runs the full gated pipeline (see [skill-compilation](skill-compilation.md)) —
-or at runtime via `solve`, where "crystallizing" is the same compiler applied on
+or at runtime via `solve`, where "compiling" is the same compiler applied on
 demand: the **frontier model** authors the typed procedure (AG-IR), the
 mechanical half lowers it, and the result persists as a `TaskGraph`. Later
 requests of the same kind are a **HIT** and run on the cheap model; a near-match
 is a **PARTIAL** (the procedure is recompiled to cover it); a new kind is a
 **MISS** (compiled fresh).
 
-In chat, `learn_skill(task)` crystallizes a reusable skill on demand; use it only when you
+In chat, `learn_skill(task)` compiles a reusable skill on demand; use it only when you
 want a durable, repeatable procedure rather than a one-off action.
 
 ## Managing the library
 
 ```bash
-sigil library                 # crystallized skills with run stats
+sigil library                 # compiled skills with run stats
 sigil eval <sig> [probe]      # grounded-eval a skill (run + judge the artifact)
-sigil relearn <sig> [hint]    # re-crystallize a skill fresh with the frontier
+sigil relearn <sig> [hint]    # recompile a skill fresh with the frontier
 sigil forget <sig>            # remove a skill entirely (all versions + files)
 ```
 
 The `auto_eval` valve (with `eval_threshold`) judges each skill run and can automatically
-relearn a degraded procedure. Isolation: each crystallized module runs in a separate
+relearn a degraded procedure. Isolation: each compiled module runs in a separate
 subprocess, so a run's throwaway task-graph never touches Sigil's own persistent graph.

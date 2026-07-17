@@ -13,7 +13,7 @@ test "chat_agent: streams tokens with the full tool-belt + incl_info soul (mock 
     CHAT_INFO.update({
         "agent_name": "sigil", "persona": "a pragmatic operator",
         "principles": ["do the work"], "workspace": "/tmp/ws",
-        "sandbox_mode": "jail", "crystallized_skills": 0
+        "sandbox_mode": "jail", "compiled_skills": 0
     });
     # stream=True -> chat_agent returns a generator; accumulate the tokens
     r1 = "";

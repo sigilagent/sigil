@@ -21,7 +21,7 @@ noted, not built).
 | Config model: `SOUL.md`/persona/rules (file-based) | **`Soul` node** — persona, ethos, model tiers, channels, all on the graph (no files) | ✅ |
 | System prompt assembly (`full`/`minimal`/`none` modes) | **`Soul.prompt_mode`** — full (ethos+memory) / minimal (contract only) / none (bare task); `configure prompt_mode` | ✅ |
 | Sessions (dm scope, daily reset, transcripts) | `Attempt` episodic records; `Channel.dm_scope` (main/per-peer) | 🔶 |
-| System prompt assembly (`full`/`minimal`/`none` modes) | crystallizer contract + ethos woven into AG-IR authoring | 🔶 |
+| System prompt assembly (`full`/`minimal`/`none` modes) | compiler contract + ethos woven into AG-IR authoring | 🔶 |
 | Sessions (dm scope, daily reset, transcripts) | **`Session` nodes** — per-`dm_scope` transcripts, daily reset, `session show/reset/list` | ✅ |
 | Compaction / pruning (prompt-cache economics) | byLLM history primitive; memory injected at run-time not baked in | 🔶 |
 | Command queue (steer/queue/followup), streaming | conversational `chat` loop with a LIVE per-tool-call trace + inline approvals | 🔶 |
@@ -64,9 +64,9 @@ noted, not built).
 | `exec`/`bash` + approval gate | **`ws_exec`** — `check_exec` gate + sandboxed runner (`jail`/`docker`), inline chat approvals | ✅ |
 | file read/write/edit (sandbox-aware) | **`ws_read/ws_write/ws_edit/ws_list`** — jailed to the workspace (`sigil_workspace.jac`) | ✅ |
 | web_search / web_fetch | **`web_search`** (keyless) + **`web_fetch`** (real HTTP, SSRF-guarded) chat tools | ✅ |
-| Tool groups + `allow`/`deny`/`profile` | **policy on `Soul`** (allow/deny/groups/profile); enforced at crystallizer binding + run-time dispatch | ✅ |
+| Tool groups + `allow`/`deny`/`profile` | **policy on `Soul`** (allow/deny/groups/profile); enforced at compiler binding + run-time dispatch | ✅ |
 | browser, image/video/music gen, pdf, tts | via MCP servers or a provider plugin | 🔶 |
-| ACP harnesses (Claude Code/Codex/Cursor) | crystallized OSP agents are the harness; ACP bridge 📋 | 🔶 |
+| ACP harnesses (Claude Code/Codex/Cursor) | compiled OSP agents are the harness; ACP bridge 📋 | 🔶 |
 
 ## Security
 
@@ -75,7 +75,7 @@ noted, not built).
 | exec-approvals (`deny`/`allowlist`/`full` × `off`/`on-miss`/`always`) | **`approvals.jac`** — `ExecPolicy` + allowlist + pending-approval flow | ✅ |
 | `/approve id allow-once\|allow-always\|deny` | **`approve(cmd, decision)`** | ✅ |
 | Elevated / break-glass | **`approvals elevate <min>` / `deescalate`** — time-boxed bypass on `ExecPolicy`, every allow audited (`approvals audit`) | ✅ |
-| Sandbox (docker/ssh/openshell) | **workspace jail** (file tools path-confined) + **`sandbox_mode` = jail \| docker \| off** (`docker` = `--network none --cap-drop ALL --pids-limit`), on top of the exec gate; crystallized runs also subprocess-isolated | ✅ |
+| Sandbox (docker/ssh/openshell) | **workspace jail** (file tools path-confined) + **`sandbox_mode` = jail \| docker \| off** (`docker` = `--network none --cap-drop ALL --pids-limit`), on top of the exec gate; compiled runs also subprocess-isolated | ✅ |
 | Secrets / SecretRefs | **`SecretRef` nodes** (name -> env; value never stored) + `secret:` resolve at run-time + `redact_secrets` | ✅ |
 | Gateway auth (token/password/trusted-proxy) | jac-cloud `walker:priv` + JWT; token/proxy modes 📋 | 🔶 |
 | SSRF / egress proxy | 📋 | 📋 |
@@ -127,7 +127,7 @@ noted, not built).
 ## What "parity" means here, honestly
 
 - **Built graph-native + tested (✅):** the agent loop, Soul/config, three-layer memory,
-  crystallized skills, MCP tools, **cron** (with a native binary), **channels** (the
+  compiled skills, MCP tools, **cron** (with a native binary), **channels** (the
   inbound→reply loop + guided provider setup), **hooks**, **exec-approvals**, the
   Observatory Control-UI, and — new — a **conversational chat-mode agent**: a sandboxed
   workspace (jailed file tools + gated/sandboxed `ws_exec`), SSRF-guarded web tools,

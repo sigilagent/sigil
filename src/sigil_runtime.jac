@@ -3,13 +3,13 @@
 The AG-IR -> OSP *compile* itself lives in Jac (``compiler/compiler.jac``'s
 ``transpile_ir``); this module only
 
-  1. persists the lowered OSP source to disk as a crystallized module, and
-  2. runs a crystallized module in an *isolated subprocess*.
+  1. persists the lowered OSP source to disk as a compiled module, and
+  2. runs a compiled module in an *isolated subprocess*.
 
 The isolation matters: a compiled OSP agent builds its own task-graph off
 ``root`` when it runs. If we ran it in-process it would splice its throwaway
 task-graph into Sigil's *persistent* agent graph. A subprocess gives each
-execution a fresh, disposable ``root`` — Sigil keeps only the crystallized
+execution a fresh, disposable ``root`` — Sigil keeps only the compiled
 *procedure* (source + AG-IR + stats) on its own graph, never the run artifacts.
 """
 
@@ -20,11 +20,11 @@ import shutil;
 import subprocess;
 import from pathlib { Path }
 
-glob CRYSTAL_DIR: str = "crystallized";
+glob CRYSTAL_DIR: str = "crystallized";   # legacy dir name — existing installs keep modules here
 glob _MARKER: str = "<<<SIGIL_REPORT>>>";
 glob OBS_LOG: str = "observability/live.jsonl";
 
-# The driver we write next to each crystallized module: it imports the module's
+# The driver we write next to each compiled module: it imports the module's
 # `run`, binds the small model, installs the token observer, and prints the report
 # behind a marker. Kept as a `.format()` template — `{{`/`}}` are literal braces.
 glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
@@ -77,7 +77,7 @@ def repo_root() -> str {
     return str(_here());
 }
 
-# The AG-IR authoring contract handed to the frontier crystallizer. Prefer the
+# The AG-IR authoring contract handed to the frontier compiler. Prefer the
 # compiler-exact template (a concrete working AG-IR to mimic) over the abstract
 # primitive-standard — zero-shot authoring needs the exact schema.
 def default_contract() -> str {
@@ -134,7 +134,7 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
     return str(path);
 }
 
-# Run a crystallized module in an isolated ``jac run`` subprocess. Returns
+# Run a compiled module in an isolated ``jac run`` subprocess. Returns
 # ``{ok, report, error}``. Never raises — a crash/timeout is a typed failure the
 # walker escalates (mutate + retry), never a walker abort. ``mcp_json`` is the
 # user's registered MCP servers (JSON), exposed to the run's ``_live_tool`` via

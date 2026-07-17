@@ -134,9 +134,9 @@ with entry:__main__ {
     } elif cmd == "library" {
         lib = library();
         if not lib {
-            print("(empty — no crystallized procedures yet)");
+            print("(empty — no compiled procedures yet)");
         } else {
-            print("crystallized procedures (" + str(len(lib)) + "):");
+            print("compiled procedures (" + str(len(lib)) + "):");
             for e in lib {
                 print("  " + e["signature"] + "  v" + str(e["version"])
                       + "  [" + e["origin"] + "]  runs=" + str(e["runs"])
@@ -198,7 +198,7 @@ with entry:__main__ {
         if topic { print(read_doc(topic)); }
         else { print(list_docs()); }
     } elif cmd == "eval" {
-        # eval <signature> [probe-task]  — grounded verification of a crystallized skill
+        # eval <signature> [probe-task]  — grounded verification of a compiled skill
         sig = _arg(argv, 1); probe = _arg(argv, 2);
         if not sig { print("usage: eval <signature> [probe-task]"); }
         else {
@@ -212,7 +212,7 @@ with entry:__main__ {
             }
         }
     } elif cmd == "relearn" {
-        # relearn <signature> [hint]  — discard + re-crystallize a skill fresh (frontier)
+        # relearn <signature> [hint]  — discard + recompile a skill fresh (frontier)
         sig = _arg(argv, 1); hint = _arg(argv, 2);
         if not sig { print("usage: relearn <signature> [hint]"); }
         else {
@@ -513,11 +513,11 @@ with entry:__main__ {
         print("  channel setup <kind>        how to connect discord|telegram|whatsapp|slack");
         print("  channel connect <name> <kind>   register a channel + its token secret, print next steps");
         print("  config [<key> <value>]      interactive settings editor (or set one key)");
-        print("  solve \"<task>\" [skill]     route a task; crystallize/execute/mutate as needed");
-        print("  library                     list crystallized procedures (skills)");
+        print("  solve \"<task>\" [skill]     route a task; compile/execute/mutate as needed");
+        print("  library                     list compiled procedures (skills)");
         print("  tasks list [n] | show <n>   background task ledger (solve runs + cron fires)");
         print("  eval <sig> [probe]          grounded-eval a skill (run + judge the artifact)");
-        print("  relearn <sig> [hint]        re-crystallize a skill fresh with the frontier");
+        print("  relearn <sig> [hint]        recompile a skill fresh with the frontier");
         print("  forget <sig>                remove a skill entirely (all versions + files)");
         print("  docs [<topic>]              Sigil's own reference (how it works, config, tools)");
         print("  soul                        show identity, config, skills & memory (all graph state)");

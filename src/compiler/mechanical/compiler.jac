@@ -414,7 +414,7 @@ def _load_ir(text: str) -> any {
     fm: any = {};
     # Strip a Markdown code fence if the frontier wrapped the AG-IR (e.g. ```yaml … ```).
     # Chat models like gpt-4o fence code/YAML by default; without this the raw backticks
-    # crash yaml.safe_load and every crystallization lowers to an empty module.
+    # crash yaml.safe_load and every compilation lowers to an empty module.
     s = text.strip();
     if s.startswith("```") {
         nl = s.find("\n");
@@ -1588,7 +1588,7 @@ def ir_graph(ir_text: str) -> dict {
         carries.append({"name": str(kv[0]), "produced_by": _aslist(pb)});
     }
     # context/knowledge source: each static knowledge item + the nodes it sits on
-    # + its FULL embodied content (the SKILL.md know-how crystallized into the IR).
+    # + its FULL embodied content (the SKILL.md know-how compiled into the IR).
     knowledge: list = [];
     for kv2 in _items(ir.get("knowledge")) {
         k = kv2[1];

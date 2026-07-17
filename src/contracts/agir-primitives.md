@@ -192,7 +192,7 @@ fixed top-level sections, produced by running the phases in order.
 | Section | Holds | View / phase |
 |---------|-------|--------------|
 | `types` | typed cognitive outputs — `enum`s & `obj`s | Phase 1 / P2 |
-| `tools` | crystallized snippets (`owner=code`), **bodies VERBATIM** | the snippet sort (P1) |
+| `tools` | compiled snippets (`owner=code`), **bodies VERBATIM** | the snippet sort (P1) |
 | `knowledge` | static data resident on nodes (the knowledge-graph view) | Phase 4 |
 | `walker` | moving state the agent carries (the dataflow view) | Phase 4 |
 | `nodes` | one entry per action (the flowchart view) | Phase 1/2 |
