@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Sigil — the skill compiler</title>
-<meta name="description" content="Sigil compiles a plain-markdown SKILL.md into a typed agent harness — a runnable program the model executes inside, so every step, rule and check in the skill is enforced by structure, not hoped for in a prompt. Small and local models included." />
-<meta property="og:title" content="Sigil — the skill compiler" />
-<meta property="og:description" content="Don't prompt the skill — compile it. SKILL.md in, one runnable agent harness out: the instructions become structure the model cannot skip, so even small local models follow them faithfully." />
+<title>Sigil: the skill compiler</title>
+<meta name="description" content="Sigil compiles a plain-markdown SKILL.md into a typed agent harness: a runnable program the model executes inside, so every step, rule and check in the skill is enforced by structure, not hoped for in a prompt. Small and local models included." />
+<meta property="og:title" content="Sigil: the skill compiler" />
+<meta property="og:description" content="Don't prompt the skill. Compile it. SKILL.md in, one runnable agent harness out: the instructions become structure the model cannot skip, so even small local models follow them faithfully." />
 <meta property="og:type" content="website" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%23a78bfa' stroke-width='1.6'%3E%3Cpolygon points='16,3 28,10 28,22 16,29 4,22 4,10' /%3E%3Cpath d='M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.6' fill='%2322d3ee'/%3E%3C/svg%3E" />
 <style>
@@ -252,7 +252,7 @@
   .oneliner .pr{color:var(--violet);font-family:var(--mono);user-select:none;font-size:15px;flex:0 0 auto;line-height:1.55}
   .oneliner .ol-scroll{flex:1 1 auto;min-width:0}
   .oneliner .ol-scroll pre{margin:0;padding:0;background:none;border:0;white-space:normal}
-  /* wrap the command (incl. the long URL) so the whole line is visible on any width —
+  /* wrap the command (incl. the long URL) so the whole line is visible on any width;
      no horizontal scrollbar, which read as an ugly bar in the narrow/hero box */
   .oneliner code{color:var(--text);font-family:var(--mono);font-size:14.5px;white-space:normal;overflow-wrap:anywhere;line-height:1.55}
   .oneliner .copy-btn{flex:0 0 auto;font-size:12px;padding:6px 12px;margin-top:1px}
@@ -389,10 +389,18 @@
       <div>
         <span class="eyebrow"><span class="dot"></span>The skill compiler · SKILL.md → runnable agent harness</span>
         <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
-        <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong> — a program the model runs <em>inside</em> — so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
-        <p class="hero-tag">sigil compile ./SKILL.md -e agent.jac · one command, one runnable file</p>
+        <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
+        <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
+        <div class="hero-install" style="margin-bottom:18px">
+          <span class="hero-install-label">Compile a skill</span>
+          <div class="code" data-code>
+            <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">your terminal</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="k">sigil</span> compile ./SKILL.md <span class="p">-e</span> agent.jac
+./agent.jac <span class="s">"extract the tables from report.pdf"</span></code></pre>
+          </div>
+        </div>
         <div class="hero-install">
-          <span class="hero-install-label">Install — macOS &amp; Linux</span>
+          <span class="hero-install-label">Install · macOS &amp; Linux</span>
           <div class="oneliner" data-code>
             <span class="pr">$</span>
             <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
@@ -422,7 +430,7 @@
           <g class="ring-2" stroke="rgba(34,211,238,.28)" fill="none" stroke-width="1">
             <circle cx="130" cy="130" r="96" stroke-dasharray="1 9"/>
           </g>
-          <!-- hexagon + spokes + corner nodes — spin together (counter-clockwise) -->
+          <!-- hexagon + spokes + corner nodes: spin together (counter-clockwise) -->
           <g class="hex">
             <g stroke="#a78bfa" stroke-width="1.4" fill="none" opacity=".85">
               <polygon points="130,28 218,79 218,181 130,232 42,181 42,79"/>
@@ -437,7 +445,7 @@
               <circle class="pulse" cx="42" cy="79" r="5" style="animation-delay:2s"/>
             </g>
           </g>
-          <!-- inner triangle — spins clockwise, opposite the hexagon -->
+          <!-- inner triangle: spins clockwise, opposite the hexagon -->
           <g class="tri">
             <path d="M130 66 L186 162 L74 162 Z" fill="none" stroke="#22d3ee" stroke-width="1.1" opacity=".7"/>
           </g>
@@ -458,29 +466,29 @@
     <div class="section-head">
       <div class="kicker">The compiler</div>
       <h2 class="section-title">Everywhere else, a skill is a prompt. Here, it's source code.</h2>
-      <p>A <code>SKILL.md</code> loaded into context is a hope: the model <em>reads</em> the instructions, and you hope it follows them. Sigil's compiler reads the same file and emits a <strong>typed, runnable harness</strong> — every mandatory step becomes a node the run must visit, every prohibition a constraint, every code snippet a runnable tool body, every check a gate. The model's judgment is confined to typed slots at exactly the points the skill calls for judgment.</p>
+      <p>A <code>SKILL.md</code> loaded into context is a hope: the model <em>reads</em> the instructions, and you hope it follows them. Sigil's compiler reads the same file and emits a <strong>typed, runnable harness</strong>: every mandatory step becomes a node the run must visit, every prohibition a constraint, every code snippet a runnable tool body, every check a gate. The model's judgment is confined to typed slots at exactly the points the skill calls for judgment.</p>
     </div>
 
     <div class="loop-panel">
       <div class="loop-row">
-        <div class="stage"><div class="n">01 · IN</div><h4>SKILL.md</h4><p>Plain-markdown instructions — the skill you'd hand any agent.</p></div>
+        <div class="stage"><div class="n">01 · IN</div><h4>SKILL.md</h4><p>Plain-markdown instructions: the skill you'd hand any agent.</p></div>
         <div class="arrow">→</div>
-        <div class="stage frontier"><div class="n">02 · LIFT</div><h4>Author the AG-IR</h4><p>A frontier model extracts a typed graph contract — every rule pinned to a verbatim quote from the skill.</p></div>
+        <div class="stage frontier"><div class="n">02 · LIFT</div><h4>Author the AG-IR</h4><p>A frontier model extracts a typed graph contract, with every rule pinned to a verbatim quote from the skill.</p></div>
         <div class="arrow">→</div>
         <div class="stage frontier"><div class="n">03 · GATE</div><h4>Prove it</h4><p>A gate battery audits coverage, drift and structure; the compile oracle round-trips the IR through the real type-checker.</p></div>
         <div class="arrow">→</div>
-        <div class="stage"><div class="n">04 · LOWER</div><h4>Transpile</h4><p>The mechanical back-end lowers the IR as written — every construct has exactly one lowering, zero judgment.</p></div>
+        <div class="stage"><div class="n">04 · LOWER</div><h4>Transpile</h4><p>The mechanical back-end lowers the IR as written: every construct has exactly one lowering, zero judgment.</p></div>
         <div class="arrow">→</div>
         <div class="stage small"><div class="n">05 · RUN</div><h4>Any model</h4><p>The harness runs on small, cheap, even fully-local models. Structure can't be skipped.</p></div>
       </div>
       <div class="loop-note">
         <div class="route hit"><b>COMPILED</b>Step order is control flow; MUSTs are nodes the run visits; prohibitions are constraints, never paths.</div>
         <div class="route miss"><b>GROUNDED</b>The model proposes, code disposes: a rule that doesn't quote the skill verbatim is dropped deterministically.</div>
-        <div class="route partial"><b>EJECTED</b><code>-e</code> packages one self-contained runnable file — no sigil, no session, no graph needed to run it.</div>
+        <div class="route partial"><b>EJECTED</b><code>-e</code> packages one self-contained runnable file. No sigil, no session, no graph needed to run it.</div>
       </div>
     </div>
 
-    <p class="lead" style="margin-top:30px">Why it matters: the compiled harness carries <strong style="color:var(--text)">structure a weak model cannot skip</strong> — step order, embodied tools, grounded verification. The model isn't asked to <em>be</em> disciplined; the harness <em>is</em> the discipline. That is how a skill written once runs faithfully on any model — and how capability transfers from the frontier model that compiled it to the small one that runs it.</p>
+    <p class="lead" style="margin-top:30px">Why it matters: the compiled harness carries <strong style="color:var(--text)">structure a weak model cannot skip</strong>: step order, embodied tools, grounded verification. The model isn't asked to <em>be</em> disciplined; the harness <em>is</em> the discipline. That is how a skill written once runs faithfully on any model, and how capability transfers from the frontier model that compiled it to the small one that runs it.</p>
   </div>
 </section>
 
@@ -492,7 +500,7 @@
     <div class="section-head">
       <div class="kicker">The runtime</div>
       <h2 class="section-title">Compiled skills live on a persistent graph agent.</h2>
-      <p>Around the compiler, Sigil ships a full agent runtime. Every compiled skill persists as a <span class="node-name">TaskGraph</span> on one living graph, next to the agent's identity, memory and schedules. Ask for something it has a skill for and it runs it — cheap, on the small model. Ask for something new and the frontier model compiles a skill first, then it's cheap forever.</p>
+      <p>Around the compiler, Sigil ships a full agent runtime. Every compiled skill persists as a <span class="node-name">TaskGraph</span> on one living graph, next to the agent's identity, memory and schedules. Ask for something it has a skill for and it runs it on the small, cheap model. Ask for something new and the frontier model compiles a skill first, then it's cheap forever.</p>
     </div>
 
     <div class="graph-layout">
@@ -574,7 +582,7 @@
         <div class="mem-card proc">
           <div class="tag">Procedural</div>
           <h3>Skills</h3>
-          <p>The compiled skills themselves — each one covers a whole class of task, not just one. This is what the agent has learned to do.</p>
+          <p>The compiled skills themselves: each one covers a whole class of task, not just one. This is what the agent has learned to do.</p>
         </div>
         <div class="mem-card epis">
           <div class="tag">Episodic</div>
@@ -584,12 +592,12 @@
         <div class="mem-card sem">
           <div class="tag">Semantic</div>
           <h3>Memory</h3>
-          <p>Durable facts, retrieved by deterministic lexical recall and injected at run time — grown automatically by distilling each completed task.</p>
+          <p>Durable facts, retrieved by deterministic lexical recall and injected at run time, grown automatically by distilling each completed task.</p>
         </div>
       </div>
 
       <p class="lead" style="margin:6px 0 0">
-        <strong style="color:var(--text)">Soul</strong> is identity and config as state you mutate in place — persona, ethos, model tiers, channels. The compiled skill stays class-general; instance-specific memory is injected only at execution time, never baked into the harness. On a small-model failure, the frontier mutates the skill and retries — the graph keeps the whole lineage.
+        <strong style="color:var(--text)">Soul</strong> is identity and config as state you mutate in place: persona, ethos, model tiers, channels. The compiled skill stays class-general; instance-specific memory is injected only at execution time, never baked into the harness. On a small-model failure, the frontier mutates the skill and retries; the graph keeps the whole lineage.
       </p>
     </div>
   </div>
@@ -603,49 +611,49 @@
     <div class="section-head">
       <div class="kicker">Inside the compiler</div>
       <h2 class="section-title">Built like a compiler. Gated like one, too.</h2>
-      <p>A classic two-half design: an AI front-end (<strong>LIFT</strong>) that owns all the judgment, and a mechanical back-end (<strong>LOWER</strong>) that owns none — with typed gates between them, so an unfaithful skill can never slip through silently.</p>
+      <p>A classic two-half design: an AI front-end (<strong>LIFT</strong>) that owns all the judgment, and a mechanical back-end (<strong>LOWER</strong>) that owns none, with typed gates between them, so an unfaithful skill can never slip through silently.</p>
     </div>
 
     <div class="feat-grid">
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
         <h3>Grounded spec loop</h3>
-        <p>The model proposes, code disposes. Every extracted rule must quote the skill verbatim — a hallucinated rule can't produce a matching span, so it's dropped deterministically.</p>
+        <p>The model proposes, code disposes. Every extracted rule must quote the skill verbatim; a hallucinated rule can't produce a matching span, so it's dropped deterministically.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></div>
         <h3>Compile oracle</h3>
-        <p>Every candidate IR round-trips through the real back-end and the type-checker before it's accepted — a deterministic ground truth on every iteration. Failures raise; nothing unfaithful persists.</p>
+        <p>Every candidate IR round-trips through the real back-end and the type-checker before it's accepted: a deterministic ground truth on every iteration. Failures raise; nothing unfaithful persists.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l-4 16M6 8l-4 4 4 4M18 8l4 4-4 4"/></svg></div>
         <h3>Eject to one file</h3>
-        <p><code>-e</code> emits a single self-contained runnable — shebang'd, runtime embedded. No sigil, no session, no graph needed to run it. Pick the model with an env var.</p>
+        <p><code>-e</code> emits a single self-contained runnable: shebang'd, runtime embedded. No sigil, no session, no graph needed to run it. Pick the model with an env var.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
         <h3>Replay</h3>
-        <p>Recorded runs re-execute through a recompiled harness with no model and no cost — every expensive live failure becomes a permanent free regression test for the compiler.</p>
+        <p>Recorded runs re-execute through a recompiled harness with no model and no cost; every expensive live failure becomes a permanent free regression test for the compiler.</p>
       </div>
       <div class="feat"><span class="badge done">any model</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/></svg></div>
         <h3>52 providers &amp; local models</h3>
-        <p>Compile with a frontier model — GPT, Claude, Gemini — and run the harness on anything, including fully local via Ollama. The structure carries the discipline, not the model.</p>
+        <p>Compile with a frontier model (GPT, Claude, Gemini) and run the harness on anything, including fully local via Ollama. The structure carries the discipline, not the model.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/></svg></div>
         <h3>Three ingress forms</h3>
-        <p>Hand it a plain-Markdown skill (the compiler runs), a hand-authored AG-IR (no model call), or an already-compiled module — all land as skills on the graph.</p>
+        <p>Hand it a plain-Markdown skill (the compiler runs), a hand-authored AG-IR (no model call), or an already-compiled module; all land as skills on the graph.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4zM4 12h10v8H4zM18 12h2v8h-2z"/></svg></div>
         <h3>MCP tools, bound at compile time</h3>
-        <p>Connect any tool server and the compiler binds its tools by name into the skills it builds — live runs dispatch to whichever server exposes the tool.</p>
+        <p>Connect any tool server and the compiler binds its tools by name into the skills it builds; live runs dispatch to whichever server exposes the tool.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-9 8.4 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 1121 11.5z"/></svg></div>
         <h3>A full runtime included</h3>
-        <p>Chat with tool use and exec approvals, Discord / Slack / Telegram channels, cron scheduling, three-layer memory, hooks — all driving the same graph the compiler writes to.</p>
+        <p>Chat with tool use and exec approvals, Discord / Slack / Telegram channels, cron scheduling, three-layer memory, hooks, all driving the same graph the compiler writes to.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
@@ -664,7 +672,7 @@
     <div class="section-head">
       <div class="kicker">The workflow</div>
       <h2 class="section-title">Compile the skill. Then run it anywhere.</h2>
-      <p>One command takes a plain-Markdown skill through the whole gated pipeline. Keep the result on Sigil's graph — or eject it as a single runnable file that needs nothing else.</p>
+      <p>One command takes a plain-Markdown skill through the whole gated pipeline. Keep the result on Sigil's graph, or eject it as a single runnable file that needs nothing else.</p>
     </div>
 
     <div class="two-col">
@@ -677,20 +685,20 @@
 <span class="k">sigil</span> compile ./SKILL.md <span class="p">-e</span> agent.jac
 ./agent.jac <span class="s">"extract the tables from report.pdf"</span>
 
-<span class="c"># the harness is the discipline — pick any execution model</span>
+<span class="c"># the harness is the discipline: pick any execution model</span>
 <span class="v">SIGIL_MODEL</span>=ollama_chat/qwen3:8b ./agent.jac <span class="s">"..."</span></code></pre>
       </div>
 
       <div class="code" data-code>
         <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">skills &amp; tools, three ingress forms</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="c"># plain Markdown — the compiler runs</span>
+<pre><code><span class="c"># plain Markdown: the compiler runs</span>
 <span class="k">sigil</span> register-skill ./my-skill/SKILL.md
 
 <span class="c"># a hand-authored AG-IR (no model call) · a precompiled module</span>
 <span class="k">sigil</span> register-skill ./procedure.agir <span class="p">agir</span>
 <span class="k">sigil</span> register-skill ./skills/report_v1.jac <span class="p">osp</span>
 
-<span class="c"># MCP servers — the compiler binds their tools into new skills</span>
+<span class="c"># MCP servers: the compiler binds their tools into new skills</span>
 <span class="k">sigil</span> add-mcp github stdio gh-mcp</code></pre>
       </div>
     </div>
@@ -716,7 +724,7 @@
     <p class="oneliner-note">macOS &amp; Linux · installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
 
     <div class="what-grid">
-      <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs one small self-contained program — no Python, no dependencies to manage.</p></div>
+      <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs one small self-contained program; no Python, no dependencies to manage.</p></div>
       <div class="what"><div class="k">02</div><h4>Fetches Sigil</h4><p>Clones the source into <code>~/.sigil/app</code> (or a tarball if you have no git).</p></div>
       <div class="what"><div class="k">03</div><h4>Provisions PyYAML</h4><p>The one dependency the compiler needs and the binary doesn't bundle.</p></div>
       <div class="what"><div class="k">04</div><h4>Puts <code>sigil</code> on PATH</h4><p>A launcher so <code>sigil serve</code> / <code>sigil solve</code> work from anywhere.</p></div>
@@ -744,7 +752,7 @@ jac install pyyaml
     </details>
 
     <p class="lead" style="margin:26px 0 0">
-      Verify the build with the test suite — <code>jac test *.test.jac report_fix_tests.jac</code> — or launch the live Observatory Control-UI with <code>jac start observatory.jac</code>. Then compile your first skill:
+      Verify the build with the test suite (<code>jac test *.test.jac report_fix_tests.jac</code>) or launch the live Observatory Control-UI with <code>jac start observatory.jac</code>. Then compile your first skill:
     </p>
   </div>
 </section>
@@ -756,8 +764,8 @@ jac install pyyaml
   <div class="wrap">
     <div class="section-head">
       <div class="kicker">Use it</div>
-      <h2 class="section-title">Or skip the files entirely — just ask the agent.</h2>
-      <p>Point it at models once — a frontier one to compile with, and a small or fully-local one (via <code>ollama</code>) to run with. <code>solve</code> compiles a skill the first time it meets a class of task, and reuses it every time after.</p>
+      <h2 class="section-title">Or skip the files entirely and just ask the agent.</h2>
+      <p>Point it at models once: a frontier one to compile with, and a small or fully-local one (via <code>ollama</code>) to run with. <code>solve</code> compiles a skill the first time it meets a class of task, and reuses it every time after.</p>
     </div>
 
     <div class="stack">
@@ -766,10 +774,10 @@ jac install pyyaml
 <pre><code><span class="c"># first time: the frontier compiles a skill for this class of task</span>
 <span class="k">sigil</span> solve <span class="s">"turn report.pdf into a clean CSV"</span>
 
-<span class="c"># similar ask — HIT: runs the compiled skill on the small model</span>
+<span class="c"># a similar ask is a HIT: it runs the compiled skill on the small model</span>
 <span class="k">sigil</span> solve <span class="s">"pull the tables out of invoice.pdf"</span>
 
-<span class="c"># the compiled skills, with run stats — and everything else it knows</span>
+<span class="c"># the compiled skills with run stats, and everything else it knows</span>
 <span class="k">sigil</span> library
 <span class="k">sigil</span> soul
 <span class="k">sigil</span> teach <span class="s">"always give me CSV with a header row"</span></code></pre>
@@ -780,15 +788,15 @@ jac install pyyaml
           <h3 style="font-size:18px;margin-bottom:14px">Three ways to run it</h3>
           <div class="status-panel" style="padding:22px 20px">
             <p><strong style="color:var(--text)">In your terminal.</strong> <code>sigil compile</code> a skill, or <code>sigil solve "…"</code> and let it compile on demand.</p>
-            <p style="margin-top:12px"><strong style="color:var(--text)">As a dashboard.</strong> Run <code>sigil serve</code> for a live web view — watch it compile and run every skill, in your browser.</p>
-            <p style="margin-top:12px"><strong style="color:var(--text)">Standalone.</strong> Eject a skill to one file and run it anywhere — no sigil installed at all.</p>
+            <p style="margin-top:12px"><strong style="color:var(--text)">As a dashboard.</strong> Run <code>sigil serve</code> for a live web view; watch it compile and run every skill, in your browser.</p>
+            <p style="margin-top:12px"><strong style="color:var(--text)">Standalone.</strong> Eject a skill to one file and run it anywhere, no sigil installed at all.</p>
           </div>
         </div>
         <div>
           <h3 style="font-size:18px;margin-bottom:14px">Pay for intelligence once</h3>
           <div class="status-panel" style="padding:22px 20px">
-            <p>The frontier model is paid <strong style="color:var(--green)">once per class of task</strong> — to compile the harness.</p>
-            <p style="margin-top:12px">Every run after rides that structure on a small, cheap model. If the small model fails, the frontier mutates the skill and retries — the skill gets better under pressure.</p>
+            <p>The frontier model is paid <strong style="color:var(--green)">once per class of task</strong>, to compile the harness.</p>
+            <p style="margin-top:12px">Every run after rides that structure on a small, cheap model. If the small model fails, the frontier mutates the skill and retries; the skill gets better under pressure.</p>
             <p style="margin-top:12px">Teach it something and it remembers. Point it at a different model and it switches. All of it, live.</p>
           </div>
         </div>
