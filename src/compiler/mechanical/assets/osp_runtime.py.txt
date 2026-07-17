@@ -17,6 +17,13 @@ def _ensure_path():
     # reads (open("templates/viewer.html")) and module imports (from core import x)
     # resolve when it runs in a fresh bench workdir rather than inside the skill bundle.
     cwd = os.getcwd()
+    # NEVER stage from a system temp root: a module placed directly in /tmp
+    # would "stage" every /tmp resident (browser locks, other sessions' dirs)
+    # into the invoking cwd. Bundles live in their own directories.
+    _tmp_roots = {"/tmp", "/private/tmp", "/var/tmp",
+                  os.path.realpath(os.environ.get("TMPDIR", "/nonexistent")).rstrip("/")}
+    if os.path.realpath(here or "/nonexistent").rstrip("/") in _tmp_roots:
+        return
     if here and here != cwd and os.path.isdir(here):
         _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
                  "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
