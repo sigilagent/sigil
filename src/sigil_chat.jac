@@ -268,7 +268,6 @@ def _install_hooks(console: any, session: any) {
         # first token ends the "thinking" phase: stop the spinner, print the "◆ sigil"
         # header, then stream the reply as a distinct block — a purple left-border gutter
         # on every line so each turn's answer is clearly bracketed and separated.
-        global _STREAMED;
         if not _STREAMED {
             _STREAMED = True;
             if _STATUS is not None { try { _STATUS.stop(); } except Exception as e {} }
@@ -295,7 +294,6 @@ def _install_hooks(console: any, session: any) {
 }
 
 def _run_and_render(console: any, message: str) {
-    global _STATUS, _STREAMED;
     _STREAMED = False;
     r: dict = {};
     if sys.stdin.isatty() {

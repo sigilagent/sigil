@@ -83,7 +83,6 @@ glob wf_llm: any = Model(model_name="gpt-4o-mini");
 glob _WF_PINNED: bool = False;
 
 def pin_workflow_llm(m: any) -> None {
-    global wf_llm, _WF_PINNED;
     wf_llm = m;
     _WF_PINNED = True;
 }

@@ -22,13 +22,11 @@ glob sub_llm: any = Model(model_name="gpt-4o-mini");
 glob _SUB_PINNED: bool = False;   # when set, don't rebind from the graph (tests / embedders pin a model)
 
 def pin_sub_llm(m: any) -> None {
-    global sub_llm, _SUB_PINNED;
     sub_llm = m;
     _SUB_PINNED = True;
 }
 
 def _ensure_sub_llm() -> None {
-    global sub_llm;
     if not _SUB_PINNED { sub_llm = bind_chat_model(); }
 }
 

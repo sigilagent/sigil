@@ -378,7 +378,6 @@ walker FileWriterAgent {
 
 # ===== ENTRYPOINT =====
 def run(task: str, model: Model, skill: str) -> str {
-    global llm;
     llm = model;
 
     n_activate = Activate();

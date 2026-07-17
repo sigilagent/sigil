@@ -23,7 +23,6 @@ glob repair_llm: any = Model(model_name="gpt-4o-mini");
 glob _REPAIR_PINNED: bool = False;
 
 def pin_repair_llm(m: any) -> None {
-    global repair_llm, _REPAIR_PINNED;
     repair_llm = m;
     _REPAIR_PINNED = True;
 }

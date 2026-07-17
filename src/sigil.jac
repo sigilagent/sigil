@@ -276,7 +276,6 @@ def models_info() -> dict {
 }
 
 def awaken() -> Soul {
-    global frontier, small, router, SMALL_NAME, CONTRACT, ETHOS, PROMPT_MODE;
     found = [root -->[?:Soul]];
     if found {
         soul = found[0];

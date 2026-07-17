@@ -6,7 +6,6 @@
 import from jaclang.byllm.lib { MockLLM }
 
 test "chat_agent: streams tokens with the full tool-belt + incl_info soul (mock model)" {
-    global chat_llm, CHAT_HISTORY, CHAT_INFO;
     chat_llm = MockLLM(model_name="mockllm",
                        config={"outputs": ["Hi — I'm Sigil, ready to help.", "Working on it."]});
     CHAT_HISTORY = [];
@@ -28,7 +27,6 @@ test "chat_agent: streams tokens with the full tool-belt + incl_info soul (mock 
 }
 
 test "chat_turn: streams to the token sink and returns the full reply" {
-    global chat_llm, CHAT_HISTORY, CHAT_INFO;
     # pin the mock so chat_turn's bind_chat_model rebind still streams a known string
     # (bind_chat_model reads the graph; here we just assert the sink receives the tokens
     #  chat_agent yields, independent of which model backs it).
