@@ -177,6 +177,36 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
 }
 
 # ---------------------------------------------------------------------------
+# G6-HIL — human-feedback gates are owner=code (slotted != gated)
+# ---------------------------------------------------------------------------
+
+def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
+    # The superpowers HIL session's sharpest finding: a model-owned approval
+    # route read the human's explicit "NOT approved" and proceeded as approved.
+    # A route that consumes human feedback is a MANDATE-CLASS gate: owner=code,
+    # explicit guards on every branch — no model judgment between the human's
+    # words and the control flow.
+    issues: list = [];
+    gated_nodes = [hp.node for hp in vb.hil.points];
+    hil_carries: list = [];
+    for n in wf.nodes {
+        if n.id in gated_nodes {
+            for w in n.writes { if w not in hil_carries { hil_carries.append(w); } }
+        }
+    }
+    for n in wf.nodes {
+        if n.ntype != NodeType.ROUTE { continue; }
+        feeds = [rd for rd in n.reads if rd in hil_carries];
+        if not feeds { continue; }
+        if n.owner != Owner.CODE {
+            issues.append("G6: route '" + n.id + "' consumes human feedback ('" + ", ".join(feeds)
+                          + "') but is model-owned — make it owner=code with explicit guards (e.g. contains 'approved')");
+        }
+    }
+    return issues;
+}
+
+# ---------------------------------------------------------------------------
 # G4 — the compile oracle
 # ---------------------------------------------------------------------------
 

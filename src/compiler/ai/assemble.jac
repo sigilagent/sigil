@@ -103,6 +103,22 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     # (v1 lowering: FORBIDDEN rules ride every model Mind node's sem; a HIL gate
     # rides its target node's sem. The mechanical half folds doc into the slot
     # sem, which is where prohibitions and gates bind.)
+    # ---- HIL points become REAL gates: an ask_user tool per gated node ----
+    # (runtime _ask_user: file channel when HIL_QA_FILE is attached, an honest
+    # sentinel in batch — the human gate exists either way, never fabricated.)
+    hil_tool_by_node: dict[str, str] = {};
+    hil_extra_tools: list[dict] = [];
+    for hp0 in vb.hil.points {
+        if hp0.node not in node_ids { continue; }
+        tname = "ask_user_" + hp0.node;
+        if hp0.node in hil_tool_by_node { continue; }
+        hil_tool_by_node[hp0.node] = tname;
+        prompt = (hp0.kind + ": " + hp0.prompt).replace('"', "'");
+        hil_extra_tools.append({"name": tname,
+            "sig": "(prompt) -> str", "surface": "SENSE", "serves": [hp0.node],
+            "body": 'return _ask_user("' + prompt + '")'});
+    }
+
     con_texts: list[str] = [];
     for c0 in wf.constraints {
         if ":" in c0 { con_texts.append(str(c0.split(":", 1)[1]).strip()); }
@@ -132,7 +148,13 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         if n.reads { nd["reads"] = list(n.reads); }
         if n.writes { nd["writes"] = list(n.writes); }
         if n.surface { nd["surface"] = "ACT·" + n.surface if not n.surface.startswith("ACT") else n.surface; }
-        if n.autonomy_tools { nd["autonomy"] = {"tools": list(n.autonomy_tools)}; }
+        atools = list(n.autonomy_tools);
+        if (n.id in hil_tool_by_node) and (n.owner == Owner.MODEL) and (n.ntype in mind) {
+            # the gated Mind slot can genuinely ASK (clarify loops converge on
+            # real answers when a channel is attached)
+            if hil_tool_by_node[n.id] not in atools { atools.append(hil_tool_by_node[n.id]); }
+        }
+        if atools { nd["autonomy"] = {"tools": atools}; }
         # persist the rule-id spine into the IR: node -> rule ids -> (spec.json) verbatim skill spans.
         # The mechanical half ignores unknown keys; provenance rides for free.
         if n.traces_to { nd["traces_to"] = list(n.traces_to); }
@@ -150,6 +172,10 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     }
 
     tools_out: dict = {};
+    for ht in hil_extra_tools {
+        tools_out[str(ht["name"])] = {"sig": ht["sig"], "surface": ht["surface"],
+                                      "serves": list(ht["serves"]), "body": ht["body"]};
+    }
     for td in vb.kn.tools {
         te: dict = {};
         if td.sig { te["sig"] = td.sig; }

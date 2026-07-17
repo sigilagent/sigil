@@ -61,6 +61,39 @@ def _progress(node):
     except Exception:
         pass
 
+# ---- human-in-the-loop channel: file-based Q&A (sigil chat/approvals attach it
+# via HIL_QA_FILE; the superpowers HIL session prototyped this). Batch-safe: with
+# no channel attached it returns an HONEST sentinel immediately — never blocks,
+# never fabricates a user. ----
+def _ask_user(question=None):
+    import os, time, json
+    qf = os.environ.get("HIL_QA_FILE", "")
+    if not qf:
+        return "[no human channel attached - proceeding without user input]"
+    af = qf + ".answers"
+    n = 0
+    try:
+        n = sum(1 for _ in open(qf))
+    except Exception:
+        pass
+    try:
+        with open(qf, "a") as f:
+            f.write(json.dumps({"i": n, "q": str(question)}) + "\n")
+            f.flush()
+    except Exception:
+        return "[human channel write failed]"
+    deadline = time.time() + int(os.environ.get("HIL_TIMEOUT", "600") or 600)
+    while time.time() < deadline:
+        try:
+            for line in open(af):
+                rec = json.loads(line)
+                if rec.get("i") == n:
+                    return str(rec.get("a", ""))
+        except Exception:
+            pass
+        time.sleep(2)
+    return "[human did not answer in time]"
+
 # ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
 def _strip_fences(code):
     c = str(code).strip()

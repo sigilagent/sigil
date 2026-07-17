@@ -202,7 +202,7 @@ def _gaps_digest(v: ExtractVerdict) -> str {
 # the loop
 # ---------------------------------------------------------------------------
 
-def extract_spec(skill: str, name: str, max_rounds: int = 5) -> SpecResult {
+def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     # Returns the frozen spec plus its honest verdict. Callers gate on
     # verdict.sound/complete rather than trusting the set blindly.
     sn = _norm(skill);
@@ -210,7 +210,10 @@ def extract_spec(skill: str, name: str, max_rounds: int = 5) -> SpecResult {
     verdict = ExtractVerdict();
     dry = 0;
     rounds = 0;
-    while (rounds < max_rounds) and (dry < 2) {
+    # auto budget (max_rounds=0): caps tuned on 5-rule toys starve gpt-5-scale
+    # specs (40-140 rules) — scale with observed size, bounded.
+    cap = max_rounds if (max_rounds > 0) else 5;
+    while (rounds < cap) and (dry < 2) {
         rs = extract_round(skill, prior, _gaps_digest(verdict));
         rs.skill_name = name;
 
@@ -234,6 +237,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 5) -> SpecResult {
         notes = audit_modality(skill, rs);
 
         rounds += 1;
+        if max_rounds <= 0 { cap = min(9, max(5, 3 + len(rs.rules) // 20)); }
         changed = _fingerprint(rs) != _fingerprint(prior);
         verdict = ExtractVerdict(
             sound=(len(bad) == 0), complete=(len(uncovered) == 0),

@@ -4,7 +4,7 @@ failure paths must return routed verdicts, never raise."""
 
 import from .spec_loop { Rule }
 import from .workflow { AgirNode }
-import from .flows { ToolDef, KnowledgeItem, KnowledgeView }
+import from .flows { ToolDef, KnowledgeItem, KnowledgeView, HILView, HILPoint }
 
 glob GOOD_IR: str = """---
 name: note-writer
@@ -129,4 +129,19 @@ test "G3-hard: the _write_artifact fallback (ACT with a content read) counts as 
     emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, reads=["doc"]);
     wf = WorkflowView(nodes=[author, emit]);
     assert gate_artifact_boundary(spec, wf, ViewBundle()) == [];
+}
+
+test "G6: a model-owned route consuming human feedback is flagged; code-owned passes" {
+    wait_n = AgirNode(id="wait_review", ntype=NodeType.SENSE, owner=Owner.CODE,
+                      writes=["feedback"], traces_to=["r1"]);
+    bad_route = AgirNode(id="approved_route", ntype=NodeType.ROUTE, owner=Owner.MODEL,
+                         reads=["feedback"], traces_to=["r1"]);
+    wf = WorkflowView(nodes=[wait_n, bad_route]);
+    vb = ViewBundle(hil=HILView(points=[HILPoint(node="wait_review", kind="APPROVE", prompt="review the spec")]));
+    issues = gate_hil_gates(wf, vb);
+    assert len(issues) == 1, issues;
+    assert "'approved_route'" in issues[0] and "model-owned" in issues[0];
+
+    bad_route.owner = Owner.CODE;
+    assert gate_hil_gates(wf, vb) == [];
 }

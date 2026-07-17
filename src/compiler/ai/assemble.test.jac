@@ -6,7 +6,7 @@ import from .lift_types { Modality, RuleKind }
 import from .spec_loop { Rule, RuleSet }
 import from .ir_views { NodeType, Owner }
 import from .workflow { AgirNode, AgirEdge, WorkflowView }
-import from .flows { Carry, IOView, Residency, ContextView, ToolDef, KnowledgeItem, KnowledgeView, HILView, ViewBundle }
+import from .flows { Carry, IOView, Residency, ContextView, ToolDef, KnowledgeItem, KnowledgeView, HILView, HILPoint, ViewBundle }
 import from .gates { compile_gate }
 
 def _spec() -> RuleSet {
@@ -102,4 +102,20 @@ test "prose-pointer precheck: an unembodied tool is flagged" {
     vb.kn.tools.append(ToolDef(name="magic", sig="(x) -> y", serves=["parse"]));
     res = assemble(_spec(), _wf(), vb, "csv-toy");
     assert len([i for i in res.issues if "'magic'" in i and "prose-pointer" in i]) == 1;
+}
+
+test "a HIL point injects a real ask_user gate: SENSE served + Mind autonomy belt" {
+    spec = _spec(); wf = _wf(); vb = _views();
+    # gate the model Mind node (summarize) and pretend parse waits on a human
+    vb.hil = HILView(points=[
+        HILPoint(node="summarize", kind="CONFIRM", prompt="proceed with this summary?"),
+        HILPoint(node="parse", kind="INPUT", prompt="which file should I parse?")
+    ]);
+    res = assemble(spec, wf, vb, "csv-toy");
+    assert "ask_user_summarize" in res.ir_text;
+    assert "ask_user_parse" in res.ir_text;
+    assert "_ask_user(" in res.ir_text;           # embodied body, not a pointer
+    v = compile_gate(res.ir_text, "csv_toy_hil");
+    assert v.ok, v.errors;
+    assert "_ask_user" in v.module_src;           # the runtime channel rode into the module
 }

@@ -113,6 +113,9 @@ become entries in `constraints` ('rule_id: prohibition'), NEVER edges or nodes.
 (Concurrency) If independent branches share no moving data, add a SPAWN node;
 otherwise set spawn_note explaining why the flow is sequential. Never leave the
 decision implicit.
+(Human gates) A route that consumes human feedback (approval, confirmation,
+review response) is owner=CODE with explicit string-match guards — the human's
+words bind control flow directly; model judgment must never sit between them.
 (Artifact boundary) Every MANDATORY IO rule ends in an ACT node with
 surface 'artifact' that READS the content carry it must write — a deliverable
 authored into a carry but never written is a dropped artifact.
@@ -250,14 +253,16 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
 # the loop
 # ---------------------------------------------------------------------------
 
-def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 3) -> SpineResult {
+def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0) -> SpineResult {
     # Bounded model-propose / code-dispose loop. On exhaustion, returns the last
     # view WITH its outstanding issues — an honest failure, never a silent one.
     wf = WorkflowView();
     issues: list = [];
     rounds = 0;
     digest = "";
-    while rounds < max_rounds {
+    # auto budget: spine rounds scale with spec size (3 for toys, up to 6)
+    cap = max_rounds if (max_rounds > 0) else min(6, max(3, 2 + len(spec.rules) // 30));
+    while rounds < cap {
         wf = workflow_view(spec, skill, digest);
         issues = validate_spine(spec, wf);
         rounds += 1;
