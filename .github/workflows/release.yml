@@ -45,22 +45,42 @@ jobs:
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      # The CLI banner reads its version from jac.toml, so a tag cut without bumping
-      # the manifest ships a lying banner (v0.1.0 was reported all the way to v0.2.0).
-      # Tag pushes fail hard on drift; manual dispatch only warns, so refreshing the
-      # assets of an already-published release stays possible.
-      - name: Check tag matches jac.toml version
+      # The CLI banner reads its version from jac.toml, and installs track the default
+      # branch — so cutting a release keeps the manifest in lockstep automatically:
+      # if the tag is NEWER than jac.toml on the default branch, push a version-bump
+      # commit there (Contents API, so the working tree stays at the tag). Equal is a
+      # no-op; an OLDER tag (asset refresh, backport) leaves the manifest alone.
+      - name: Sync jac.toml version to the tag
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
+          BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          v="$(sed -n 's/^version *= *"\(.*\)".*/\1/p' jac.toml | head -1)"
-          if [ "v$v" = "$TAG" ]; then
-            echo "jac.toml version ($v) matches tag $TAG"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "::error::jac.toml says version=$v but the tag is $TAG. Bump jac.toml (and commit) before tagging."
-            exit 1
+          set -euo pipefail
+          t="${TAG#v}"
+          file="$(gh api "repos/$GITHUB_REPOSITORY/contents/jac.toml?ref=$BRANCH")"
+          sha="$(jq -r .sha <<<"$file")"
+          cur="$(jq -r .content <<<"$file" | base64 -d | sed -n 's/^version *= *"\(.*\)".*/\1/p' | head -1)"
+          if [ "$cur" = "$t" ]; then
+            echo "jac.toml on $BRANCH already says $t — nothing to sync."
+            exit 0
+          fi
+          hi="$(printf '%s\n%s\n' "$cur" "$t" | sort -V | tail -1)"
+          if [ "$hi" != "$t" ]; then
+            echo "::warning::tag $TAG is older than jac.toml ($cur) on $BRANCH — leaving the manifest alone."
+            exit 0
+          fi
+          jq -r .content <<<"$file" | base64 -d \
+            | awk -v v="$t" '!done && /^version *= */ {print "version = \"" v "\""; done=1; next} {print}' > /tmp/jac.toml
+          # If the branch is protected the PUT is refused — warn rather than sink the
+          # release (the assets don't depend on the manifest; only the banner drifts).
+          if gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/jac.toml" \
+            -f message="chore(release): sync jac.toml version to $TAG" \
+            -f branch="$BRANCH" -f sha="$sha" \
+            -f content="$(base64 -w0 </tmp/jac.toml)"; then
+            echo "pushed version bump $cur -> $t to $BRANCH"
           else
-            echo "::warning::jac.toml version ($v) != $TAG — allowed for manual dispatch (asset refresh)."
+            echo "::warning::could not push the version bump to $BRANCH (branch protection?). jac.toml still says $cur — bump it to $t manually, or allow the github-actions app to bypass protection."
           fi
 
       # Never ship a broken pipe-to-bash installer: fail the release if it won't parse.
