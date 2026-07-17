@@ -10,7 +10,7 @@ import from src.compiler.ai.workflow { AgirNode, AgirEdge, WorkflowView }
 import from src.compiler.ai.flows {
     Carry, IOView, Residency, ContextView, ToolDef, KnowledgeItem, KnowledgeView, HILView
 }
-import from src.compiler.ai.lift { lift, pin_all_lift_llms }
+import from src.compiler.ai.lift { lift, pin_all_lift_llms, set_lift_progress }
 
 glob SKILL: str = """# CSV Toy
 Parse the input file with the standard library.
@@ -20,7 +20,12 @@ Never use Unicode subscripts in output.
 CSV rules: the output must include a header row naming every column.
 """;
 
+glob _events: list = [];
+
+def _collect(ev: dict) -> None { _events.append(ev); }
+
 with entry:__main__ {
+    set_lift_progress(_collect);
     spec = RuleSet(skill_name="csv-toy", rules=[
         Rule(id="r1", quote="Parse the input file with the standard library.", kind=RuleKind.STEP, modality=Modality.MANDATORY),
         Rule(id="r2", quote="Summarize the data in one sentence.", kind=RuleKind.STEP, modality=Modality.MANDATORY),
@@ -84,6 +89,12 @@ with entry:__main__ {
     assert res.ok, res.compile_errors;
     assert "def run(" in res.module_src;
     assert "GEN-RAW" in res.ir_text;
+    _stages = [str(e["stage"]) for e in _events if str(e.get("state")) == "done"];
+    assert _stages[:4] == ["spec", "spine", "flows", "assemble"], _stages;
+    assert "gates" in _stages, _stages;
+    _spec_done = [e for e in _events if (str(e["stage"]) == "spec") and (str(e["state"]) == "done")][0];
+    assert _spec_done["rules"] > 0;
+    print("SCENARIO lift progress events OK (" + str(len(_events)) + " events)");
     print("SCENARIO lift e2e OK");
     spec = RuleSet(skill_name="csv-toy", rules=[
         Rule(id="r1", quote="Parse the input file with the standard library.", kind=RuleKind.STEP, modality=Modality.MANDATORY),

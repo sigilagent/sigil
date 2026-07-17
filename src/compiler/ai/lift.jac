@@ -13,6 +13,7 @@ clean — anything less rides the LiftResult, never swallowed.
 """
 
 import from .ir_views { LiftResult }
+import time;
 import from .spec_loop { extract_spec, pin_lift_llm }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
@@ -29,26 +30,62 @@ def pin_all_lift_llms(m: any) -> None {
     pin_repair_llm(m);
 }
 
+# Optional progress hook: the CLI attaches a renderer; None = silent. Guarded —
+# a renderer bug must never kill a compile.
+glob lift_progress: any = None;
+
+def set_lift_progress(cb: any) -> None {
+    lift_progress = cb;
+}
+
+def _emit(ev: dict) -> None {
+    if lift_progress {
+        try { lift_progress(ev); } except Exception {  }
+    }
+}
+
 def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
     repairs: list = [];
 
+    _t0 = time.time();
+    _emit({"stage": "spec", "state": "start"});
     sr = extract_spec(skill, name);
+    _emit({"stage": "spec", "state": "done", "secs": time.time() - _t0,
+           "rules": len(sr.spec.rules), "rounds": sr.verdict.rounds,
+           "sound": sr.verdict.sound, "complete": sr.verdict.complete,
+           "drift": sr.verdict.drift});
     spec_issues: list = [];
     if not sr.verdict.sound { spec_issues.append("spec not sound: dropped " + ", ".join(sr.verdict.ungrounded)); }
     if not sr.verdict.complete { spec_issues.append("spec incomplete: uncovered " + " | ".join(sr.verdict.uncovered)); }
     if sr.verdict.drift { spec_issues.append("modality drift: " + " | ".join(sr.verdict.drift_notes)); }
 
+    _t1 = time.time();
+    _emit({"stage": "spine", "state": "start"});
     spine = workflow_spine(sr.spec, skill);
+    _emit({"stage": "spine", "state": "done", "secs": time.time() - _t1,
+           "nodes": len(spine.view.nodes), "edges": len(spine.view.edges),
+           "rounds": spine.rounds, "issues": len(spine.issues)});
     ctx = spine_digest(spine.view, skill);
+    _t2 = time.time();
+    _emit({"stage": "flows", "state": "start"});
     vb = gather_views(sr.spec, ctx, parallel);
+    _emit({"stage": "flows", "state": "done", "secs": time.time() - _t2,
+           "carries": len(vb.io.carries), "tools": len(vb.kn.tools),
+           "knowledge": len(vb.kn.knowledge), "hil": len(vb.hil.points)});
+    _t3 = time.time();
+    _emit({"stage": "assemble", "state": "start"});
     asm = assemble(sr.spec, spine.view, vb, name);
     g1 = gate_standalone(vb) + gate_artifact_boundary(sr.spec, spine.view, vb) + gate_hil_gates(spine.view, vb);
+    _emit({"stage": "assemble", "state": "done", "secs": time.time() - _t3,
+           "issues": len(asm.issues) + len(g1)});
 
     # VIEW repair — route assemble/G1/G3 issues back to the owning flows, one pass:
     # each flow re-emits its own view with the exact issues to fix in its ctx.
     if asm.issues or g1 {
         all_issues = asm.issues + g1;
         ctx2 = ctx + "\nFIX EXACTLY THESE ISSUES (change nothing else):\n- " + "\n- ".join([str(i) for i in all_issues]);
+        _emit({"stage": "repair", "state": "start", "round": 1,
+               "issues": len(all_issues), "target": "views"});
         vb2 = gather_views(sr.spec, ctx2, parallel);
         asm2 = assemble(sr.spec, spine.view, vb2, name);
         g1_2 = gate_standalone(vb2) + gate_artifact_boundary(sr.spec, spine.view, vb2) + gate_hil_gates(spine.view, vb2);
@@ -61,7 +98,11 @@ def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
     }
 
     # COMPILE repair — the G4 oracle drives the scoped repair_ir loop, bounded.
+    _t4 = time.time();
+    _emit({"stage": "gates", "state": "start"});
     ro = repair_compile_loop(asm.ir_text, name);
+    _emit({"stage": "gates", "state": "done", "secs": time.time() - _t4,
+           "g4": ro.verdict.ok, "g1_issues": len(g1), "repairs": len(ro.attempts)});
     for a in ro.attempts { repairs.append(a); }
     g4 = ro.verdict;
     ir_text = ro.ir_text;

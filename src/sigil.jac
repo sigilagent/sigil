@@ -592,18 +592,19 @@ def register_skill(source: str, kind: str) -> dict {
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
 
-def compile_skill(source: str, eject: bool = False, eject_path: str = "") -> dict {
+def compile_skill(source: str, eject: bool = False, eject_path: str = "", progress: any = None) -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the gated AI lift, always:
     # spec loop -> spine -> flows -> assemble -> G1/G4/G5 + bounded repair.
     # ok=False returns the issues (the CLI prints them; nothing is persisted).
     # On success the skill is SET IN THE TREE (a TaskGraph on the Registry) and,
     # with eject, ALSO written out as one self-contained runnable .jac program.
     # LAZY imports — see the register_skill note on the jac-test topology bug.
-    import from .compiler.ai.lift { lift, pin_all_lift_llms }
+    import from .compiler.ai.lift { lift, pin_all_lift_llms, set_lift_progress }
     import from .compiler.ai.eject { eject_program, write_program }
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
     pin_all_lift_llms(frontier);
+    set_lift_progress(progress);
     sig = agir_name(source);
     lr = lift(source, sig);
     issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
