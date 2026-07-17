@@ -1,4 +1,16 @@
-# Sigil — the skill compiler
+<div align="center">
+  <img src="docs/assets/logo.svg" width="110" alt="the Sigil mark — a compiled graph">
+  <h1>Sigil</h1>
+  <p><strong>The skill compiler — <code>SKILL.md</code> in, a typed agent harness out.</strong></p>
+  <p>
+    <a href="https://github.com/sigilagent/sigil/actions/workflows/ci.yml"><img src="https://github.com/sigilagent/sigil/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/sigilagent/sigil/releases/latest"><img src="https://img.shields.io/github/v/release/sigilagent/sigil?color=8b5cf6" alt="release"></a>
+    <a href="https://github.com/sigilagent/sigil/releases"><img src="https://img.shields.io/github/downloads/sigilagent/sigil/total?color=8b5cf6" alt="downloads"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/sigilagent/sigil?color=8b5cf6" alt="license"></a>
+    <a href="https://sigilagent.com"><img src="https://img.shields.io/badge/site-sigilagent.com-22d3ee" alt="website"></a>
+    <a href="https://sigilagent.com/reference/"><img src="https://img.shields.io/badge/docs-reference-22d3ee" alt="docs"></a>
+  </p>
+</div>
 
 **Sigil compiles skills into agent harnesses.** You write a skill the way you
 already do — a plain-markdown `SKILL.md`. Sigil's compiler turns it into a

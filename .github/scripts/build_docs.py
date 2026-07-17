@@ -55,6 +55,7 @@ main h3{{font-size:16.5px;margin:24px 0 10px}}
 main p,main li{{color:var(--muted)}} main strong{{color:var(--text)}} main em{{color:var(--text)}}
 main ul,main ol{{padding-left:22px;margin:10px 0}}
 main code{{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1.5px 5px;color:var(--text)}}
+main pre.mermaid{{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;justify-content:center}}
 main pre{{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;margin:14px 0}}
 main pre code{{background:none;border:none;padding:0;color:#c9c9e0;font-size:13px;line-height:1.55}}
 main table{{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}}
@@ -86,10 +87,24 @@ def title_of(md_text: str, slug: str) -> str:
     return m.group(1).strip() if m else slug
 
 
+MERMAID_RE = re.compile(r'<pre><code class="language-mermaid">(.*?)</code></pre>', re.S)
+MERMAID_JS = (
+    '<script type="module">'
+    'import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";'
+    "mermaid.initialize({startOnLoad:true,theme:'dark',themeVariables:{"
+    "primaryColor:'#1a1a26',primaryBorderColor:'#8b5cf6',primaryTextColor:'#e8e8f0',"
+    "lineColor:'#63637a',fontFamily:'-apple-system,Segoe UI,Inter,sans-serif'}});"
+    "</script>"
+)
+
+
 def render(md_text: str) -> str:
-    return markdown.markdown(
+    html = markdown.markdown(
         md_text, extensions=["fenced_code", "tables", "sane_lists"]
     )
+    # ```mermaid fences -> live diagrams (mermaid reads decoded textContent,
+    # so the entity-escaped arrows inside <pre> are fine)
+    return MERMAID_RE.sub(r'<pre class="mermaid">\1</pre>', html)
 
 
 def main() -> None:
@@ -115,6 +130,8 @@ def main() -> None:
         # intra-reference links: point at the rendered pages
         body = render(re.sub(r"\(([\w-]+)\.md\)", r"(\1.html)", text))
         out = SITE / "reference" / f"{p.stem}.html"
+        if 'class="mermaid"' in body:
+            body += MERMAID_JS
         out.write_text(
             PAGE.format(title=title_of(text, p.stem), slug=p.stem,
                         sidebar=sidebar(p.stem), body=body)

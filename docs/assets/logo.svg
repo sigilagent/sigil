@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="512" height="512">
+  <!-- the Sigil mark: a compiled graph — hex boundary, spokes to every node, live core -->
+  <g fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="16,3 28,10 28,22 16,29 4,22 4,10"/>
+    <path d="M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16"/>
+  </g>
+  <circle cx="16" cy="16" r="2.4" fill="#22d3ee"/>
+</svg>

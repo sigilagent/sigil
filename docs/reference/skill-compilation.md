@@ -12,10 +12,15 @@ agent harness. The compiler has two halves (`src/compiler/`):
 
 ## The pipeline
 
-```
-SKILL.md → spec loop → workflow spine → annotator flows → assemble → gates ⇄ repair → agent.jac
-           (rules)     (the CFG)        (IO·context·      (one AG-IR)  (G1…G6, compile
-                                         knowledge·HIL)                 oracle, STRUCT-COV)
+```mermaid
+flowchart LR
+    S["SKILL.md"] --> SPEC["spec loop\n(grounded rules)"]
+    SPEC --> SPINE["workflow spine\n(the CFG)"]
+    SPINE --> FLOWS["annotator flows\nIO · context · knowledge · HIL"]
+    FLOWS --> ASM["assemble\n(one AG-IR)"]
+    ASM --> GATES{"gates\nG1…G6 · compile oracle\nSTRUCT-COV"}
+    GATES -->|fail| REPAIR["bounded repair"] --> FLOWS
+    GATES -->|pass| OUT["agent.jac"]
 ```
 
 - **Spec loop** — the anchor. The model proposes rules; **code disposes**: every
