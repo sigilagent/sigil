@@ -168,7 +168,9 @@ def execute_module(module_path: str, task: str, model_name: str,
     out = p.stdout or "";
     if _MARKER in out {
         rep = out.split(_MARKER, 1)[1].strip();
-        ok = p.returncode == 0;
+        # a clean exit with an empty or INCOMPLETE report is a silent failure —
+        # the superpowers sweep's escape-hatch runs exited 0 with empty hands.
+        ok = (p.returncode == 0) and bool(rep) and (not rep.startswith("INCOMPLETE"));
     } else {
         rep = out.strip();
         ok = False;
