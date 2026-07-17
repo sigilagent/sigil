@@ -68,6 +68,17 @@ sigil register-skill ./y.jac osp         # drop in a precompiled module
 sigil replay agent.jac obs.jsonl "task"  # re-run a recorded run's cognition — free
 ```
 
+## Running a compiled artifact
+
+An ejected artifact is a **terminal app, not a script**. Run it in a terminal
+and you get a live TUI: a banner, the walker's node path rendering as it
+executes (with per-node timings), human gates asked **inline** (`? question`
+→ type your answer — the compiled skill's clarify loops become a real
+conversation), and a styled outcome with the report and every artifact the run
+created. No task argument? It prompts for one. Zero extra dependencies — pure
+ANSI, part of the compiled runtime. Piped, captured, or in CI the same run is
+byte-identical to the old plain output (`AGIR_TUI=0/1` overrides detection).
+
 Compiled runs are honest by construction: a walker that never reaches its
 terminal reports `INCOMPLETE` (never a silent success), runaway loops abort at
 `AGIR_STEP_BUDGET` (default 256) naming the node, and human gates ask a real
