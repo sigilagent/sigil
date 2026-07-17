@@ -32,12 +32,16 @@ structure a weak model would skip is no longer skippable.
 
 ## The graph (the compiler's persistent memory)
 
-```
-root ──Embodies──▶ Soul ──Knows──────▶ Spec       the AG-IR contract
-  │                 │  ╲──Remembers──▶ Memory     semantic memory (durable facts)
-  │                 ╲───Owns─────────▶ Registry
-root ──Anchored──▶ Registry ──Crystallized──▶ TaskGraph   procedural memory (skills)
-                                    TaskGraph ──Ran──────▶ Attempt   episodic memory (runs)
+```mermaid
+graph LR
+    root((root)) -->|Embodies| Soul
+    root -->|Anchored| Registry
+    Soul -->|Knows| Spec["Spec — the AG-IR contract"]
+    Soul -->|Remembers| Memory["Memory — durable facts"]
+    Soul -->|Owns| Registry
+    Registry -->|Crystallized| TaskGraph["TaskGraph — a compiled skill"]
+    TaskGraph -->|Ran| Attempt["Attempt — one run"]
+    TaskGraph -->|MutatedFrom| TaskGraph
 ```
 
 The `Soul` node holds all configuration — persona, model tiers, workspace, sandbox mode,
