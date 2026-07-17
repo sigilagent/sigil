@@ -47,3 +47,10 @@ jobs:
       # regression suite (non-annex name), so it is named explicitly.
       - name: Run test suite
         run: jac test src/*.test.jac src/report_fix_tests.jac
+      # SEPARATE process on purpose: loading these annexes in the same jac test
+      # invocation as another src module resets the by-llm slot's __globals__
+      # (py3.14 lazy-annotation eval then dies with NameError on the slot's own
+      # types — reproduce with: jac test src/compiler/ai/spec_loop.test.jac
+      # src/report_fix_tests.jac). Runtime bug, process isolation sidesteps it.
+      - name: Run AI-compiler test suite
+        run: jac test src/compiler/ai/*.test.jac

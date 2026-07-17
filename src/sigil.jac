@@ -15,7 +15,7 @@ import os;
 import json;
 import from .sigil_mcp { digest, tools_for }
 import from jaclang.byllm.lib { Model, ModelPool }
-import from .compiler.compiler { transpile_ir }
+import from .compiler.mechanical.compiler { transpile_ir }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp
 }
