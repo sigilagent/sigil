@@ -1,6 +1,6 @@
 [project]
 name = "sigil"
-version = "0.2.1"
+version = "0.2.2"
 description = "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction."
 entry-point = "observatory.jac"
 
