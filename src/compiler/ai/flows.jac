@@ -165,7 +165,12 @@ whose content is VERBATIM from the skill. EMBODY, DON'T POINT: never emit a
 'see X.md' / library-name / summary in place of the actual content — an entry
 with neither body nor command nor content is a prose-pointer and will be
 rejected. A demand to consult a LIVE source stays a live tool (name it after
-the fetch, leave body empty, note the URL in the skill knowledge).""";
+the fetch, leave body empty, note the URL in the skill knowledge). EVERY
+deliverable the skill mandates needs a tool that WRITES it to disk: when the
+skill supplies no snippet, author a minimal write tool yourself — sig
+"(content, path) -> path", body writing content to the path — serving the
+emitting ACT node. Writing given content to a named file is pure mechanism
+(owner=code), prescribed by the artifact-boundary rule, never an addition.""";
 sem knowledge_view.spec = "The frozen RuleSet.";
 sem knowledge_view.ctx = "The spine digest plus the skill text (the snippets live here — copy them verbatim).";
 def knowledge_view(spec: RuleSet, ctx: str) -> KnowledgeView by flows_llm();

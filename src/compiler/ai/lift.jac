@@ -17,7 +17,7 @@ import from .spec_loop { extract_spec, pin_lift_llm }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_struct_cov }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_struct_cov }
 import from .repair { repair_compile_loop, pin_repair_llm }
 
 def pin_all_lift_llms(m: any) -> None {
@@ -42,16 +42,16 @@ def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
     ctx = spine_digest(spine.view, skill);
     vb = gather_views(sr.spec, ctx, parallel);
     asm = assemble(sr.spec, spine.view, vb, name);
-    g1 = gate_standalone(vb);
+    g1 = gate_standalone(vb) + gate_artifact_boundary(sr.spec, spine.view, vb);
 
-    # VIEW repair — route assemble/G1 issues back to the owning flows, one pass:
+    # VIEW repair — route assemble/G1/G3 issues back to the owning flows, one pass:
     # each flow re-emits its own view with the exact issues to fix in its ctx.
     if asm.issues or g1 {
         all_issues = asm.issues + g1;
         ctx2 = ctx + "\nFIX EXACTLY THESE ISSUES (change nothing else):\n- " + "\n- ".join([str(i) for i in all_issues]);
         vb2 = gather_views(sr.spec, ctx2, parallel);
         asm2 = assemble(sr.spec, spine.view, vb2, name);
-        g1_2 = gate_standalone(vb2);
+        g1_2 = gate_standalone(vb2) + gate_artifact_boundary(sr.spec, spine.view, vb2);
         if (len(asm2.issues) + len(g1_2)) < (len(asm.issues) + len(g1)) {
             vb = vb2; asm = asm2; g1 = g1_2;
             repairs.append("view repair: " + str(len(all_issues)) + " -> " + str(len(asm.issues) + len(g1)) + " issue(s)");

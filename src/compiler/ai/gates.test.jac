@@ -97,3 +97,36 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     assert sc2.monolithic == ["r2"];
     assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }
+
+test "G3-hard: IO mandates must chain to an embodied artifact write" {
+    spec = RuleSet(rules=[
+        Rule(id="r1", quote="write the plan", kind=RuleKind.IO, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="write the log", kind=RuleKind.IO, modality=Modality.MANDATORY),
+        Rule(id="r3", quote="may export csv", kind=RuleKind.IO, modality=Modality.DISCRETIONARY)
+    ]);
+    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+                      writes=["plan"], traces_to=["r1"]);
+    emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE,
+                    reads=["plan"], writes=["artifact"], traces_to=["r1"]);
+    orphan = AgirNode(id="log_note", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+                      writes=["log_text"], traces_to=["r2"]);
+    wf = WorkflowView(nodes=[author, emit, orphan]);
+    vb = ViewBundle(kn=KnowledgeView(tools=[
+        ToolDef(name="write_plan", sig="(plan) -> path", serves=["emit"], body="return 'plan.md'")
+    ]));
+
+    issues = gate_artifact_boundary(spec, wf, vb);
+    # r1: satisfied via the served ACT; r3: discretionary, exempt; r2: authored
+    # into a carry nothing writes -> flagged.
+    assert len(issues) == 1, issues;
+    assert "'r2'" in issues[0];
+}
+
+test "G3-hard: the _write_artifact fallback (ACT with a content read) counts as embodied" {
+    spec = RuleSet(rules=[Rule(id="r1", quote="write it", kind=RuleKind.IO, modality=Modality.MANDATORY)]);
+    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+                      writes=["doc"], traces_to=["r1"]);
+    emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, reads=["doc"]);
+    wf = WorkflowView(nodes=[author, emit]);
+    assert gate_artifact_boundary(spec, wf, ViewBundle()) == [];
+}

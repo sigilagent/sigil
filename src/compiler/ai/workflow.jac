@@ -113,6 +113,9 @@ become entries in `constraints` ('rule_id: prohibition'), NEVER edges or nodes.
 (Concurrency) If independent branches share no moving data, add a SPAWN node;
 otherwise set spawn_note explaining why the flow is sequential. Never leave the
 decision implicit.
+(Artifact boundary) Every MANDATORY IO rule ends in an ACT node with
+surface 'artifact' that READS the content carry it must write — a deliverable
+authored into a carry but never written is a dropped artifact.
 (Provenance) Every node lists the rule ids it realizes in traces_to. The TASK
 overrides the SKILL: keep conditional guidance conditional.
 If ISSUES from the validator are given, fix exactly those — keep everything

@@ -69,6 +69,59 @@ def gate_standalone(vb: ViewBundle) -> list[str] {
 }
 
 # ---------------------------------------------------------------------------
+# G3-hard — the artifact boundary (A.6 as a HARD gate)
+# ---------------------------------------------------------------------------
+
+def _is_embodied_act(n: AgirNode, vb: ViewBundle) -> bool {
+    # an ACT that will actually WRITE at runtime: a bound tool with body/command,
+    # or the mechanical _write_artifact fallback (ACT + str content read).
+    if n.ntype != NodeType.ACT { return False; }
+    for td in vb.kn.tools {
+        if (n.id in td.serves) and (td.body.strip() or td.command.strip()) { return True; }
+    }
+    if n.reads { return True; }   # ACT with a content read lowers to _write_artifact
+    return False;
+}
+
+def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> list[str] {
+    # The sweep's systemic finding: process-skill deliverables die in carries —
+    # authored, never written. Enforce A.6 mechanically: every MANDATORY IO rule
+    # must chain (rule -> traced node, or 1 hop through its written carries) to
+    # an ACT that genuinely writes. A deliverable with no embodied write is a
+    # dropped artifact, however good the content in the carry looks.
+    issues: list = [];
+    consumers: dict[str, list[AgirNode]] = {};
+    for n in wf.nodes {
+        for rd in n.reads {
+            cur: list[AgirNode] = list(consumers.get(rd, []));
+            cur.append(n);
+            consumers[rd] = cur;
+        }
+    }
+    for r in spec.rules {
+        if (r.kind != RuleKind.IO) or (r.modality != Modality.MANDATORY) { continue; }
+        owners = [n for n in wf.nodes if r.id in n.traces_to];
+        satisfied = False;
+        for n in owners {
+            if _is_embodied_act(n, vb) { satisfied = True; break; }
+            for w in n.writes {
+                for c in consumers.get(w, []) {
+                    if _is_embodied_act(c, vb) { satisfied = True; break; }
+                }
+                if satisfied { break; }
+            }
+            if satisfied { break; }
+        }
+        if not satisfied {
+            hint = (" (nodes: " + ", ".join([n.id for n in owners]) + ")") if owners else " (no node realizes it)";
+            issues.append("G3: IO mandate '" + r.id + "' has no embodied artifact write" + hint
+                          + " — add an ACT node served by a write-tool (body/command) or reading the content carry");
+        }
+    }
+    return issues;
+}
+
+# ---------------------------------------------------------------------------
 # G5 — STRUCT-COV / no-monolith, static on the COMPILED module
 # ---------------------------------------------------------------------------
 

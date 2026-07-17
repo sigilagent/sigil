@@ -1265,9 +1265,12 @@ def _emit_walker(ir: any) -> list {
                 creads5 = [r for r in reads if r in ckeys][:6];
                 expr = f"{slot}({_slot_args(creads5, carries, types)})";
             }
-            # ACT·artifact with no tool but a str content carry it reads -> write it
-            # to a deterministic run-dir file (app-controlled path).
-            if (not expr) and ("artifact" in str(n.get("surface", ""))) {
+            # ACT with no tool but a str content carry it reads -> write it to a
+            # deterministic run-dir file (app-controlled path). Applies regardless
+            # of surface annotation: an ACT holding authored content must never
+            # lower to a comment-only no-op (standard gap #1) — the superpowers
+            # sweep showed deliverables dying in carries exactly here.
+            if (not expr) {
                 for rc in reads {
                     if (rc in ckeys) and (rc != "artifact") and (not expr) {
                         if str(_jac_type(carries[rc].get("type"), types)[0]) == "str" {
