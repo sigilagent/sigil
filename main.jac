@@ -28,6 +28,7 @@ import from src.sigil {
     tool_group_set, tool_allowed, tools_policy_info, config_status
 }
 import from src.sigil_examples { examples_list, examples_fetch }
+import from src.sigil_repo { looks_like_repo, resolve_repo, repo_skills, repo_compile_batch }
 import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
@@ -127,6 +128,87 @@ def _run_setup_gate() {
     if not config_status()["setup_done"] {
         print("  Setup skipped — run  sigil setup  when you're ready.");
         sys.exit(0);
+    }
+}
+
+def _compile_repo_cli(path: str, eject: bool, take_all: bool, which: list, tty: bool) {
+    # a repo/dir/URL was given: interactive pick in a real terminal; flag-driven otherwise.
+    if tty and (not take_all) and (not which) {
+        import from src.sigil_chat { compile_repo }
+        compile_repo(path, eject);
+        return;
+    }
+    if (not take_all) and (not which) {
+        # non-interactive with no selection — list what's there, never auto-compile
+        rr = resolve_repo(path);
+        if not rr["ok"] { print(str(rr["error"])); return; }
+        sk = repo_skills(rr["path"]);
+        if not sk { print("no SKILL.md files found in " + str(rr["name"])); return; }
+        print("skills in " + str(rr["name"]) + " (" + str(len(sk)) + "):");
+        for s in sk { print("  " + str(s["name"]) + "  " + str(s["desc"])[:60]); }
+        print("");
+        print("pick with:  sigil compile " + path + " --all    (or --skill <name>)");
+        return;
+    }
+    rb = repo_compile_batch(path, which, eject);
+    if not rb["ok"] { print(str(rb["error"])); return; }
+    print("compiled from " + str(rb["name"]) + " (" + str(rb["selected"]) + " selected):");
+    for res in list(rb["results"]) {
+        if res["ok"] {
+            line = "  ✓ " + str(res["signature"]);
+            if res["eject"] { line += "  -> " + str(res["eject"]); }
+            print(line);
+        } else {
+            print("  ✗ " + str(res["name"]) + "  " + ("; ".join([str(x) for x in list(res["issues"])]))[:120]);
+        }
+    }
+}
+
+def _cmd_compile(argv: list) {
+    # compile <SKILL.md | repo-dir | git-url> [-e|--eject [out]] [--all] [--skill <name>]...
+    path = _arg(argv, 1);
+    if (not path) or path.startswith("-") {
+        print("usage: compile <SKILL.md | repo-dir | git-url> [-e|--eject [out.jac]] [--all] [--skill <name>]...");
+        return;
+    }
+    eject = False; eject_path = ""; take_all = False; which: list = [];
+    i = 2;
+    while i < len(argv) {
+        flg = _arg(argv, i);
+        if (flg == "-e") or (flg == "--eject") {
+            eject = True;
+            nxt = _arg(argv, i + 1);
+            if nxt and (not nxt.startswith("-")) { eject_path = nxt; i += 1; }
+        } elif flg == "--all" { take_all = True; }
+        elif flg == "--skill" {
+            nxt = _arg(argv, i + 1);
+            if nxt { which.append(nxt); i += 1; }
+        }
+        i += 1;
+    }
+    tty = False;
+    try { tty = bool(sys.stdout.isatty()); } except Exception {  }
+
+    if looks_like_repo(path) {
+        _compile_repo_cli(path, eject, take_all, which, tty);
+        return;
+    }
+    # single SKILL.md — the gated AI lift (spec loop -> spine -> flows -> gates + repair)
+    if tty { print(chr(10) + "  Compiling " + path); }
+    r = compile_skill(open(path).read(), eject, eject_path, _compile_ev if tty else None);
+    if tty { print(""); }
+    if not r["ok"] {
+        print("compile FAILED for '" + str(r["signature"]) + "':");
+        for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
+        if r["compile_errors"] { print("  compile: " + str(r["compile_errors"])[:400]); }
+        for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+    } else {
+        print("compiled skill: " + str(r["signature"]) + "  [compiled-skill]  -> " + str(r["module"]));
+        for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+        if r["eject"] {
+            print("ejected runnable: " + str(r["eject"]));
+            print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");
+        }
     }
 }
 
@@ -366,43 +448,9 @@ with entry:__main__ {
             print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
         }
     } elif cmd == "compile" {
-        # compile <SKILL.md> [-e|--eject [out.jac]] — the gated AI lift: spec
-        # loop -> spine -> flows -> assemble -> G1/G4/G5 gates + repair. Sets
-        # the skill on the graph; -e also ejects one runnable .jac program.
-        path = _arg(argv, 1);
-        if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]]");
-        } else {
-            eject = False; eject_path = "";
-            i = 2;
-            while i < len(argv) {
-                flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
-                if (flg == "-e") or (flg == "--eject") {
-                    eject = True;
-                    nxt = _arg(argv, i + 1);
-                    if nxt and (not nxt.startswith("-")) { eject_path = nxt; i += 1; }
-                }
-                i += 1;
-            }
-            _tty = False;
-            try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
-            if _tty { print(chr(10) + "  Compiling " + path); }
-            r = compile_skill(open(path).read(), eject, eject_path, _compile_ev if _tty else None);
-            if _tty { print(""); }
-            if not r["ok"] {
-                print("compile FAILED for '" + str(r["signature"]) + "':");
-                for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
-                if r["compile_errors"] { print("  compile: " + str(r["compile_errors"])[:400]); }
-                for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
-            } else {
-                print("compiled skill: " + str(r["signature"]) + "  [compiled-skill]  -> " + str(r["module"]));
-                for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
-                if r["eject"] {
-                    print("ejected runnable: " + str(r["eject"]));
-                    print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");
-                }
-            }
-        }
+        # compile a single SKILL.md (the gated AI lift), or a repo/dir/URL: discover
+        # its SKILL.md files, pick which, compile each. See _cmd_compile.
+        _cmd_compile(argv);
     } elif cmd == "examples" {
         # examples            -> starter SKILL.md files to compile (bundled + fetched)
         # examples fetch [pack] -> clone a community skill pack (default: superpowers)
@@ -619,6 +667,7 @@ with entry:__main__ {
         print("");
         print("compile & run skills");
         print("  compile <SKILL.md> [-e|--eject [out.jac]]   gated compile onto the graph; -e ejects a standalone runnable .jac");
+        print("  compile <repo-dir|git-url> [--all|--skill <name>]   discover a skills repo's SKILL.md files, pick, and compile them");
         print("  examples [fetch [pack]]             starter SKILL.md files to compile; `fetch superpowers` pulls a community pack");
         print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md lifted / hand-authored AG-IR / precompiled OSP)");
         print("  solve \"<task>\" [skill]              route a task: run a compiled skill (HIT), compile a new one (MISS), or adapt one (PARTIAL)");
