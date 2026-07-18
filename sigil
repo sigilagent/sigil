@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# sigil — talk to your Sigil agent.
+# sigil — the skill compiler. SKILL.md in, a runnable agent out.
 #
 # Runs locally by default — no server needed:
+#   sigil setup                        # first run: pick your models (any command also prompts)
+#   sigil compile ./SKILL.md -e agent.jac   # compile a skill -> a runnable agent
+#   sigil examples                     # starter SKILL.md files (fetch superpowers for more)
 #   sigil solve "turn report.pdf into a clean CSV"
 #   sigil soul | tasks list | models list | teach "…" | recall "…"
 #   sigil chat | config                # interactive

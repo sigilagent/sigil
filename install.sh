@@ -105,15 +105,17 @@ esac
 
 cat <<'EOF'
 
-  Next:
-    export OPENAI_API_KEY=sk-...       # a model key (or point it at a local model)
+  Next — set up your models, then compile your first skill:
 
-    # just use it — runs locally, no server needed:
-    sigil solve "turn report.pdf into a clean CSV"
-    sigil soul | sigil tasks list | sigil chat
+    sigil setup                        # pick your models (any command also prompts on first run)
+    export OPENAI_API_KEY=sk-...       # your model key (skip it for a local model)
 
-    # optional — a live web dashboard to watch it work:
-    sigil serve                        # Observatory web UI + HTTP API
+    sigil examples                     # starter SKILL.md files to compile
+    sigil compile <SKILL.md> -e agent.jac    # SKILL.md  ->  a runnable agent
+    ./agent.jac "…"                    # run it — on any model (SIGIL_MODEL=…)
+
+    sigil examples fetch superpowers   # pull a community skill library to compile
+    sigil chat                         # the whole agent, from one conversation
 
   Docs: https://sigilagent.com   ·   https://github.com/sigilagent/sigil
 EOF

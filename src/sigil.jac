@@ -143,6 +143,7 @@ node Soul {
     has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
     has workspace: str = "";           # sandboxed workspace dir the file tools are jailed to (default ~/.sigil/workspace)
     has sandbox_mode: str = "jail";    # how ws_exec is contained: jail (cwd-confined subprocess) | docker | off
+    has setup_done: bool = False;      # has the first-run setup wizard completed? gates model-touching pathways until it has
 }
 
 node Spec {
@@ -780,6 +781,7 @@ def describe_soul() -> dict {
         "sandbox_mode": (soul.sandbox_mode if soul.sandbox_mode else "jail"),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
         "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
+        "setup_done": soul.setup_done,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
         "skills": nskills
     };
@@ -815,8 +817,61 @@ def configure(key: str, value: str) -> str {
         if value not in ["jail", "docker", "off"] { return "sandbox_mode must be one of: jail | docker | off"; }
         soul.sandbox_mode = value;
     }
+    elif key == "setup_done" { soul.setup_done = value.lower() in ["1", "true", "yes", "on"]; }
     else { return "unknown key: " + key; }
     return key + " = " + value;
+}
+
+# ---------------------------------------------------------------------------
+# First-run readiness — every model-touching pathway (solve/compile/chat/eval…)
+# gates on this, so a fresh install runs the setup TUI instead of silently
+# defaulting to gpt-4o and failing mid-task with no key.
+# ---------------------------------------------------------------------------
+def _model_provider_key(model: str) -> dict {
+    # Map a litellm model string to its provider + the env var that credentials it.
+    # Local runtimes (ollama, a localhost base_url) need no key. Best-effort: an
+    # unknown provider reports key_env="" so we don't nag about a key we can't name.
+    m = str(model).strip().lower();
+    if not m { return {"provider": "", "key_env": "", "local": False}; }
+    if m.startswith("ollama") or m.startswith("local/") or ("localhost" in m) or ("127.0.0.1" in m) {
+        return {"provider": "ollama", "key_env": "", "local": True};
+    }
+    prov = m.split("/")[0] if "/" in m else "";
+    table = {
+        "anthropic": "ANTHROPIC_API_KEY", "claude": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY", "azure": "AZURE_API_KEY",
+        "gemini": "GEMINI_API_KEY", "vertex_ai": "GOOGLE_APPLICATION_CREDENTIALS",
+        "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY",
+        "cohere": "COHERE_API_KEY", "deepseek": "DEEPSEEK_API_KEY",
+        "together_ai": "TOGETHERAI_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+        "xai": "XAI_API_KEY", "fireworks_ai": "FIREWORKS_API_KEY"
+    };
+    if prov and (prov in table) { return {"provider": prov, "key_env": table[prov], "local": False}; }
+    # No explicit provider prefix — infer from bare model families litellm accepts.
+    if m.startswith("gpt-") or m.startswith("o1") or m.startswith("o3") or m.startswith("chatgpt") {
+        return {"provider": "openai", "key_env": "OPENAI_API_KEY", "local": False};
+    }
+    if m.startswith("claude-") { return {"provider": "anthropic", "key_env": "ANTHROPIC_API_KEY", "local": False}; }
+    if m.startswith("gemini-") { return {"provider": "gemini", "key_env": "GEMINI_API_KEY", "local": False}; }
+    return {"provider": prov, "key_env": "", "local": False};
+}
+
+def config_status() -> dict {
+    # Is the agent ready to make model calls? Reports the effective chat/build model,
+    # the credential it needs, and whether that credential is present — so the setup
+    # gate can decide whether to run and the wizard can verify the key.
+    soul = awaken();
+    model = soul.chat_model if soul.chat_model else (soul.frontier_model if soul.frontier_model else soul.small_model);
+    pk = _model_provider_key(model);
+    key_env = str(pk["key_env"]);
+    key_present = bool(pk["local"]) or (bool(key_env) and bool(os.environ.get(key_env)));
+    has_model = bool(str(model).strip());
+    ready = bool(soul.setup_done) and has_model and key_present;
+    return {
+        "ready": ready, "setup_done": bool(soul.setup_done), "has_model": has_model,
+        "model": str(model), "provider": str(pk["provider"]), "local": bool(pk["local"]),
+        "key_env": key_env, "key_present": key_present
+    };
 }
 
 # ---------------------------------------------------------------------------

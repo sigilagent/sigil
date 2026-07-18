@@ -25,8 +25,9 @@ import from src.sigil {
     add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info,
-    tool_group_set, tool_allowed, tools_policy_info
+    tool_group_set, tool_allowed, tools_policy_info, config_status
 }
+import from src.sigil_examples { examples_list, examples_fetch }
 import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
 }
@@ -104,6 +105,31 @@ def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
+# Commands that make model calls — they get the first-run config gate below.
+glob _MODEL_CMDS: list = ["solve", "compile", "chat", "eval", "relearn"];
+
+def _run_setup_gate() {
+    # First-run gate: no model-touching command runs before setup is done. In a real
+    # terminal we drop straight into the setup TUI, then continue the command; piped /
+    # CI (no TTY to draw on) we print exactly what to do and stop.
+    interactive = False;
+    try { interactive = bool(sys.stdin.isatty()) and bool(sys.stdout.isatty()); } except Exception {  }
+    if not interactive {
+        print("");
+        print("  ◆ Sigil isn't set up yet.");
+        print("    Run  sigil setup  in a terminal to choose your models (one time),");
+        print("    then set your model key, e.g.  export OPENAI_API_KEY=sk-…");
+        print("");
+        sys.exit(1);
+    }
+    import from src.sigil_chat { setup_wizard }
+    setup_wizard();
+    if not config_status()["setup_done"] {
+        print("  Setup skipped — run  sigil setup  when you're ready.");
+        sys.exit(0);
+    }
+}
+
 # The all-zeros superroot — the root every plain `jac run` executes against.
 glob SUPERROOT: str = "00000000000000000000000000000000";
 
@@ -159,6 +185,13 @@ def serve_observatory(port: str) {
 with entry:__main__ {
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
+
+    # First-run config gate — before ANY model-touching pathway, make sure the
+    # user has picked a model (and knows about their key). Fires once; setup_done
+    # on the graph stops it nagging. `setup`/`config` are exempt (they ARE config).
+    if (cmd in _MODEL_CMDS) and (not config_status()["setup_done"]) {
+        _run_setup_gate();
+    }
 
     if (cmd == "serve") or (cmd == "observatory") {
         serve_observatory(_arg(argv, 1));
@@ -370,6 +403,36 @@ with entry:__main__ {
                 }
             }
         }
+    } elif cmd == "examples" {
+        # examples            -> starter SKILL.md files to compile (bundled + fetched)
+        # examples fetch [pack] -> clone a community skill pack (default: superpowers)
+        sub = _arg(argv, 1);
+        if sub == "fetch" {
+            pack = _arg(argv, 2) if _arg(argv, 2) else "superpowers";
+            r = examples_fetch(pack);
+            if not r["ok"] { print(str(r["error"])); }
+            else {
+                print(str(r["action"]) + " " + str(r["name"]) + "  ->  " + str(r["dest"]));
+                print("  " + str(r["count"]) + " SKILL.md files. List them:  sigil examples");
+            }
+        } else {
+            ex = examples_list();
+            print("starter skills — compile any of these into a runnable agent:");
+            print("");
+            print("bundled:");
+            for e in list(ex["bundled"]) {
+                print("  " + str(e["name"]).ljust(20) + str(e["desc"]));
+                print("    sigil compile " + str(e["path"]) + " -e agent.jac");
+            }
+            packs = list(ex["packs"]);
+            if packs {
+                print("");
+                print("fetched packs (~/.sigil/skills):");
+                for p in packs { print("  " + str(p["name"]).ljust(20) + str(p["count"]) + " skills  " + str(p["path"])); }
+            }
+            print("");
+            print("fetch more:  sigil examples fetch superpowers   (obra/superpowers-skills)");
+        }
     } elif cmd == "replay" {
         # replay <agent.jac> <observability.jsonl> "<task>" [workdir] — re-run a
         # RECORDED run's cognition through the (re)compiled module: no model, no
@@ -556,6 +619,7 @@ with entry:__main__ {
         print("");
         print("compile & run skills");
         print("  compile <SKILL.md> [-e|--eject [out.jac]]   gated compile onto the graph; -e ejects a standalone runnable .jac");
+        print("  examples [fetch [pack]]             starter SKILL.md files to compile; `fetch superpowers` pulls a community pack");
         print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md lifted / hand-authored AG-IR / precompiled OSP)");
         print("  solve \"<task>\" [skill]              route a task: run a compiled skill (HIT), compile a new one (MISS), or adapt one (PARTIAL)");
         print("  library                             list compiled skills, with run stats");
