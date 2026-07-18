@@ -21,6 +21,7 @@ import os;
 import from .sigil_logo { BANNER_LOGO }
 import from .sigil { describe_soul, configure, library, recollect, teach, config_status, compile_skill }
 import from .sigil_examples { examples_list }
+import from .sigil_repo { resolve_repo, repo_skills, understand_repo, install_run, compile_one, stem, looks_like_repo }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
@@ -249,7 +250,7 @@ def _show_examples(console: any) {
 
 def _do_compile(console: any, arg: str) {
     parts = [p for p in arg.split() if p];
-    if not parts { console.print("[dim]  usage: /compile <path/to/SKILL.md> [-e agent.jac][/dim]"); return; }
+    if not parts { console.print("[dim]  usage: /compile <SKILL.md | repo-dir | git-url> [-e agent.jac][/dim]"); return; }
     path = str(parts[0]);
     eject = False; eject_path = "";
     i = 1;
@@ -260,6 +261,7 @@ def _do_compile(console: any, arg: str) {
         }
         i += 1;
     }
+    if looks_like_repo(path) { compile_repo(path, eject); return; }   # a dir/URL -> discover + pick + compile
     if not os.path.exists(path) { console.print("[red]  no such file:[/red] " + path); return; }
     console.print();
     console.print("  [#a78bfa]◐[/#a78bfa] compiling [cyan]" + path + "[/cyan] [dim]…[/dim]");
@@ -278,6 +280,91 @@ def _do_compile(console: any, arg: str) {
     } else {
         console.print("  [green]✓ compiled[/green] [bold]" + str(r["signature"]) + "[/bold] [dim]->[/dim] " + str(r["module"]));
         if r["eject"] { console.print("    [dim]ejected runnable:[/dim] [cyan]./" + str(r["eject"]) + "[/cyan] [dim]\"<task>\"[/dim]"); }
+    }
+    console.print();
+}
+
+def _parse_selection(choice: str, n: int) -> list {
+    # "1,3 5" / "all" / "" -> 0-based indices (deduped, in range)
+    c = str(choice).strip().lower();
+    if not c { return []; }
+    if c in ["all", "a", "*"] { return [k for k in range(n)]; }
+    out: list = [];
+    for tok in c.replace(",", " ").split() {
+        v = _to_int(tok.strip(), 0);
+        if (v >= 1) and (v <= n) and ((v - 1) not in out) { out.append(v - 1); }
+    }
+    return out;
+}
+
+def compile_repo(link: str, eject: bool) {
+    # Repo mode: clone the link, read what it is + how to install, list its SKILL.md
+    # files, let the user pick, compile each (live), then offer to run the install steps.
+    console = Console();
+    session = _make_session();
+    console.print();
+    console.print("  [#a78bfa]◐[/#a78bfa] fetching [cyan]" + str(link) + "[/cyan] [dim]…[/dim]");
+    rr = resolve_repo(link);
+    if not rr["ok"] { console.print("  [red]" + str(rr["error"]) + "[/red]"); return; }
+    console.print("  [#22d3ee]✓[/#22d3ee] [dim]" + ("cloned" if rr["cloned"] else "using") + " " + str(rr["path"]) + "[/dim]");
+
+    console.print("  [#a78bfa]◐[/#a78bfa] [dim]reading the repo …[/dim]");
+    brief = understand_repo(str(rr["path"]));
+    if brief["summary"] { console.print("  [dim]about:[/dim] ", Text(str(brief["summary"]))); }
+    install = list(brief["install"]);
+
+    sk = repo_skills(str(rr["path"]));
+    if not sk {
+        console.print("  [yellow]no SKILL.md files found here[/yellow] [dim]— is this a skills repo?[/dim]");
+        console.print();
+        return;
+    }
+    console.print();
+    console.print("  [bold]" + str(len(sk)) + " skills[/bold] [dim]— which to compile?[/dim]");
+    i = 1;
+    for s in sk {
+        console.print("   [cyan]" + str(i).rjust(2) + "[/cyan]  " + stem(str(s["name"])).ljust(26) + "[dim]" + str(s["desc"])[:58] + "[/dim]");
+        i += 1;
+    }
+    console.print("  [dim]enter numbers (e.g. 1,3), 'all', or blank to cancel[/dim]");
+    choice = "";
+    try { choice = str(_prompt(session, "  › ")).strip(); }
+    except Exception as e { console.print(); return; }
+    sel = _parse_selection(choice, len(sk));
+    if not sel { console.print("  [dim]nothing selected.[/dim]"); console.print(); return; }
+
+    console.print();
+    ok_n = 0;
+    for idx in sel {
+        s = sk[idx];
+        console.print("  [#a78bfa]◐[/#a78bfa] compiling [cyan]" + stem(str(s["name"])) + "[/cyan] [dim]…[/dim]");
+        r = compile_one(s, eject);
+        if r["ok"] {
+            ok_n += 1;
+            line = "    [green]✓[/green] [bold]" + str(r["signature"]) + "[/bold]";
+            if r["eject"] { line += " [dim]->[/dim] [cyan]./" + str(r["eject"]) + "[/cyan]"; }
+            console.print(line);
+        } else {
+            console.print("    [red]✗ failed[/red] [dim]" + str(r["name"]) + "[/dim]");
+            for iss in list(r["issues"])[:3] { console.print("      [dim]- " + str(iss) + "[/dim]"); }
+        }
+    }
+    console.print("  [dim]compiled " + str(ok_n) + "/" + str(len(sel)) + "[/dim]");
+
+    if install {
+        console.print();
+        console.print("  [bold]to run these skills, this repo installs with:[/bold]");
+        for c in install { console.print("    [yellow]$[/yellow] [dim]" + str(c) + "[/dim]"); }
+        ans = "";
+        try { ans = str(_prompt(session, "  run these now? [y/N] ")).strip().lower(); }
+        except Exception as e { console.print(); return; }
+        if ans in ["y", "yes"] {
+            for res in install_run(str(rr["path"]), install) {
+                mark = "[green]✓[/green]" if res["ok"] else "[red]✗[/red]";
+                console.print("    " + mark + " [dim]" + str(res["cmd"]) + "[/dim]");
+                if not res["ok"] { console.print("      [dim]" + str(res["output"])[:200] + "[/dim]"); }
+            }
+        }
     }
     console.print();
 }

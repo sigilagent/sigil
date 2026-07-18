@@ -29,17 +29,24 @@ def _pack_names() -> list {
 }
 
 def _skill_meta(path: str) -> dict {
-    # a one-line label from frontmatter `description:`, else the first `# heading`
-    desc = "";
+    # name + one-line label. Prefer the frontmatter `name:`/`description:`; fall back to
+    # the parent folder for the SKILL.md-per-folder convention (obra/superpowers-skills),
+    # else the filename. `desc` is the frontmatter description or the first `# heading`.
+    desc = ""; fmname = "";
     try {
         with open(path, "r") as f { text = f.read(); }
         for ln in text.split(chr(10))[:24] {
             t = ln.strip();
-            if t.lower().startswith("description:") { desc = t.split(":", 1)[1].strip(); break; }
-            if t.startswith("# ") and (not desc) { desc = t[2:].strip(); }
+            if t.lower().startswith("description:") and (not desc) { desc = t.split(":", 1)[1].strip(); }
+            elif t.lower().startswith("name:") and (not fmname) { fmname = t.split(":", 1)[1].strip(); }
+            elif t.startswith("# ") and (not desc) { desc = t[2:].strip(); }
         }
     } except Exception as e {  }
-    return {"name": os.path.basename(path), "path": path, "desc": desc};
+    base = os.path.basename(path);
+    if fmname { name = fmname; }
+    elif base.lower() == "skill.md" { name = os.path.basename(os.path.dirname(path)); }
+    else { name = base; }
+    return {"name": name, "file": base, "path": path, "desc": desc};
 }
 
 def _find_skills(base: str) -> list {
