@@ -12,11 +12,13 @@ freshly-recalled memory, so the standing brief stays current without a restart.
 """
 
 import json;
+import os;
 import from jaclang.byllm.lib { Model }
 import from .sigil {
     bind_chat_model, describe_soul, teach, recollect, library,
-    cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
+    cfg_set_model, cfg_set_persona, cfg_set_prompt_mode, compile_skill
 }
+import from .sigil_examples { examples_list }
 import from .agent { run_task }
 import from .cron { cron_add, cron_list, cron_remove }
 import from .channels { message_send }
@@ -82,12 +84,48 @@ def recall_memory(query: str) -> str {
 sem learn_skill = """Compile a REUSABLE skill for a class of task: the frontier
 model authors a typed procedure, runs it, and persists it so future requests of the
 same kind are handled cheaply. Use this only when the user wants a durable, repeatable
-procedure — for a one-off, just do the work with the other tools.""";
+procedure FROM A DESCRIPTION — for a one-off, just do the work with the other tools.
+If they already have a SKILL.md FILE, use compile_skill_file instead.""";
 sem learn_skill.task = "A representative task describing the class of work to compile into a skill.";
 def learn_skill(task: str) -> str {
     _trace("learn", task);
     r = run_task(task, "");
     return "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
+}
+
+sem compile_skill_file = """Compile a SKILL.md FILE into a runnable agent — Sigil's headline
+capability. Give it the path to a plain-markdown skill file; the compiler lifts it into a
+typed graph contract (AG-IR) and lowers it to a runnable module on the graph, so every step
+and rule becomes structure the model can't skip. Set eject=true to also write a standalone
+`.jac` the user can run on any model. Reach for this whenever the user has a SKILL.md, points
+at examples/skills or a fetched pack, or asks to compile a skill file.""";
+sem compile_skill_file.path = "Filesystem path to the SKILL.md file to compile.";
+sem compile_skill_file.eject = "If true, also eject a standalone runnable .jac artifact.";
+def compile_skill_file(path: str, eject: bool = False) -> str {
+    _trace("compile", path);
+    if not os.path.exists(path) { return "no such file: " + path + "  (try list_skill_examples)"; }
+    try { src = open(path).read(); }
+    except Exception as e { return "could not read " + path + ": " + str(e)[:160]; }
+    r = compile_skill(src, eject, "", None);
+    if not r["ok"] {
+        issues = "; ".join([str(x) for x in list(r["issues"] or [])]);
+        return "compile failed for '" + str(r["signature"]) + "': " + (issues if issues else "gates not satisfied");
+    }
+    out = "compiled '" + str(r["signature"]) + "' -> " + str(r["module"]);
+    if r["eject"] { out += "  (ejected runnable: " + str(r["eject"]) + " — run: ./" + str(r["eject"]) + " \"<task>\")"; }
+    return out;
+}
+
+sem list_skill_examples = """List the starter SKILL.md files available to compile — the tiny
+examples bundled with Sigil plus any community packs fetched into ~/.sigil/skills. Use when the
+user asks what they can compile, or wants a skill to try.""";
+def list_skill_examples() -> str {
+    ex = examples_list();
+    lines: list = [];
+    for e in list(ex["bundled"]) { lines.append(str(e["path"]) + "  — " + str(e["desc"])); }
+    for p in list(ex["packs"]) { lines.append(str(p["name"]) + " pack: " + str(p["count"]) + " skills in " + str(p["path"])); }
+    if not lines { return "(no example skills found — fetch some: `sigil examples fetch superpowers`)"; }
+    return "\n".join(lines);
 }
 
 sem list_skills = "List the compiled (learned) skills with their run stats.";
@@ -158,8 +196,22 @@ def send_message(channel: str, peer: str, text: str) -> str {
 # The agent. Its `sem` is the operating brief (system prompt); tools + conversation
 # do the rest. Kept concise so a small model can follow it.
 # ---------------------------------------------------------------------------
-sem chat_agent = """You are Sigil, a capable, autonomous assistant that operates entirely
-from chat. You have a SANDBOXED workspace and a full tool-belt.
+sem chat_agent = """You are Sigil, THE SKILL COMPILER. Your headline power is turning a
+plain-markdown SKILL.md into a runnable agent harness: the compiler lifts it into a typed
+graph and lowers it to a program the model runs INSIDE, so every mandated step, rule, and
+verification becomes structure a weak model can't skip. That is what makes you special, and
+it lets a compiled skill run faithfully even on a small or local model.
+
+Make this OBVIOUS: whenever the user asks what you are, what you can do, how you're different,
+or anything about skills or SKILL.md, LEAD with skill compilation. If they have a SKILL.md
+file, compile it with compile_skill_file (eject=true for a standalone runnable). If they don't,
+point them at list_skill_examples (or the `/examples` command, and `sigil examples fetch
+superpowers` for a real library) and offer to compile one. To build a reusable skill from a
+DESCRIPTION rather than a file, use learn_skill. Never let a curious user leave without knowing
+they can compile a skill.
+
+Beyond that, you are a capable, autonomous assistant that operates entirely from chat, with a
+SANDBOXED workspace and a full tool-belt.
 
 FIRST decide whether the message even needs a tool. Greetings, questions about you,
 explanations, opinions, and anything you can answer in words → just REPLY as text, with
@@ -192,7 +244,9 @@ Guidance:
 - Memory: remember_fact for durable facts the user will want later; recall_memory to
   look them up.
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
-- Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
+- Skill compilation (your headline capability): compile_skill_file to compile a SKILL.md file
+  into a runnable agent; list_skill_examples to show what's available to try; learn_skill to
+  build a reusable skill from a task description instead of a file.
 - External tools: mcp_call for connected MCP servers.
 - About YOURSELF: when the user asks how Sigil works, what a config key/tool does, or
   about the sandbox/cron/channels/memory/models, call read_docs (or doc_index) and answer
@@ -207,6 +261,7 @@ def chat_agent(message: str) -> str by chat_llm(
         ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search,
         schedule_task, list_scheduled, cancel_scheduled,
         remember_fact, recall_memory, learn_skill, list_skills,
+        compile_skill_file, list_skill_examples,
         mcp_call, send_message, connect_channel, setup_channel,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
         doc_index, read_docs, spawn_subagent, spawn_parallel

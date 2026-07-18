@@ -19,7 +19,8 @@ falling back to builtin input() when piped (so it stays scriptable).
 import sys;
 import os;
 import from .sigil_logo { BANNER_LOGO }
-import from .sigil { describe_soul, configure, library, recollect, teach }
+import from .sigil { describe_soul, configure, library, recollect, teach, config_status, compile_skill }
+import from .sigil_examples { examples_list }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
@@ -85,7 +86,7 @@ def _banner(console: any) {
     logo = "\n".join(BANNER_LOGO);
     info = (
         "[bold #a78bfa]S I G I L[/]  [dim]v" + _version() + "[/]\n"
-        + "[dim]the whole agent, from one conversation[/]\n\n"
+        + "[dim]the skill compiler — [/][#a78bfa]SKILL.md[/][dim] in, a runnable agent out[/]\n\n"
         + "[dim]model    [/] " + cm + "\n"
         + "[dim]workspace[/] " + str(wi["root"]) + "\n"
         + "[dim]sandbox  [/] " + str(wi["sandbox_mode"]) + "\n"
@@ -96,12 +97,15 @@ def _banner(console: any) {
     t.add_row(logo, info);
     console.print();
     console.print(t);
-    console.print("  [dim]just say what you want — files, shell, web, cron, memory, sub-agents. /help · /exit[/dim]");
+    console.print("  [#a78bfa]◆ compile a skill →[/] [cyan]/compile <SKILL.md>[/cyan]   [dim]· starters:[/dim] [cyan]/examples[/cyan]");
+    console.print("  [dim]…or just say what you want — files, shell, web, cron, memory, sub-agents. /help · /exit[/dim]");
     console.print();
 }
 
 def _help(console: any) {
     rows = [
+        ["/compile <SKILL.md>", "compile a skill file into a runnable agent — Sigil's core"],
+        ["/examples", "starter SKILL.md files to compile (+ fetched packs)"],
         ["/help", "show this help"],
         ["/soul", "identity, models, skills & memory"],
         ["/config", "edit settings interactively"],
@@ -226,6 +230,58 @@ def _show_soul(console: any) {
     console.print();
 }
 
+def _show_examples(console: any) {
+    ex = examples_list();
+    console.print();
+    console.print("[bold]starter skills[/bold] [dim]— /compile any of these into a runnable agent[/dim]");
+    for e in list(ex["bundled"]) {
+        console.print("  [cyan]" + str(e["path"]) + "[/cyan]");
+        if e["desc"] { console.print("    [dim]" + str(e["desc"]) + "[/dim]"); }
+    }
+    packs = list(ex["packs"]);
+    if packs {
+        console.print("  [dim]fetched packs (~/.sigil/skills):[/dim]");
+        for p in packs { console.print("    " + str(p["name"]) + "  [dim]" + str(p["count"]) + " skills · " + str(p["path"]) + "[/dim]"); }
+    }
+    console.print("  [dim]fetch more:[/dim] [cyan]sigil examples fetch superpowers[/cyan]");
+    console.print();
+}
+
+def _do_compile(console: any, arg: str) {
+    parts = [p for p in arg.split() if p];
+    if not parts { console.print("[dim]  usage: /compile <path/to/SKILL.md> [-e agent.jac][/dim]"); return; }
+    path = str(parts[0]);
+    eject = False; eject_path = "";
+    i = 1;
+    while i < len(parts) {
+        if parts[i] in ["-e", "--eject"] {
+            eject = True;
+            if ((i + 1) < len(parts)) and (not str(parts[i + 1]).startswith("-")) { eject_path = str(parts[i + 1]); i += 1; }
+        }
+        i += 1;
+    }
+    if not os.path.exists(path) { console.print("[red]  no such file:[/red] " + path); return; }
+    console.print();
+    console.print("  [#a78bfa]◐[/#a78bfa] compiling [cyan]" + path + "[/cyan] [dim]…[/dim]");
+    def prog(ev: dict) {
+        if str(ev.get("state")) == "done" {
+            secs = float(ev.get("secs", 0.0));
+            console.print("    [#22d3ee]✓[/#22d3ee] [dim]" + str(ev.get("stage")).ljust(10) + ("%.1f" % secs) + "s[/dim]");
+        }
+    }
+    r: dict = {};
+    try { r = compile_skill(open(path).read(), eject, eject_path, prog); }
+    except Exception as e { console.print("  [red]compile error:[/red] " + str(e)[:200]); return; }
+    if not r["ok"] {
+        console.print("  [red]compile failed[/red] [dim]for '" + str(r["signature"]) + "':[/dim]");
+        for iss in list(r["issues"] or []) { console.print("    [dim]- " + str(iss) + "[/dim]"); }
+    } else {
+        console.print("  [green]✓ compiled[/green] [bold]" + str(r["signature"]) + "[/bold] [dim]->[/dim] " + str(r["module"]));
+        if r["eject"] { console.print("    [dim]ejected runnable:[/dim] [cyan]./" + str(r["eject"]) + "[/cyan] [dim]\"<task>\"[/dim]"); }
+    }
+    console.print();
+}
+
 def _show_library(console: any) {
     lib = library();
     if not lib { console.print("[dim]  (no compiled skills yet)[/dim]"); return; }
@@ -324,6 +380,8 @@ def _handle_slash(console: any, cmd: str) -> bool {
     verb = str(parts[0]).lower();
     rest = str(parts[1]).strip() if len(parts) > 1 else "";
     if verb in ["/exit", "/quit", "/q"] { return True; }
+    elif verb in ["/compile", "/build"] { _do_compile(console, rest); }
+    elif verb in ["/examples", "/starters"] { _show_examples(console); }
     elif verb in ["/help", "/?", "/h"] { _help(console); }
     elif verb == "/soul" { _show_soul(console); }
     elif verb == "/config" { config_menu(); }
@@ -398,10 +456,11 @@ def setup_wizard() {
     session = _make_session();
     console.print();
     console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
+    console.print("  [dim]Sigil compiles a SKILL.md into a runnable agent. First, pick the models it runs on.[/dim]");
     console.print();
     steps = [
         ["chat_model", "Which model do you TALK to in chat? (use a strong one)", "gpt-4o"],
-        ["frontier_model", "Which model builds new skills? (also strong)", "gpt-4o"],
+        ["frontier_model", "Which model COMPILES new skills? (also strong)", "gpt-4o"],
         ["small_model", "Which cheap/local model RUNS compiled skills?", "gpt-4o-mini"],
         ["persona", "In a line, how should your agent describe itself? (optional)", ""]
     ];
@@ -417,9 +476,25 @@ def setup_wizard() {
         if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); }
         console.print();
     }
+    # Mark setup complete so the first-run gate stops firing on every model command.
+    configure("setup_done", "true");
     s = describe_soul();
     console.print("[bold]  You're set.[/bold] [dim]chat=" + str(s["chat_model"]) + "  frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "[/dim]");
-    console.print("  [dim]Try:  [/dim][cyan]sigil chat[/cyan][dim]   or   [/dim][cyan]sigil solve \"…\"[/cyan]");
+    # Key check — the models are on the graph, but the credential lives in your env.
+    # Warn (don't block) so a wrong guess or a local model never traps you.
+    cs = config_status();
+    if cs["local"] {
+        console.print("  [green]✓[/green] [dim]local model — no API key needed.[/dim]");
+    } elif cs["key_env"] and (not cs["key_present"]) {
+        console.print("  [yellow]![/yellow] [dim]set your model key before running:  [/dim][cyan]export " + str(cs["key_env"]) + "=…[/cyan]");
+    } elif cs["key_present"] {
+        console.print("  [green]✓[/green] [dim]" + str(cs["key_env"]) + " found.[/dim]");
+    }
+    console.print();
+    console.print("  [bold]Now compile a skill[/bold] [dim]— that's what Sigil is for:[/dim]");
+    console.print("    [cyan]sigil examples[/cyan]                          [dim]starter SKILL.md files to try[/dim]");
+    console.print("    [cyan]sigil compile examples/skills/hello.SKILL.md -e agent.jac[/cyan]");
+    console.print("    [dim]…or just[/dim] [cyan]sigil chat[/cyan] [dim]and say \"compile a skill\".[/dim]");
     console.print();
 }
 
