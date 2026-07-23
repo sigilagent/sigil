@@ -395,6 +395,13 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
 # param `width` binds to `self.spec.width`), else POSITIONAL to the node's `reads`
 # (so a param `gif_path` binds to reads[0]=`artifact` -> `self.artifact`). This
 # handles both the "fields of a spec" and "renamed positional" tool conventions.
+# Announce a `by llm` slot before it runs: the slot's name and the carries it was
+# handed. Paired with a `_tui_llm_out(...)` on the value it produced.
+def _llm_trace_in(slot: str, creads: list) -> str {
+    rl = _j(", ", [("(" + _q(str(r)) + ", self." + _safe(str(r)) + ")") for r in _list(creads)]);
+    return "        _tui_llm_in(" + _q(str(slot)) + ", [" + rl + "]);";
+}
+
 def _bind_args(params: any, reads: any, carries: any, types: any, write_target: str = "") -> str {
     rl: list = list(_list(reads));
     ck = list(carries);
@@ -693,8 +700,19 @@ def _emit_tools(ir: any) -> str {
         # guards return a helpful message instead, so the model self-corrects.
         sig_params = _j(", ", [(_safe(p) + "=None") for p in params]) if params else "";
         out.append("");
-        out.append("def " + _toolfn_prefix(name) + f"({sig_params}):");
+        # The tool is emitted as an impl plus a thin traced wrapper. Every caller
+        # (walker node, dispatcher, ReAct wrapper) hits the wrapper, so a run shows
+        # the call and its return — what was handed in, what came back, how long —
+        # instead of a node name with opaque work behind it.
+        fnm = _toolfn_prefix(name);
+        out.append("def " + fnm + "__impl(" + sig_params + "):");
         for fl in _body_lines(body, params) { out.append(fl); }
+        pairs = _j(", ", [("(" + _q(str(p)) + ", " + _safe(str(p)) + ")") for p in params]);
+        fwd = _j(", ", [_safe(str(p)) for p in params]);
+        out.append("");
+        out.append("def " + fnm + "(" + sig_params + "):");
+        out.append("    return _tui_tool(" + _q(str(name)) + ", [" + pairs + "], "
+                   + "lambda: " + fnm + "__impl(" + fwd + "))");
         serves = _list(t.get("serves"));
         if surf == "SENSE" { sense_tools.append([name, params, serves]); }
         elif surf.startswith("ACT") { act_tools.append([name, params, serves]); }
@@ -1184,7 +1202,11 @@ def _emit_walker(ir: any) -> list {
                 tt = _jac_type(carries[tgt].get("type"), types)[0];
                 val = call;
                 if (ntype == "GEN-RAW") and (tt == "str") { val = f"str(_strip_fences({call}))"; }
+                # Bracket the model's turn so a run shows which slot ran, what it
+                # read, and what it produced — the same visibility tools now get.
+                body.append(_llm_trace_in(_slot_name(nid, carries), creads));
                 body.append(f"        self.{_safe(tgt)} = {val};");
+                body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
                 # author+execute fold: a GEN-RAW that writes a `script` carry needs
                 # the authored code RUN so the deliverable is produced.
                 if (ntype == "GEN-RAW") and (tgt == "script") {

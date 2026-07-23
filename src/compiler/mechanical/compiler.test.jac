@@ -165,6 +165,49 @@ edges:
   - {from: check_it, to: done, modality: mandatory}
 """;
 
+test "every tool is emitted as a traced wrapper around its impl" {
+    src = transpile_ir(DEF_BODY_IR, "shout_traced");
+    assert "def _upcase__impl(text=None):" in src;              # body lives in the impl
+    assert "def _upcase(text=None):" in src;                    # callers hit the wrapper
+    assert '_tui_tool("upcase", [("text", text)], lambda: _upcase__impl(text))' in src;
+}
+
+glob GEN_IR: str = """---
+name: noter
+description: Write a note.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: NoteAgent
+  carries:
+    task:
+      type: str
+      role: input
+    note:
+      type: str
+      produced_by: draft
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [note]
+    doc: "Write the note the task asks for."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: draft, to: done, modality: mandatory}
+""";
+
+test "a by-llm slot is bracketed so its inputs and output are visible" {
+    src = transpile_ir(GEN_IR, "noter_traced");
+    assert '_tui_llm_in("draft", [("task", self.task)]);' in src;
+    assert "_tui_llm_out(self.note);" in src;
+}
+
 test "a bool verdict is assigned to its carry, not discarded" {
     src = transpile_ir(GATE_IR, "checker");
     assert "self.is_short = bool(_check_len(self.sentence));" in src;
