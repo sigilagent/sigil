@@ -113,10 +113,17 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         tname = "ask_user_" + hp0.node;
         if hp0.node in hil_tool_by_node { continue; }
         hil_tool_by_node[hp0.node] = tname;
-        prompt = (hp0.kind + ": " + hp0.prompt).replace('"', "'");
+        # The tool takes a `prompt` because the gated node has a question to ask —
+        # a Socratic clarify loop's question is authored at RUN time, not lift time.
+        # Baking only the static text and ignoring the argument asked the human
+        # "INPUT:" and nothing else, which is a gate the human cannot answer.
+        # Runtime question wins; the lifted text is the fallback when there is none.
+        static = (hp0.kind + ": " + hp0.prompt).replace('"', "'").rstrip();
+        kind = hp0.kind.replace('"', "'");
         hil_extra_tools.append({"name": tname,
             "sig": "(prompt) -> str", "surface": "SENSE", "serves": [hp0.node],
-            "body": 'return _ask_user("' + prompt + '")'});
+            "body": 'q = str(prompt or "").strip()\n'
+                    + 'return _ask_user(("' + kind + ': " + q) if q else "' + static + '")'});
     }
 
     con_texts: list[str] = [];
