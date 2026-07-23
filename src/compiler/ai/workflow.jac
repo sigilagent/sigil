@@ -125,7 +125,22 @@ else stable (ids included).""";
 sem workflow_view.spec = "The frozen RuleSet — the complete, grounded spec.";
 sem workflow_view.skill = "The original skill text, for context. The spec is the contract; the text disambiguates.";
 sem workflow_view.issues = "Validator issues from the previous round to fix (empty on round one).";
-def workflow_view(spec: RuleSet, skill: str, issues: str) -> WorkflowView by wf_llm();
+sem workflow_view.target = """The model that will EXECUTE this graph, node by
+node — NOT the model designing it. You compile FOR it, like a cross-compiler
+targeting a specific ISA. When it names a small or local model (an 8B, a quantized
+local model, anything below frontier), design defensively for a weak executor:
+(a) each cognitive node's output IS its deliverable carry and nothing else — NEVER
+fold speak-to-the-human narration ('announce...', 'tell them...') into the doc of
+a node that PRODUCES an artifact; a weak model emits the narration as part of the
+artifact (an 'announce' folded into a header node becomes the first line of the
+header). Attach such a rule to a NON-producing node, or if none exists, keep it as
+a constraint note — never a producing node's output contract. (b) Pass every input
+a node needs EXPLICITLY in its reads, especially the task — a weak model loses the
+thread when a value is implicit. (c) Prefer the TIGHTEST slot type: an ENUM/FILL a
+weak model can't wander out of beats an open GEN_RAW. (d) One unambiguous
+responsibility per node. If the target is blank or a frontier model, design
+normally.""";
+def workflow_view(spec: RuleSet, skill: str, issues: str, target: str) -> WorkflowView by wf_llm();
 
 # ---------------------------------------------------------------------------
 # code disposes — the spine validator
@@ -252,7 +267,7 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
 # the loop
 # ---------------------------------------------------------------------------
 
-def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0) -> SpineResult {
+def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0, target: str = "") -> SpineResult {
     # Bounded model-propose / code-dispose loop. On exhaustion, returns the last
     # view WITH its outstanding issues — an honest failure, never a silent one.
     wf = WorkflowView();
@@ -262,7 +277,7 @@ def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0) -> SpineResul
     # auto budget: spine rounds scale with spec size (3 for toys, up to 6)
     cap = max_rounds if (max_rounds > 0) else min(6, max(3, 2 + len(spec.rules) // 30));
     while rounds < cap {
-        wf = workflow_view(spec, skill, digest);
+        wf = workflow_view(spec, skill, digest, target);
         issues = validate_spine(spec, wf);
         rounds += 1;
         if not issues { break; }

@@ -44,7 +44,11 @@ def _emit(ev: dict) -> None {
     }
 }
 
-def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
+def lift(skill: str, name: str, parallel: bool = True, target: str = "") -> LiftResult {
+    # `target` names the model that will EXECUTE the compiled graph (the small /
+    # local tier), so the design stages can compile FOR it — a cross-compiler that
+    # knows its target. It rides the DESIGN stages only (spine); the spec stays
+    # model-independent, since the contract is what the skill says, not who runs it.
     repairs: list = [];
 
     _t0 = time.time();
@@ -61,7 +65,7 @@ def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
 
     _t1 = time.time();
     _emit({"stage": "spine", "state": "start"});
-    spine = workflow_spine(sr.spec, skill);
+    spine = workflow_spine(sr.spec, skill, 0, target);
     _emit({"stage": "spine", "state": "done", "secs": time.time() - _t1,
            "nodes": len(spine.view.nodes), "edges": len(spine.view.edges),
            "rounds": spine.rounds, "issues": len(spine.issues)});

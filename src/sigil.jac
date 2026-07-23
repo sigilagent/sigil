@@ -573,7 +573,10 @@ def register_skill(source: str, kind: str) -> dict {
         import from .compiler.ai.lift { lift, pin_all_lift_llms }
         pin_all_lift_llms(frontier);
         sig = agir_name(source);
-        lr = lift(source, sig);
+        # Compile FOR the tier that will run it: the frontier designs the graph
+        # aware of the small executor's limits (a cross-compiler that knows its
+        # target). SMALL_NAME is the live small tier from the Soul.
+        lr = lift(source, sig, True, SMALL_NAME);
         if not lr.ok {
             gaps = "; ".join(lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues)[:600];
             ce = (" | compile: " + lr.compile_errors[:300]) if lr.compile_errors else "";
