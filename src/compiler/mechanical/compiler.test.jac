@@ -165,6 +165,74 @@ edges:
   - {from: check_it, to: done, modality: mandatory}
 """;
 
+# The writing-plans shape: a GEN node writes an UNTYPED carry, and a tool consumes
+# that carry as a dict. Declaring the slot `-> str` makes the tool's `.get()` fail
+# on every model — the failure is in the contract, not the cognition.
+glob CONSUMER_TYPE_IR: str = """---
+name: header
+description: Build a plan header.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  render_header:
+    sig: "(header_fields) -> str"
+    surface: SENSE
+    doc: "Render the header from its fields."
+    body: |
+      def render_header(header_fields: dict) -> str:
+          return header_fields.get("feature_name", "[none]")
+walker:
+  name: HeaderAgent
+  carries:
+    task:
+      type: str
+      role: input
+    header_fields:
+      type: any
+      produced_by: fill_fields
+    header_md:
+      type: str
+      produced_by: render_it
+nodes:
+  - id: fill_fields
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [header_fields]
+    doc: "Fill in the header fields."
+  - id: render_it
+    type: SENSE
+    owner: code
+    op: render_header
+    tool: render_header
+    reads: [header_fields]
+    writes: [header_md]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: fill_fields, to: render_it, modality: mandatory}
+  - {from: render_it, to: done, modality: mandatory}
+""";
+
+test "an untyped carry takes its type from the tool that consumes it" {
+    src = transpile_ir(CONSUMER_TYPE_IR, "header_consumer");
+    # the slot must produce what the consumer reads, parameterized so byLLM can
+    # schematize it (a bare `dict` raises "Untyped dict is not supported").
+    assert "def fill_fields(task: str) -> dict[str, str] by llm;" in src;
+    assert "-> str by llm;" not in src;
+}
+
+test "a bare dict/list slot return is widened so byLLM can schematize it" {
+    ir = CONSUMER_TYPE_IR.replace("      type: any\n      produced_by: fill_fields",
+                                  "      type: dict\n      produced_by: fill_fields");
+    src = transpile_ir(ir, "header_bare_dict");
+    assert "-> dict[str, str] by llm;" in src;
+    assert "-> dict by llm;" not in src;
+}
+
 test "every tool is emitted as a traced wrapper around its impl" {
     src = transpile_ir(DEF_BODY_IR, "shout_traced");
     assert "def _upcase__impl(text=None):" in src;              # body lives in the impl
