@@ -569,9 +569,41 @@ def _delegating_call(body: str, params: list) -> str {
     return "    return " + fname + "(" + _j(", ", args_out) + ")";
 }
 
+# LIFT sometimes authors a tool body as a STANDALONE script: a `def tool(...)`
+# plus an `if __name__ == "__main__":` harness that reads JSON off stdin and prints
+# the result. That harness is for running the tool as a subprocess. Inlined into
+# the ejected module as `_name__impl`, the guard is live — the ejected artifact IS
+# `__main__` — so it fires, reads empty stdin, and raises JSONDecodeError before the
+# real work runs. The guard is dead weight in-process; strip it, then the leftover
+# single def delegates cleanly (see _delegating_call).
+def _strip_main_guard(body: str) -> str {
+    import re;
+    lines = body.splitlines();
+    guard = re.compile(r"^\s*if\s+__name__\s*==\s*['\"]__main__['\"]\s*:");
+    out: list = [];
+    i = 0;
+    n = len(lines);
+    while i < n {
+        if guard.match(lines[i]) {
+            # drop the guard line and everything indented beneath it
+            i += 1;
+            while i < n {
+                nx = lines[i];
+                if (nx.strip() == "") or (nx[:1] in [" ", "\t"]) { i += 1; continue; }
+                break;
+            }
+            continue;
+        }
+        out.append(lines[i]);
+        i += 1;
+    }
+    return "\n".join(out).rstrip();
+}
+
 def _body_lines(body: str, params: list) -> list {
     out: list = [];
     if _py_ok(body) {
+        body = _strip_main_guard(body);
         for ln in body.splitlines() { out.append(("    " + ln) if ln.strip() else ""); }
         tail = _delegating_call(body, params);
         if tail { out.append(tail); }

@@ -233,6 +233,67 @@ test "a bare dict/list slot return is widened so byLLM can schematize it" {
     assert "-> dict by llm;" not in src;
 }
 
+# A tool LIFT authored as a standalone stdin-script: a def plus a __main__ harness.
+# Inlined into the ejected module (itself __main__), the guard fires and reads empty
+# stdin — a JSONDecodeError before the real work. It must be stripped, and the def
+# delegated to.
+glob MAIN_GUARD_IR: str = """---
+name: saver
+description: Save content to a path.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  save_file:
+    sig: "(content, path) -> str"
+    surface: ACT·artifact
+    doc: "Write content to path."
+    body: |
+      import sys, json, os
+      def tool(content: str, path: str) -> str:
+          os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+          with open(path, "w") as f:
+              f.write(content)
+          return path
+      if __name__ == "__main__":
+          data = json.load(sys.stdin)
+          print(tool(data["content"], data["path"]))
+walker:
+  name: SaveAgent
+  carries:
+    task:
+      type: str
+      role: input
+    content:
+      type: str
+      role: input
+    saved:
+      type: str
+      produced_by: save_it
+nodes:
+  - id: save_it
+    type: ACT
+    owner: code
+    op: save_file
+    tool: save_file
+    reads: [content]
+    writes: [saved]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: save_it, to: done, modality: mandatory}
+""";
+
+test "an inlined tool body's __main__ stdin harness is stripped, not run" {
+    src = transpile_ir(MAIN_GUARD_IR, "saver_main");
+    assert 'if __name__ == "__main__":' not in src;   # the harness never rides in
+    assert "json.load(sys.stdin)" not in src;          # …so it can't fire on empty stdin
+    assert "def tool(content: str, path: str) -> str:" in src;   # the real def stays
+    assert "return tool(content, path)" in src;        # …and is delegated to
+}
+
 test "every tool is emitted as a traced wrapper around its impl" {
     src = transpile_ir(DEF_BODY_IR, "shout_traced");
     assert "def _upcase__impl(text=None):" in src;              # body lives in the impl
