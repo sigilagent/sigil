@@ -30,6 +30,11 @@ glob GEN_TYPES: list = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
 # guard values that mean "unconditional" — never lower as a literal condition
 glob GUARD_SENTINELS: list = ["", "otherwise", "default", "else", "always", "true", "_"];
 
+# Tool params that name a DESTINATION rather than a value — an ACT tool's write
+# path. Kept in sync with the `ppar` sniff in the embodiment ladder.
+glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
+    "out_path", "output_path", "outpath", "target", "target_path", "dest_path"];
+
 # Embodiment-ladder rung-3 fallbacks recorded during a transpile: tools with no
 # runnable body that were lowered to the scoped GEN-RAW author-run envelope instead
 # of a silent `pass`. Reset per _transpile; reported by _main (loud, not silent).
@@ -377,6 +382,12 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     if tt == "str" { return f"        self.{_safe(str(tgt))} = str({expr});"; }
     if tt == "any" { return f"        self.{_safe(str(tgt))} = {expr};"; }
     if tt.startswith("list") { return f"        self.{_safe(str(tgt))} = list({expr});"; }
+    # A verification gate's verdict is `bool`. Without this the check RUNS and its
+    # answer is thrown away — the carry keeps its default, so nothing downstream
+    # (a guard edge, the TERMINAL report) can ever see a failed check. `bool()` is
+    # total, so it coerces the Unknown ::py:: return without risking a raise the
+    # way int()/float() would on a None; those stay conservative below.
+    if tt == "bool" { return f"        self.{_safe(str(tgt))} = bool({expr});"; }
     return f"        {expr};  # -> {tgt} ({tt}); carry keeps default";
 }
 
@@ -384,7 +395,7 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
 # param `width` binds to `self.spec.width`), else POSITIONAL to the node's `reads`
 # (so a param `gif_path` binds to reads[0]=`artifact` -> `self.artifact`). This
 # handles both the "fields of a spec" and "renamed positional" tool conventions.
-def _bind_args(params: any, reads: any, carries: any, types: any) -> str {
+def _bind_args(params: any, reads: any, carries: any, types: any, write_target: str = "") -> str {
     rl: list = list(_list(reads));
     ck = list(carries);
     out: list = [];
@@ -392,6 +403,15 @@ def _bind_args(params: any, reads: any, carries: any, types: any) -> str {
     for p in _list(params) {
         b = _bind_carry_arg(p, carries, types);
         if (b == "None") and (i < len(rl)) and (rl[i] in ck) { b = "self." + _safe(str(rl[i])); }
+        # An ACT tool that takes a DESTINATION has no carry to bind it to: the IR
+        # names deliverables in prose, not in the dataflow. Binding None hands the
+        # tool a null path, which raises inside the generated module. Resolve it
+        # the way the no-tool ACT fallback below already does — the filename the
+        # task asks for, else a deterministic name off the carry being written.
+        # Only for ACT (write_target set); a SENSE path param is an INPUT to read.
+        if (b == "None") and write_target and ("task" in ck) and (str(p).lower() in PATH_PARAMS) {
+            b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
+        }
         out.append(b);
         i += 1;
     }
@@ -505,10 +525,49 @@ def _looks_shell(body: str) -> bool {
     return False;
 }
 
-def _body_lines(body: str) -> list {
+# A tool `body` arrives in one of two shapes: bare statements (what the authoring
+# contract asks for), or a COMPLETE `def` — LIFT emits the latter whenever the
+# skill's snippet is itself a function. Indenting a complete def into the wrapper
+# nests it and never calls it, so the tool silently returns None. `jac check`
+# still passes (a nested def is valid Python), so G4 cannot catch it. Normalize
+# the second shape by appending an explicit delegating call: the wrapper's params
+# are forwarded to the inner def by NAME, anything unmatched passes None (same
+# contract as the wrapper's own `=None` defaults).
+def _delegating_call(body: str, params: list) -> str {
+    import ast;
+    try { tree = ast.parse(textwrap.dedent(body)); } except Exception { return ""; }
+    fname = "";
+    nfn = 0;
+    inner: list = [];
+    for st in tree.body {
+        if isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef) {
+            nfn += 1;
+            fname = str(st.name);
+            inner = [str(a.arg) for a in st.args.args];
+        } elif isinstance(st, ast.Return) {
+            return "";                      # body already returns at top level
+        } elif isinstance(st, ast.Import) or isinstance(st, ast.ImportFrom) or isinstance(st, ast.Expr) {
+            continue;                       # imports / docstrings ride along
+        } else {
+            return "";                      # real top-level work: body is statements
+        }
+    }
+    if nfn != 1 { return ""; }
+    avail: list = [_safe(str(p)) for p in params];
+    args_out: list = [];
+    for nm in inner {
+        s = _safe(str(nm));
+        args_out.append(s if s in avail else "None");
+    }
+    return "    return " + fname + "(" + _j(", ", args_out) + ")";
+}
+
+def _body_lines(body: str, params: list) -> list {
     out: list = [];
     if _py_ok(body) {
         for ln in body.splitlines() { out.append(("    " + ln) if ln.strip() else ""); }
+        tail = _delegating_call(body, params);
+        if tail { out.append(tail); }
         return out;
     }
     if _looks_shell(body) {
@@ -635,7 +694,7 @@ def _emit_tools(ir: any) -> str {
         sig_params = _j(", ", [(_safe(p) + "=None") for p in params]) if params else "";
         out.append("");
         out.append("def " + _toolfn_prefix(name) + f"({sig_params}):");
-        for fl in _body_lines(body) { out.append(fl); }
+        for fl in _body_lines(body, params) { out.append(fl); }
         serves = _list(t.get("serves"));
         if surf == "SENSE" { sense_tools.append([name, params, serves]); }
         elif surf.startswith("ACT") { act_tools.append([name, params, serves]); }
@@ -1269,7 +1328,7 @@ def _emit_walker(ir: any) -> list {
             # (frames, builder, spec.width, …), realizing the IR's node separation.
             stA = _node_tool(ir, nid, n);
             if (not expr) and stA {
-                expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types) + ")";
+                expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types, str(tgt5)) + ")";
             }
             if (not expr) and (owner == "model") {
                 # ACT owner=model with no tool = a cognitive emit (e.g. report,
