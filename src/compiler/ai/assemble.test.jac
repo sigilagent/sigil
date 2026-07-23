@@ -119,3 +119,29 @@ test "a HIL point injects a real ask_user gate: SENSE served + Mind autonomy bel
     assert v.ok, v.errors;
     assert "_ask_user" in v.module_src;           # the runtime channel rode into the module
 }
+
+test "a HIL gate asks the RUNTIME question, falling back to the lifted text" {
+    spec = _spec(); wf = _wf(); vb = _views();
+    vb.hil = HILView(points=[
+        HILPoint(node="parse", kind="INPUT", prompt="which file should I parse?")
+    ]);
+    res = assemble(spec, wf, vb, "csv-toy");
+    v = compile_gate(res.ir_text, "csv_toy_hil_q");
+    assert v.ok, v.errors;
+    # the `prompt` argument must reach _ask_user — a gate the human cannot read
+    # is not a gate. The lifted text remains as the no-runtime-question fallback.
+    assert 'q = str(prompt or "").strip()' in v.module_src;
+    assert '_ask_user(("INPUT: " + q) if q else' in v.module_src;
+    assert "which file should I parse?" in v.module_src;
+}
+
+test "a HIL point with no lifted prompt still asks the model's question" {
+    spec = _spec(); wf = _wf(); vb = _views();
+    # brainstorming's clarify loop lifts with an EMPTY prompt — the case that
+    # produced a bare "INPUT:" with no question in a live run.
+    vb.hil = HILView(points=[HILPoint(node="parse", kind="INPUT", prompt="")]);
+    res = assemble(spec, wf, vb, "csv-toy");
+    v = compile_gate(res.ir_text, "csv_toy_hil_empty");
+    assert v.ok, v.errors;
+    assert '_ask_user(("INPUT: " + q) if q else "INPUT:")' in v.module_src;
+}
