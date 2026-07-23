@@ -134,11 +134,18 @@ overrides the SKILL: keep conditional guidance conditional.
 If ISSUES from the validator are given, fix exactly those — keep everything
 else stable (ids included).""";
 sem workflow_view.spec = "The frozen RuleSet — the complete, grounded spec.";
-sem workflow_view.skill = "The original skill text, for context. The spec is the contract; the text disambiguates.";
+sem workflow_view.skill = "The original skill text for context, and — appended below a >>> EXECUTION TARGET marker when present — the model that will RUN this graph, so you can design for it. The spec is the contract; the text disambiguates.";
 sem workflow_view.issues = "Validator issues from the previous round to fix (empty on round one).";
-sem workflow_view.target = """The model that will EXECUTE this graph, node by
-node — NOT the model designing it. You compile FOR it, like a cross-compiler
-targeting a specific ISA. When it names a small or local model (an 8B, a quantized
+def workflow_view(spec: RuleSet, skill: str, issues: str) -> WorkflowView by wf_llm();
+
+# The execution-target directive, folded into the `skill` context (not a 4th param —
+# byLLM's MTIR factory mis-indexes a 4th input on a structured-output slot). When
+# the graph will run on a small/local model, the frontier compiles FOR it — a
+# cross-compiler that knows its target.
+glob TARGET_DIRECTIVE: str = """
+>>> EXECUTION TARGET: this graph will be EXECUTED node by node by the model named
+below — NOT the model designing it. Compile FOR it, like a cross-compiler
+targeting a specific ISA. If it is a small or local model (an 8B, a quantized
 local model, anything below frontier), design defensively for a weak executor:
 (a) each cognitive node's output IS its deliverable carry and nothing else — NEVER
 fold speak-to-the-human narration ('announce...', 'tell them...') into the doc of
@@ -149,9 +156,8 @@ a constraint note — never a producing node's output contract. (b) Pass every i
 a node needs EXPLICITLY in its reads, especially the task — a weak model loses the
 thread when a value is implicit. (c) Prefer the TIGHTEST slot type: an ENUM/FILL a
 weak model can't wander out of beats an open GEN_RAW. (d) One unambiguous
-responsibility per node. If the target is blank or a frontier model, design
-normally.""";
-def workflow_view(spec: RuleSet, skill: str, issues: str, target: str) -> WorkflowView by wf_llm();
+responsibility per node.
+EXECUTION TARGET MODEL: """;
 
 # ---------------------------------------------------------------------------
 # code disposes — the spine validator
@@ -285,10 +291,13 @@ def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0, target: str =
     issues: list = [];
     rounds = 0;
     digest = "";
+    # Compile FOR the executor: fold the target directive into the skill context so
+    # the spine designs aware of who will run the graph (kept out of a 4th slot param).
+    skill_ctx = (skill + "\n" + TARGET_DIRECTIVE + target) if target.strip() else skill;
     # auto budget: spine rounds scale with spec size (3 for toys, up to 6)
     cap = max_rounds if (max_rounds > 0) else min(6, max(3, 2 + len(spec.rules) // 30));
     while rounds < cap {
-        wf = workflow_view(spec, skill, digest, target);
+        wf = workflow_view(spec, skill_ctx, digest);
         issues = validate_spine(spec, wf);
         rounds += 1;
         if not issues { break; }
