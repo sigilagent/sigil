@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Sigil or the AG-IR in your work, please cite the paper below."
+title: "SIGIL: Compiling Agent Skills into Typed Harnesses"
+authors:
+  - family-names: Dantanarayana
+    given-names: Jayanaka
+    affiliation: "University of Michigan, Ann Arbor"
+  - family-names: Kashmira
+    given-names: Savini
+    affiliation: "University of Michigan, Ann Arbor"
+  - family-names: Tang
+    given-names: Lingjia
+    affiliation: "University of Michigan, Ann Arbor"
+  - family-names: Mars
+    given-names: Jason
+    affiliation: "University of Michigan, Ann Arbor"
+date-released: 2026-07-22
+doi: 10.5281/zenodo.21499104
+url: "https://doi.org/10.5281/zenodo.21499104"
+repository-code: "https://github.com/sigilagent/sigil"
+license: CC-BY-4.0
+type: conference-paper
