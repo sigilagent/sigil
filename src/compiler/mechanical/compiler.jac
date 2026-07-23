@@ -895,6 +895,45 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
     return _j(", ", parts);
 }
 
+# byLLM cannot schematize a bare `dict`/`list` ("Untyped dict is not supported for
+# schema generation"), so a slot returning one must be widened to a parameterized
+# form before it can be emitted at all.
+def _schematizable(t: str) -> str {
+    s = str(t).strip();
+    if s == "dict" { return "dict[str, str]"; }
+    if s == "list" { return "list[str]"; }
+    return s;
+}
+
+# A tool body annotates the params it needs — `def render(header_fields: dict)`.
+# When a GEN slot writes an UNTYPED carry that such a tool consumes, coercing the
+# slot to `str` hands the tool a string it will immediately `.get()` on: a runtime
+# failure baked into the contract, identical on every model. Adopt the consumer's
+# annotation instead. Matching is by param name, the same join `_bind_carry_arg`
+# already uses to thread carries into tools.
+def _consumer_hint(ir: any, carry: str) -> str {
+    import ast;
+    for kv in _items(ir.get("tools")) {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        body = textwrap.dedent(str(t.get("body") or ""));
+        if not body.strip() { continue; }
+        try { tree = ast.parse(body); } except Exception { continue; }
+        for st in tree.body {
+            if not (isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef)) { continue; }
+            for a in st.args.args {
+                if str(a.arg) != str(carry) { continue; }
+                ann = a.annotation;
+                if ann is None { continue; }
+                if isinstance(ann, ast.Name) and (str(ann.id) in ["dict", "list"]) {
+                    return _schematizable(str(ann.id));
+                }
+            }
+        }
+    }
+    return "";
+}
+
 def _emit_slots(ir: any) -> str {
     out: list = [];
     types = ir.get("types");
@@ -949,7 +988,15 @@ def _emit_slots(ir: any) -> str {
             wf = _list(n.get("writes"))[0];
             if wf in carries { jt2 = _jac_type(carries[wf].get("type"), types); ret = str(jt2[0]); }
         }
-        if "any" in ret { ret = ret.replace("any", "str"); }   # byLLM can't schematize Any in a slot return
+        # byLLM can't schematize Any in a slot return. Before falling back to str,
+        # let the carry's CONSUMER decide: a tool that reads it as a dict must not
+        # be handed a string.
+        if "any" in ret {
+            hint = "";
+            if n.get("writes") { hint = _consumer_hint(ir, str(_list(n.get("writes"))[0])); }
+            ret = hint if hint else ret.replace("any", "str");
+        }
+        ret = _schematizable(ret);
         tools = "";
         au = _dict(n.get("autonomy"));
         if isinstance(au, dict) and au.get("tools") {
