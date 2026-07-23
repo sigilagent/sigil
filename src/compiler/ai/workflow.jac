@@ -106,6 +106,17 @@ INVOKE_UNIT (adaptive tool use: 'explore...', 'iterate until...') stays ONE
 model-owned node with its tools in autonomy_tools — never shredded into fixed
 calls. Conversely never fold several MANDATORY rules into one big authoring
 node — each mandate gets its own node so the structure can enforce it.
+(Presentational rules are NOT enforceable structure) A rule whose whole content
+is speaking to the human — 'announce ...', 'tell/inform the user ...', 'state
+that ...', 'present/offer <fixed text>' — has no verifiable post-condition: no
+artifact, no carry any later node reads, nothing a gate could check. It is NOT a
+node. Attach its rule id to the traces_to of a nearby node so it stays realized
+without manufacturing a step — but NOT a node that produces an artifact (its
+narration would leak into that artifact; see the `target` guidance); prefer a
+non-producing node, else keep it as a constraint note. The ONLY exception is a presentation whose
+answer drives control flow (a human gate / approval prompt): that IS structure —
+keep it, wired to its guard. This is the coarse-granularity principle, not an
+exception to completeness: every rule still appears in some node's traces_to.
 (Wiring) Entry node first, exactly one TERMINAL last. Edge modality comes from
 the rule's modality. Every ROUTE fan-out edge carries a guard. FORBIDDEN rules
 become entries in `constraints` ('rule_id: prohibition'), NEVER edges or nodes.
