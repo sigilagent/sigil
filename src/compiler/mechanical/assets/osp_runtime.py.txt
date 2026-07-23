@@ -101,29 +101,85 @@ def _tui_banner(name, task):
     sys.stdout.write(_D + "    " + str(task)[:120] + _R + "\n\n")
     sys.stdout.flush()
 
+def _tui_close(now=None):
+    # Finish the in-place node line. A node whose detail already streamed was
+    # committed by _tui_sub, so there is nothing left to rewrite.
+    import sys, time
+    now = now or time.time()
+    if _TUI.get("open") and _TUI["last"] is not None:
+        dt = now - (_TUI["t0"] or now)
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
+                         + _D + "  %.1fs" % dt + _R + "\n")
+        sys.stdout.flush()
+    _TUI["open"] = False
+
+def _fmt_val(v, n=72):
+    # One line, collapsed whitespace, elided \u2014 a value preview, never a dump.
+    s = " ".join(str(v).split())
+    return s[:n] + ("\u2026" if len(s) > n else "")
+
+def _tui_sub(icon, color, text, tail=""):
+    # One indented detail line under the current node. The first one commits the
+    # node's in-place line (without its duration) so detail can stream beneath.
+    import sys
+    if not _tui_on():
+        return
+    if _TUI.get("open"):
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"]) + "\n")
+        _TUI["open"] = False
+    sys.stdout.write("      " + color + icon + _R + " " + text
+                     + ((_D + "  " + tail + _R) if tail else "") + "\n")
+    sys.stdout.flush()
+
+def _tui_tool(name, args, fn):
+    # Run a tool with the call AND its return visible: what went in, what came
+    # back, how long it took. Errors surface as a failed call, then re-raise.
+    import time
+    if not _tui_on():
+        return fn()
+    shown = ", ".join("%s=%s" % (k, _fmt_val(v, 24)) for k, v in args if v is not None)
+    _tui_sub("\u2699", _C, str(name) + "(" + shown + ")")
+    t = time.time()
+    try:
+        out = fn()
+    except Exception as ex:
+        _tui_sub("\u2717", "\033[31m", "%s: %s" % (type(ex).__name__, _fmt_val(ex, 56)),
+                 "%.1fs" % (time.time() - t))
+        raise
+    _tui_sub("\u21b3", _D, _fmt_val(out), "%.1fs" % (time.time() - t))
+    return out
+
+def _tui_llm_in(slot, reads=None):
+    # A `by llm` slot is about to run: which slot, and what it was handed.
+    shown = ""
+    if reads:
+        shown = " " + _D + ", ".join("%s=%s" % (k, _fmt_val(v, 20)) for k, v in reads) + _R
+    _tui_sub("\u273b", _V, "llm " + str(slot) + shown)
+    _TUI["llm_t"] = __import__("time").time()
+
+def _tui_llm_out(val):
+    import time
+    dt = time.time() - (_TUI.get("llm_t") or time.time())
+    _tui_sub("\u21b3", _D, _fmt_val(val), "%.1fs" % dt)
+
 def _tui_node(node):
     import sys, time
     if not _tui_on():
         return
     now = time.time()
-    if _TUI["last"] is not None:
-        dt = now - (_TUI["t0"] or now)
-        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
-                         + _D + "  %.1fs" % dt + _R + "\n")
+    _tui_close(now)
     sys.stdout.write("  " + _V + "\u25c6 " + _R + str(node) + _D + " \u2026" + _R)
     sys.stdout.flush()
     _TUI["last"] = node
     _TUI["t0"] = now
+    _TUI["open"] = True
 
 def _tui_finish(report, artifacts=None):
     import sys, time
     if not _tui_on():
         return
     now = time.time()
-    if _TUI["last"] is not None:
-        dt = now - (_TUI["t0"] or now)
-        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
-                         + _D + "  %.1fs" % dt + _R + "\n")
+    _tui_close(now)
     total = now - (_TUI["start"] or now)
     rep = str(report or "")
     bad = rep.startswith("INCOMPLETE") or not rep
@@ -158,6 +214,7 @@ def _ask_user(question=None):
             except (EOFError, KeyboardInterrupt):
                 return "[user closed the prompt]"
         return "[no human channel attached - proceeding without user input]"
+    _tui_sub("?", _C, _fmt_val(question, 88))
     af = qf + ".answers"
     n = 0
     try:
@@ -176,10 +233,13 @@ def _ask_user(question=None):
             for line in open(af):
                 rec = json.loads(line)
                 if rec.get("i") == n:
-                    return str(rec.get("a", ""))
+                    ans = str(rec.get("a", ""))
+                    _tui_sub("↳", _D, _fmt_val(ans, 88), "human")
+                    return ans
         except Exception:
             pass
         time.sleep(2)
+    _tui_sub("✗", "\033[31m", "no answer within HIL_TIMEOUT")
     return "[human did not answer in time]"
 
 # ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
@@ -294,10 +354,14 @@ def _run_cmd(prefix, args):
     # fixed executable+script, args are the tool's params threaded in order. Non-raising;
     # returns combined stdout+stderr so a downstream verify can read it.
     argv = list(prefix) + [str(a) for a in args if a is not None]
+    _tui_sub("$", _C, _fmt_val(" ".join(argv), 88))
     try:
         r = _subprocess.run(argv, capture_output=True, text=True, timeout=180)
-        return ((r.stdout or "") + (r.stderr or "")).strip()
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        _tui_sub("↳", _D, _fmt_val(out), "exit %s" % r.returncode)
+        return out
     except Exception as e:
+        _tui_sub("✗", "\033[31m", _fmt_val(e, 56))
         return "[cmd %s failed: %s]" % (" ".join(str(x) for x in prefix), str(e)[:200])
 
 def _live_tool(name, args):
