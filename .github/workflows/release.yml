@@ -83,7 +83,26 @@ jobs:
             echo "::warning::could not push the version bump to $BRANCH (branch protection?). jac.toml still says $cur — bump it to $t manually, or allow the github-actions app to bypass protection."
           fi
 
-      # Never ship a broken pipe-to-bash installer: fail the release if it won't parse.
+      # Self-pinning release asset: rewrite the installer's default ref from main
+      # to THIS tag, so `releases/latest/download/install.sh` installs exactly the
+      # released commit — not whatever main happens to be when someone runs it.
+      # The repo copy keeps tracking main; SIGIL_REF still overrides either. The
+      # anchor is grepped before and after: if install.sh drifts, the release
+      # fails loudly instead of shipping an unpinned installer.
+      - name: Pin installer to the tag
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          grep -q '^DEFAULT_REF="main"$' install.sh \
+            || { echo "::error::install.sh lost its DEFAULT_REF=\"main\" anchor — cannot pin the release asset"; exit 1; }
+          sed -i "s|^DEFAULT_REF=\"main\"\$|DEFAULT_REF=\"$TAG\"|" install.sh
+          grep -q "^DEFAULT_REF=\"$TAG\"\$" install.sh \
+            || { echo "::error::pin substitution failed"; exit 1; }
+          echo "release asset pinned: DEFAULT_REF=$TAG"
+
+      # Never ship a broken pipe-to-bash installer: fail the release if it won't
+      # parse. Runs AFTER the pin so the checksum covers the shipped bytes.
       - name: Validate installer
         run: |
           test -f install.sh || { echo "::error::install.sh not found"; exit 1; }
@@ -110,6 +129,9 @@ jobs:
           The installer pulls the native \`jac\` runtime, fetches Sigil into \`~/.sigil/app\`,
           provisions the compiler's one dependency (PyYAML), and drops a \`sigil\` launcher on
           your PATH. No root; safe to re-run. Verify the download against \`install.sh.sha256\`.
+
+          This release's installer is **pinned to $TAG** — it installs exactly this commit,
+          not main. Set \`SIGIL_REF\` (branch / tag / commit) to override.
 
           Then:
 
