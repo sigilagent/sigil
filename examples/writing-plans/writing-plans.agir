@@ -1,0 +1,148 @@
+---
+name: writing_plans
+description: Create a detailed implementation plan with bite-sized TDD tasks for an engineer with zero codebase context.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+knowledge:
+  header_format:
+    resident_on: [draft_header]
+    template: |
+      Every plan MUST open with exactly this header:
+
+      # [Feature Name] Implementation Plan
+
+      **Goal:** [one sentence describing what this builds]
+
+      **Architecture:** [2-3 sentences about the approach]
+
+      **Tech Stack:** [key technologies/libraries]
+
+      ---
+  task_format:
+    resident_on: [write_tasks]
+    template: |
+      Break the work into bite-sized tasks. Each task is one component; each
+      step inside it is one 2-5 minute action. Every task MUST use this shape:
+
+      ### Task N: [Component Name]
+
+      **Files:**
+      - Create: `exact/path/to/file.py`
+      - Modify: `exact/path/to/existing.py:123-145`
+      - Test: `tests/exact/path/to/test.py`
+
+      **Step 1: Write the failing test** — show the complete test code.
+      **Step 2: Run it to verify it fails** — give the exact command and expected FAIL.
+      **Step 3: Write the minimal implementation** — show the complete code.
+      **Step 4: Run the test to verify it passes** — exact command, expected PASS.
+      **Step 5: Commit** — the exact `git add` + `git commit` command.
+
+      Rules: exact file paths always; complete code, never "add validation";
+      exact commands with expected output. DRY. YAGNI. TDD. Frequent commits.
+      Assume a skilled engineer who knows nothing about this codebase or domain.
+
+tools:
+  assemble_plan:
+    sig: "(header_md, tasks_md) -> str"
+    surface: ACT·artifact
+    doc: "Join the header and the task sections into one plan document."
+    body: |
+      def assemble_plan(header_md: str, tasks_md: str) -> str:
+          head = (header_md or "").rstrip()
+          body = (tasks_md or "").strip()
+          return head + "\n\n" + body + "\n"
+  verify_has_tasks:
+    sig: "(plan_md) -> bool"
+    surface: SENSE
+    doc: "True when the plan actually contains task sections with code."
+    body: |
+      def verify_has_tasks(plan_md: str) -> bool:
+          import re
+          text = plan_md or ""
+          has_task = bool(re.search(r'^###\s+Task\s', text, re.M))
+          has_code = "```" in text
+          has_header = "Implementation Plan" in text
+          return has_task and has_code and has_header
+  save_plan:
+    sig: "(plan_md, path) -> str"
+    surface: ACT·artifact
+    doc: "Write the finished plan to a markdown file and return its path."
+    body: |
+      def save_plan(plan_md: str, path: str) -> str:
+          import os
+          d = os.path.dirname(path)
+          if d:
+              os.makedirs(d, exist_ok=True)
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(plan_md or "")
+          return path
+
+walker:
+  name: WritingPlans
+  carries:
+    task:
+      type: str
+      role: input
+    header_md:
+      type: str
+      produced_by: draft_header
+    tasks_md:
+      type: str
+      produced_by: write_tasks
+    plan_md:
+      type: str
+      produced_by: assemble
+    plan_ok:
+      type: bool
+      produced_by: verify
+    plan_file:
+      type: str
+      produced_by: save
+
+nodes:
+  - id: draft_header
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [header_md]
+    doc: "Write the plan's header for the requested feature: a real feature name, a one-sentence goal, a 2-3 sentence architecture, and the tech stack. Follow the header format exactly. Output only the header markdown."
+  - id: write_tasks
+    type: GEN-RAW
+    owner: model
+    reads: [task, header_md]
+    writes: [tasks_md]
+    doc: "Write the bite-sized, test-driven task sections that implement the feature. Follow the task format exactly: exact file paths, complete code, exact commands with expected output, and a commit per task. Output only the task-section markdown, no header."
+  - id: assemble
+    type: ACT
+    owner: code
+    op: assemble_plan
+    tool: assemble_plan
+    reads: [header_md, tasks_md]
+    writes: [plan_md]
+  - id: verify
+    type: SENSE
+    owner: code
+    op: verify_has_tasks
+    tool: verify_has_tasks
+    reads: [plan_md]
+    writes: [plan_ok]
+  - id: save
+    type: ACT
+    owner: code
+    op: save_plan
+    tool: save_plan
+    reads: [plan_md]
+    writes: [plan_file]
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: draft_header, to: write_tasks, modality: mandatory}
+  - {from: write_tasks, to: assemble, modality: mandatory}
+  - {from: assemble, to: verify, modality: mandatory}
+  - {from: verify, to: save, modality: mandatory}
+  - {from: save, to: done, modality: mandatory}

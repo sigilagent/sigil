@@ -1,0 +1,792 @@
+#!/usr/bin/env -S jac run
+# writing_plans — standalone agent ejected by the sigil AI compiler.
+# Usage: ./writing_plans.jac "<task>"   (or: jac run writing_plans.jac -- "<task>")
+# Model: $SIGIL_MODEL, else $SIGIL_SMALL, else gpt-4o-mini.
+
+"""OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.
+
+Skill: writing_plans
+Shape: pipeline
+Mechanical lowering of the IR as written (not the hand-tuned production agent).
+"""
+
+import from jaclang.byllm.lib { Model }
+
+::py::
+import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile
+
+def _assemble_plan__impl(header_md=None, tasks_md=None):
+    def assemble_plan(header_md: str, tasks_md: str) -> str:
+        head = (header_md or "").rstrip()
+        body = (tasks_md or "").strip()
+        return head + "\n\n" + body + "\n"
+    return assemble_plan(header_md, tasks_md)
+
+def _assemble_plan(header_md=None, tasks_md=None):
+    return _tui_tool("assemble_plan", [("header_md", header_md), ("tasks_md", tasks_md)], lambda: _assemble_plan__impl(header_md, tasks_md))
+
+def _verify_has_tasks__impl(plan_md=None):
+    def verify_has_tasks(plan_md: str) -> bool:
+        import re
+        text = plan_md or ""
+        has_task = bool(re.search(r'^###\s+Task\s', text, re.M))
+        has_code = "```" in text
+        has_header = "Implementation Plan" in text
+        return has_task and has_code and has_header
+    return verify_has_tasks(plan_md)
+
+def _verify_has_tasks(plan_md=None):
+    return _tui_tool("verify_has_tasks", [("plan_md", plan_md)], lambda: _verify_has_tasks__impl(plan_md))
+
+def _save_plan__impl(plan_md=None, path=None):
+    def save_plan(plan_md: str, path: str) -> str:
+        import os
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(plan_md or "")
+        return path
+    return save_plan(plan_md, path)
+
+def _save_plan(plan_md=None, path=None):
+    return _tui_tool("save_plan", [("plan_md", plan_md), ("path", path)], lambda: _save_plan__impl(plan_md, path))
+
+def _run_sense(op_name, args):
+    return None
+
+def _run_act(op_name, args):
+    return None
+
+# ---- bundle on path: the skill's owned modules (core/, scripts/, …) are copied
+# into the run dir; make `from core.x import y` resolve for in-process tools and
+# the authored scripts they exec. Runs once at agent import. ----
+def _ensure_path():
+    import os, sys, shutil
+    here = ""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = ""
+    for d in (os.getcwd(), here):
+        if d and d not in sys.path:
+            sys.path.insert(0, d)
+    # Stage the skill's owned bundle resources (templates/, core/, scripts/, *.md,
+    # requirements.txt, …) from the agent dir into cwd, so the agent's relative file
+    # reads (open("templates/viewer.html")) and module imports (from core import x)
+    # resolve when it runs in a fresh bench workdir rather than inside the skill bundle.
+    cwd = os.getcwd()
+    # NEVER stage from a system temp root: a module placed directly in /tmp
+    # would "stage" every /tmp resident (browser locks, other sessions' dirs)
+    # into the invoking cwd. Bundles live in their own directories.
+    _tmp_roots = {"/tmp", "/private/tmp", "/var/tmp",
+                  os.path.realpath(os.environ.get("TMPDIR", "/nonexistent")).rstrip("/")}
+    if os.path.realpath(here or "/nonexistent").rstrip("/") in _tmp_roots:
+        return
+    if here and here != cwd and os.path.isdir(here):
+        _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
+                 "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
+        for _name in os.listdir(here):
+            if _name in _skip or _name.endswith((".jir", ".pyc", ".bak")):
+                continue
+            _src = os.path.join(here, _name); _dst = os.path.join(cwd, _name)
+            if os.path.exists(_dst):
+                continue
+            try:
+                if os.path.isdir(_src):
+                    shutil.copytree(_src, _dst)
+                else:
+                    shutil.copy2(_src, _dst)
+            except Exception:
+                pass
+
+_ensure_path()
+
+# ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
+def _progress(node):
+    import os, json, time
+    # ---- step budget: a walker cycling a graph (an unanswered HIL loop, a bad
+    # route) must abort LOUDLY, not spin to the harness timeout. Budget is
+    # env-tunable; the abort names the node and the visit count. ----
+    g = globals()
+    g["_NVISITS"] = g.get("_NVISITS", 0) + 1
+    budget = int(os.environ.get("AGIR_STEP_BUDGET", "256") or 256)
+    if g["_NVISITS"] > budget:
+        raise RuntimeError(
+            "step budget exhausted: %d node visits (budget %d), last node '%s' — "
+            "likely a loop with no converging guard; raise AGIR_STEP_BUDGET or fix the route"
+            % (g["_NVISITS"], budget, node))
+    _tui_node(node)
+    p = os.environ.get("AGIR_PROGRESS", "")
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            f.write(json.dumps({"node": node, "t": time.time()}))
+            f.write("\n")
+            f.flush()
+    except Exception:
+        pass
+
+# ---- artifact TUI: a compiled skill run IS a terminal experience. Pure ANSI,
+# zero dependencies (the ejected artifact stays self-contained). Auto-on when
+# stdout is a TTY; AGIR_TUI=0 forces off, AGIR_TUI=1 forces on (tests). Batch
+# and harness runs (captured stdout) are byte-identical to before. ----
+_TUI = {"last": None, "t0": None, "start": None}
+
+def _tui_on():
+    import os, sys
+    v = os.environ.get("AGIR_TUI", "")
+    if v == "0":
+        return False
+    if v == "1":
+        return True
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+_V = "\033[38;5;135m"   # violet
+_C = "\033[38;5;51m"    # cyan
+_D = "\033[2m"          # dim
+_R = "\033[0m"
+
+def _tui_banner(name, task):
+    import sys, time
+    if not _tui_on():
+        return
+    _TUI["start"] = time.time()
+    sys.stdout.write(_V + "\n  \u25c6 " + _R + str(name) + "\n")
+    sys.stdout.write(_D + "    " + str(task)[:120] + _R + "\n\n")
+    sys.stdout.flush()
+
+def _tui_close(now=None):
+    # Finish the in-place node line. A node whose detail already streamed was
+    # committed by _tui_sub, so there is nothing left to rewrite.
+    import sys, time
+    now = now or time.time()
+    if _TUI.get("open") and _TUI["last"] is not None:
+        dt = now - (_TUI["t0"] or now)
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
+                         + _D + "  %.1fs" % dt + _R + "\n")
+        sys.stdout.flush()
+    _TUI["open"] = False
+
+def _fmt_val(v, n=72):
+    # One line, collapsed whitespace, elided \u2014 a value preview, never a dump.
+    s = " ".join(str(v).split())
+    return s[:n] + ("\u2026" if len(s) > n else "")
+
+def _tui_sub(icon, color, text, tail=""):
+    # One indented detail line under the current node. The first one commits the
+    # node's in-place line (without its duration) so detail can stream beneath.
+    import sys
+    if not _tui_on():
+        return
+    if _TUI.get("open"):
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"]) + "\n")
+        _TUI["open"] = False
+    sys.stdout.write("      " + color + icon + _R + " " + text
+                     + ((_D + "  " + tail + _R) if tail else "") + "\n")
+    sys.stdout.flush()
+
+def _tui_tool(name, args, fn):
+    # Run a tool with the call AND its return visible: what went in, what came
+    # back, how long it took. Errors surface as a failed call, then re-raise.
+    import time
+    if not _tui_on():
+        return fn()
+    shown = ", ".join("%s=%s" % (k, _fmt_val(v, 24)) for k, v in args if v is not None)
+    _tui_sub("\u2699", _C, str(name) + "(" + shown + ")")
+    t = time.time()
+    try:
+        out = fn()
+    except Exception as ex:
+        _tui_sub("\u2717", "\033[31m", "%s: %s" % (type(ex).__name__, _fmt_val(ex, 56)),
+                 "%.1fs" % (time.time() - t))
+        raise
+    _tui_sub("\u21b3", _D, _fmt_val(out), "%.1fs" % (time.time() - t))
+    return out
+
+def _tui_llm_in(slot, reads=None):
+    # A `by llm` slot is about to run: which slot, and what it was handed.
+    shown = ""
+    if reads:
+        shown = " " + _D + ", ".join("%s=%s" % (k, _fmt_val(v, 20)) for k, v in reads) + _R
+    _tui_sub("\u273b", _V, "llm " + str(slot) + shown)
+    _TUI["llm_t"] = __import__("time").time()
+
+def _tui_llm_out(val):
+    import time
+    dt = time.time() - (_TUI.get("llm_t") or time.time())
+    _tui_sub("\u21b3", _D, _fmt_val(val), "%.1fs" % dt)
+
+def _tui_node(node):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    _tui_close(now)
+    sys.stdout.write("  " + _V + "\u25c6 " + _R + str(node) + _D + " \u2026" + _R)
+    sys.stdout.flush()
+    _TUI["last"] = node
+    _TUI["t0"] = now
+    _TUI["open"] = True
+
+def _tui_finish(report, artifacts=None):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    _tui_close(now)
+    total = now - (_TUI["start"] or now)
+    rep = str(report or "")
+    bad = rep.startswith("INCOMPLETE") or not rep
+    mark = "\033[31m\u2716" if bad else _C + "\u2714"
+    sys.stdout.write("\n  " + mark + _R + _D + "  %.1fs total" % total + _R + "\n")
+    sys.stdout.write("  " + ("\u2500" * 56) + "\n")
+    for line in (rep or "(no report)").splitlines()[:14]:
+        sys.stdout.write("  " + line[:110] + "\n")
+    if artifacts:
+        sys.stdout.write("  " + ("\u2500" * 56) + "\n  " + _D + "artifacts:" + _R + "\n")
+        for a in artifacts[:10]:
+            sys.stdout.write("    " + _C + str(a) + _R + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+# ---- human-in-the-loop channel: file-based Q&A (sigil chat/approvals attach it
+# via HIL_QA_FILE; the superpowers HIL session prototyped this). Batch-safe: with
+# no channel attached it returns an HONEST sentinel immediately — never blocks,
+# never fabricates a user. ----
+def _ask_user(question=None):
+    import os, time, json
+    qf = os.environ.get("HIL_QA_FILE", "")
+    if not qf:
+        # in a terminal, the human IS here: ask inline (the compiled skill's
+        # clarify loops and review gates become a real conversation)
+        if _tui_on():
+            import sys
+            sys.stdout.write("\r\033[2K\n  " + _C + "? " + _R + str(question) + "\n")
+            sys.stdout.flush()
+            try:
+                return input("  \u203a ")
+            except (EOFError, KeyboardInterrupt):
+                return "[user closed the prompt]"
+        return "[no human channel attached - proceeding without user input]"
+    _tui_sub("?", _C, _fmt_val(question, 88))
+    af = qf + ".answers"
+    n = 0
+    try:
+        n = sum(1 for _ in open(qf))
+    except Exception:
+        pass
+    try:
+        with open(qf, "a") as f:
+            f.write(json.dumps({"i": n, "q": str(question)}) + "\n")
+            f.flush()
+    except Exception:
+        return "[human channel write failed]"
+    deadline = time.time() + int(os.environ.get("HIL_TIMEOUT", "600") or 600)
+    while time.time() < deadline:
+        try:
+            for line in open(af):
+                rec = json.loads(line)
+                if rec.get("i") == n:
+                    ans = str(rec.get("a", ""))
+                    _tui_sub("↳", _D, _fmt_val(ans, 88), "human")
+                    return ans
+        except Exception:
+            pass
+        time.sleep(2)
+    _tui_sub("✗", "\033[31m", "no answer within HIL_TIMEOUT")
+    return "[human did not answer in time]"
+
+# ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
+def _strip_fences(code):
+    c = str(code).strip()
+    if c.startswith("```"):
+        lines = c.splitlines()[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        c = "\n".join(lines)
+    return c
+
+def _exec_script(script, args=None):
+    # The author writes a self-contained script that either writes an output file OR
+    # prints the answer to stdout. We run it and return the PATH of the deliverable.
+    with open("op.py", "w") as f:
+        f.write(_strip_fences(script))
+    # use THIS interpreter (sys.executable), not whatever `python3` is on PATH,
+    # so the script sees the same installed libs (openpyxl, reportlab, …).
+    r = _subprocess.run([sys.executable, "op.py"], capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise RuntimeError(f"script failed: {r.stderr[:800]}")
+    # 1) An explicit output file the script was asked to write.
+    try:
+        p = args.output_spec.path
+        if p and os.path.isfile(p):
+            return p
+    except Exception:
+        pass
+    # 2) Else the deliverable is whatever the script PRINTED — DON'T discard stdout
+    #    (that dropped every print-based answer). Persist it to a real file so the
+    #    verifier and the terminal report (_artifact_text) can read the actual answer.
+    out = (r.stdout or "").strip()
+    if out:
+        with open("output.txt", "w") as f:
+            f.write(out)
+        return "output.txt"
+    # 3) Nothing printed and no file — fall back to any spec path, else the script.
+    try:
+        return args.output_spec.path
+    except Exception:
+        return "op.py"
+
+# Side-channel for tool-produced data: a tools-ReAct slot returns a final TEXT
+# message (often not the script), but the real product was built inside a tool
+# call. Tools stash their product here; the author node retrieves it. Per-run
+# process, so it starts empty (no cross-run leakage).
+def _stash(key, value):
+    globals().setdefault("_OSP_PRODUCT", {})[key] = value
+    return value
+
+def _unstash(key):
+    v = globals().get("_OSP_PRODUCT", {}).get(key)
+    return v if v else []
+
+def _exec_var(script, varname):
+    # Execute an authored script and return the named product (e.g. `frames`) to
+    # thread into downstream OSP nodes. Accept either a bare `<varname>` list, a
+    # build_<varname>() factory, OR an object that accumulated it as an attribute
+    # (e.g. a GIFBuilder's `.frames`). Tolerate a mid-script error (the model may
+    # save to a bad path AFTER building) — keep whatever was produced first.
+    # Bundle modules resolve via cwd on sys.path.
+    ns = {}
+    code = _strip_fences(script)
+    try:
+        exec(code, ns)
+    except Exception:
+        pass  # partial ns retained: vars set before the failing line survive
+    val = ns.get(varname)
+    if not val and ("build_" + varname) in ns:
+        try:
+            val = ns["build_" + varname]()
+        except Exception:
+            val = None
+    if not val:
+        for v in ns.values():
+            attr = getattr(v, varname, None)
+            if isinstance(attr, list) and attr:
+                val = attr
+                break
+    return val if val else []
+
+def _exec_script_try(script, args=None):
+    # Run the authored script but DON'T raise — return {ok, error, path} so the
+    # node can hand a failure back to the model (repair_script) and retry, instead
+    # of crashing the whole agent. The error text is the model's repair signal.
+    try:
+        p = _exec_script(script, args)
+        return {"ok": True, "error": "", "path": p}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "path": ""}
+
+def _run_program(runner, target_file, content):
+    # CHANGE 3 author-run atom: an authoring tool whose command is `<runner> <bare-file>`
+    # (e.g. `node program.js`) receives the program CONTENT, not a path. Write the content
+    # to the target, run it, non-raising. Returns {ok, error, out} so an author-loop can
+    # re-author on failure (the discarded-output / node-content bugs from hand-tuning).
+    try:
+        with open(target_file, "w") as f:
+            f.write(_strip_fences(str(content)))
+    except Exception as e:
+        return {"ok": False, "error": "write failed: " + str(e)[:200], "out": ""}
+    try:
+        r = _subprocess.run([str(runner), str(target_file)], capture_output=True, text=True, timeout=180)
+        return {"ok": r.returncode == 0, "error": (r.stderr or "")[:800], "out": (r.stdout or "")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:400], "out": ""}
+
+def _run_cmd(prefix, args):
+    # EMBODIMENT LADDER rung 2: the tool's IR carried a `command` (a bundle-script/CLI
+    # invocation) but no inline body. Run it deterministically (owner=code) — prefix is the
+    # fixed executable+script, args are the tool's params threaded in order. Non-raising;
+    # returns combined stdout+stderr so a downstream verify can read it.
+    argv = list(prefix) + [str(a) for a in args if a is not None]
+    _tui_sub("$", _C, _fmt_val(" ".join(argv), 88))
+    try:
+        r = _subprocess.run(argv, capture_output=True, text=True, timeout=180)
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        _tui_sub("↳", _D, _fmt_val(out), "exit %s" % r.returncode)
+        return out
+    except Exception as e:
+        _tui_sub("✗", "\033[31m", _fmt_val(e, 56))
+        return "[cmd %s failed: %s]" % (" ".join(str(x) for x in prefix), str(e)[:200])
+
+def _live_tool(name, args):
+    # EMBODIMENT LADDER rung 0: a live-integration tool (reads the outside world) has no
+    # scriptable body. First try a REGISTERED MCP server (Sigil wires SIGIL_MCP with the
+    # user's servers); then a REAL web GET; otherwise an honest sentinel (never a hallucinated
+    # script, so a grounded verify can tell it wasn't real).
+    try:
+        import sigil_mcp
+        _m = sigil_mcp.dispatch(name, list(args) if args else [])
+        if _m is not None:
+            return _m["text"] if _m.get("ok") else "[mcp tool %s failed: %s]" % (name, _m.get("error", ""))
+    except Exception:
+        pass
+    a0 = str(args[0]) if args else ""
+    is_web = a0.startswith("http") or any(k in name for k in ("fetch", "_api", "_get", "web_", "search"))
+    if is_web:
+        url = a0 if a0.startswith("http") else ""
+        if not url:
+            return "[live tool %s: no URL argument provided]" % name
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=30) as r:
+                return r.read().decode("utf-8", "replace")[:100000]
+        except Exception as e:
+            return "[live fetch %s failed: %s]" % (name, str(e)[:200])
+    return "[live source '%s' unavailable in the batch harness]" % name
+
+def _scoped_author_run(context, out_path=None, tries=3):
+    # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
+    # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
+    # job, run it, verify the artifact appeared, and re-author on failure. Non-raising.
+    # The author is the module-level `_gen_scoped` by-llm slot (emitted whenever the
+    # compiler falls back at least one tool); scoped = it sees only this job's context.
+    import os
+    gen = globals().get("_gen_scoped")
+    if gen is None:
+        return out_path or ""
+    err = ""
+    for _ in range(max(1, int(tries))):
+        ctx = context if not err else (
+            context + "\n\nThe previous script failed with:\n" + err +
+            "\nReturn a corrected, COMPLETE, self-contained script.")
+        try:
+            script = _strip_fences(str(gen(ctx)))
+        except Exception as e:
+            err = "author error: " + str(e)[:300]
+            continue
+        res = _exec_script_try(script, None)
+        ok = res.get("ok") and ((not out_path) or (os.path.exists(out_path) and os.path.getsize(out_path) > 0))
+        if ok:
+            return out_path or res.get("path") or "op.py"
+        err = (res.get("error") or "the script produced no output file")[-500:]
+    return out_path if (out_path and os.path.exists(out_path)) else ""
+
+def _clean_path(p):
+    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
+    # verbatim writes the artifact to a garbage filename and the deliverable is lost.
+    # Strip trailing structural junk and cut at the first filename-illegal char after
+    # a recognizable extension, so 'out.txt},...' -> 'out.txt'.
+    import re
+    s = str(p or "").strip().strip('`"\' ')
+    s = re.sub(r'[}\]\)>,"\'`\s]+$', '', s)              # trailing }, ] ) , " ' ` ws
+    m = re.match(r'^(.*?\.[A-Za-z0-9]{1,6})(?:[^A-Za-z0-9._/\\-].*)?$', s)
+    if m:
+        s = m.group(1)                                   # keep up to the extension
+    return s
+
+def _emit(data, args):
+    spec = args.output_spec
+    if getattr(spec, "destination", "") == "stdout":
+        print(data)
+        return "stdout"
+    path = _clean_path(spec.path)
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    fmt = (ext or getattr(spec, "format", "") or "txt").lower()
+    if fmt == "json":
+        with open(path, "w") as f:
+            _json.dump(data, f, default=str)
+    elif fmt == "xlsx":
+        import pandas as pd
+        frames = [pd.DataFrame(t[1:], columns=t[0]) for t in data if t]
+        (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()).to_excel(path, index=False)
+    elif fmt == "csv":
+        import csv as _csv
+        tables = data if isinstance(data, list) else [data]
+        table = next((t for t in tables if t), [])
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            for row in table:
+                w.writerow([(c if c is not None else "") for c in row])
+    else:
+        with open(path, "w") as f:
+            f.write(data if isinstance(data, str) else str(data))
+    return path
+
+def _outname(task, fallback="output.txt"):
+    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
+    # filename that follows a save/output/write verb; else the first bare filename; else fallback.
+    import re
+    t = task or ""
+    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
+    if m:
+        return m.group(1)
+    return fallback
+
+def _write_artifact(content, path):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content if isinstance(content, str) else str(content))
+    return path
+
+def _artifact_text(v, limit=8000):
+    # Surface the DELIVERED CONTENT, not just a path. Delivery ops return the path
+    # of the file the authored script wrote/printed; the caller wants the ANSWER, not
+    # the filename. If v names a TEXT file, return its (stripped, truncated) content;
+    # a BINARY file (pdf/img/xlsx/…) is surfaced as "path (N bytes)" not raw bytes;
+    # anything that isn't a file is returned as-is. Never raises.
+    try:
+        s = v if isinstance(v, str) else str(v)
+        if s and os.path.isfile(s):
+            _bin = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".xlsx", ".docx",
+                    ".pptx", ".zip", ".mp4", ".mp3", ".bin", ".parquet")
+            if s.lower().endswith(_bin):
+                return "%s (%d bytes)" % (s, os.path.getsize(s))
+            with open(s, "r", errors="replace") as f:
+                data = f.read().strip()
+            return data[:limit] + ("…[truncated]" if len(data) > limit else "")
+        return s
+    except Exception:
+        return str(v)
+
+def _emit_surface(content, spec):
+    # An ACT·artifact surface (sig only, no IR body) must still WRITE the deliverable
+    # to an app-controlled path — a bodyless surface lowered to `pass` silently drops
+    # the output (the internal-comms/etc. 0% bug). `spec` may be an ArtifactSpec (has
+    # .path/.destination/.format), a carrier that holds one (OpArgs.output_spec), or a dict.
+    if spec is not None and hasattr(spec, "output_spec"):
+        spec = spec.output_spec
+    def _g(o, k, d=None):
+        if o is None: return d
+        if isinstance(o, dict): return o.get(k, d)
+        return getattr(o, k, d)
+    text = content if isinstance(content, str) else ("" if content is None else str(content))
+    if (_g(spec, "destination", "") or "") == "stdout":
+        print(text); return "stdout"
+    path = _clean_path(_g(spec, "path", "") or "")
+    if not path:
+        path = "output." + str(_g(spec, "format", "") or "txt").lstrip(".")
+    return _write_artifact(text, path)
+
+def _read_module(relpath):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (relpath, os.path.join(here, relpath)):
+        if os.path.exists(cand):
+            with open(cand) as f:
+                return f.read()
+    return ""
+
+::py::
+
+# ===== KNOWLEDGE (static globs) =====
+glob HEADER_FORMAT: str =
+"""Every plan MUST open with exactly this header:
+
+# [Feature Name] Implementation Plan
+
+**Goal:** [one sentence describing what this builds]
+
+**Architecture:** [2-3 sentences about the approach]
+
+**Tech Stack:** [key technologies/libraries]
+
+---
+""";
+glob TASK_FORMAT: str =
+"""Break the work into bite-sized tasks. Each task is one component; each
+step inside it is one 2-5 minute action. Every task MUST use this shape:
+
+### Task N: [Component Name]
+
+**Files:**
+- Create: `exact/path/to/file.py`
+- Modify: `exact/path/to/existing.py:123-145`
+- Test: `tests/exact/path/to/test.py`
+
+**Step 1: Write the failing test** — show the complete test code.
+**Step 2: Run it to verify it fails** — give the exact command and expected FAIL.
+**Step 3: Write the minimal implementation** — show the complete code.
+**Step 4: Run the test to verify it passes** — exact command, expected PASS.
+**Step 5: Commit** — the exact `git add` + `git commit` command.
+
+Rules: exact file paths always; complete code, never "add validation";
+exact commands with expected output. DRY. YAGNI. TDD. Frequent commits.
+Assume a skilled engineer who knows nothing about this codebase or domain.
+""";
+
+glob llm: Model = Model(model_name="gpt-4o-mini");
+
+# ===== COGNITIVE SLOTS (GEN-*) =====
+def draft_header(task: str) -> str by llm;
+sem draft_header =
+"""Write the plan's header for the requested feature: a real feature name, a one-sentence goal, a 2-3 sentence architecture, and the tech stack. Follow the header format exactly. Output only the header markdown.
+
+Resources resident on this node — USE these (owned helpers must be imported, not reinvented; rules/data are authoritative):
+
+[header_format]
+template:
+Every plan MUST open with exactly this header:
+
+# [Feature Name] Implementation Plan
+
+**Goal:** [one sentence describing what this builds]
+
+**Architecture:** [2-3 sentences about the approach]
+
+**Tech Stack:** [key technologies/libraries]
+
+---
+""";
+def write_tasks(task: str, header_md: str) -> str by llm;
+sem write_tasks =
+"""Write the bite-sized, test-driven task sections that implement the feature. Follow the task format exactly: exact file paths, complete code, exact commands with expected output, and a commit per task. Output only the task-section markdown, no header.
+
+Resources resident on this node — USE these (owned helpers must be imported, not reinvented; rules/data are authoritative):
+
+[task_format]
+template:
+Break the work into bite-sized tasks. Each task is one component; each
+step inside it is one 2-5 minute action. Every task MUST use this shape:
+
+### Task N: [Component Name]
+
+**Files:**
+- Create: `exact/path/to/file.py`
+- Modify: `exact/path/to/existing.py:123-145`
+- Test: `tests/exact/path/to/test.py`
+
+**Step 1: Write the failing test** — show the complete test code.
+**Step 2: Run it to verify it fails** — give the exact command and expected FAIL.
+**Step 3: Write the minimal implementation** — show the complete code.
+**Step 4: Run the test to verify it passes** — exact command, expected PASS.
+**Step 5: Commit** — the exact `git add` + `git commit` command.
+
+Rules: exact file paths always; complete code, never "add validation";
+exact commands with expected output. DRY. YAGNI. TDD. Frequent commits.
+Assume a skilled engineer who knows nothing about this codebase or domain.
+""";
+
+# ===== NODES =====
+node DraftHeader {}
+node WriteTasks {}
+node Assemble {}
+node Verify {}
+node Save {}
+node Done {}
+
+# ===== WALKER =====
+walker WritingPlans {
+    has task: str;
+    has header_md: str = "";
+    has tasks_md: str = "";
+    has plan_md: str = "";
+    has plan_ok: bool = False;
+    has plan_file: str = "";
+    has report: str = "";
+
+    can n_draft_header with DraftHeader entry {
+        _progress("draft_header");
+        _tui_llm_in("draft_header", [("task", self.task)]);
+        self.header_md = str(_strip_fences(draft_header(self.task)));
+        _tui_llm_out(self.header_md);
+        visit [-->][?:WriteTasks];
+    }
+
+    can n_write_tasks with WriteTasks entry {
+        _progress("write_tasks");
+        _tui_llm_in("write_tasks", [("task", self.task), ("header_md", self.header_md)]);
+        self.tasks_md = str(_strip_fences(write_tasks(self.task, self.header_md)));
+        _tui_llm_out(self.tasks_md);
+        visit [-->][?:Assemble];
+    }
+
+    can n_assemble with Assemble entry {
+        _progress("assemble");
+        self.plan_md = str(_assemble_plan(self.header_md, self.tasks_md));
+        visit [-->][?:Verify];
+    }
+
+    can n_verify with Verify entry {
+        _progress("verify");
+        self.plan_ok = bool(_verify_has_tasks(self.plan_md));
+        visit [-->][?:Save];
+    }
+
+    can n_save with Save entry {
+        _progress("save");
+        self.plan_file = str(_save_plan(self.plan_md, _outname(self.task, "plan_file.out")));
+        visit [-->][?:Done];
+    }
+
+    can n_done with Done entry {
+        _progress("done");
+        self.report = f"WritingPlans | header_md={str(self.header_md)[:300]} | tasks_md={str(self.tasks_md)[:300]} | plan_md={str(self.plan_md)[:300]} | plan_ok={str(self.plan_ok)[:300]} | plan_file={str(self.plan_file)[:300]}";
+        disengage;
+    }
+
+}
+
+# ===== ENTRYPOINT =====
+def run(task: str, model: Model, skill: str) -> str {
+    llm = model;
+
+    n_draft_header = DraftHeader();
+    n_write_tasks = WriteTasks();
+    n_assemble = Assemble();
+    n_verify = Verify();
+    n_save = Save();
+    n_done = Done();
+
+    root ++> n_draft_header;
+    n_draft_header ++> n_write_tasks;
+    n_write_tasks ++> n_assemble;
+    n_assemble ++> n_verify;
+    n_verify ++> n_save;
+    n_save ++> n_done;
+
+    agent = n_draft_header spawn WritingPlans(task=task);
+    if not agent.report {
+        # loud, not silent: an empty report means the walker stopped at a
+        # dead-end/escape-hatch node without reaching TERMINAL (see the
+        # AGIR_PROGRESS trace for the exact node).
+        return "INCOMPLETE: traversal ended without reaching TERMINAL — no deliverable was produced";
+    }
+    return agent.report;
+}
+
+with entry:__main__ {
+    import sys;
+    import os;
+    # accept both `./prog.jac task...` and `jac run prog.jac -- task...`
+    _ej_raw = sys.argv;
+    _ej_args = _ej_raw[_ej_raw.index("--") + 1:] if "--" in _ej_raw else _ej_raw[1:];
+    _ej_args = [str(a) for a in _ej_args if not str(a).startswith("-")];
+    _ej_task = str(" ".join(_ej_args));
+    if (not _ej_task) and _tui_on() {
+        # a terminal with no task: the artifact ASKS — it is a TUI app
+        print("");
+        _ej_task = str(input("  writing_plans › "));
+    }
+    if not _ej_task {
+        print("usage: writing_plans.jac \"<task>\"");
+    } else {
+        _ej_name = os.environ.get("SIGIL_MODEL", os.environ.get("SIGIL_SMALL", "gpt-4o-mini"));
+        _tui_banner("writing_plans", _ej_task);
+        _ej_before = set(os.listdir("."));
+        _ej_rep = run(_ej_task, Model(model_name=_ej_name), "");
+        _ej_after = set(os.listdir("."));
+        _ej_diff = _ej_after - _ej_before;   # jac: no binary ops inside a comprehension iterable
+        _ej_new = sorted([str(f) for f in _ej_diff if (str(f)[:1] != ".") and (str(f)[:1] != "_") and (str(f) != "op.py")]);
+        if _tui_on() { _tui_finish(_ej_rep, _ej_new); }
+        else { print(_ej_rep); }
+    }
+}
