@@ -391,6 +391,28 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     return f"        {expr};  # -> {tgt} ({tt}); carry keeps default";
 }
 
+# Assign a TOOL call's return across the node's write carries. LIFT-authored
+# bodies conventionally return {"carry_name": value, ...}; older bodies return
+# the bare value; a sig like `-> (report, status)` returns a tuple positionally
+# over `writes`. Assigning only writes[0] the stringified whole return — the old
+# behavior — left every carry after the first at its default forever, so a
+# verdict carry never fired its guard and the walker stalled mid-graph. The
+# runtime `_unwrap` resolves each carry from whichever shape came back.
+def _assign_writes(writes: any, expr: str, carries: any, types: any) -> list {
+    wl: list = [w for w in _list(writes) if w in list(carries)];
+    if not wl { return ["        " + expr + ";"]; }
+    if len(wl) == 1 {
+        return [_assign_carry(str(wl[0]), f"_unwrap({expr}, {_q(str(wl[0]))}, 0, True)", carries, types)];
+    }
+    out: list = ["        _rw = " + expr + ";"];
+    i = 0;
+    for w in wl {
+        out.append(_assign_carry(str(w), f"_unwrap(_rw, {_q(str(w))}, {i}, False)", carries, types));
+        i += 1;
+    }
+    return out;
+}
+
 # Bind a tool's params to carry expressions. Hybrid: by-NAME/field first (so a
 # param `width` binds to `self.spec.width`), else POSITIONAL to the node's `reads`
 # (so a param `gif_path` binds to reads[0]=`artifact` -> `self.artifact`). This
@@ -543,14 +565,10 @@ def _looks_shell(body: str) -> bool {
 def _delegating_call(body: str, params: list) -> str {
     import ast;
     try { tree = ast.parse(textwrap.dedent(body)); } except Exception { return ""; }
-    fname = "";
-    nfn = 0;
-    inner: list = [];
+    cands: list = [];
     for st in tree.body {
         if isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef) {
-            nfn += 1;
-            fname = str(st.name);
-            inner = [str(a.arg) for a in st.args.args];
+            cands.append([str(st.name), [str(a.arg) for a in st.args.args]]);
         } elif isinstance(st, ast.Return) {
             return "";                      # body already returns at top level
         } elif isinstance(st, ast.Import) or isinstance(st, ast.ImportFrom) or isinstance(st, ast.Expr) {
@@ -559,7 +577,18 @@ def _delegating_call(body: str, params: list) -> str {
             return "";                      # real top-level work: body is statements
         }
     }
-    if nfn != 1 { return ""; }
+    if not cands { return ""; }
+    # Several defs is the norm, not an error: LIFT authors an entry def (its
+    # convention names it `run`) plus helpers above it. Bailing here left the
+    # wrapper defining the function and returning None — every multi-def code
+    # tool silently produced nothing. Prefer `run`, else the LAST def (helpers
+    # are authored above their caller).
+    pick: any = cands[-1];
+    for c in cands {
+        if str(c[0]) == "run" { pick = c; }
+    }
+    fname = str(pick[0]);
+    inner: list = pick[1];
     avail: list = [_safe(str(p)) for p in params];
     args_out: list = [];
     for nm in inner {
@@ -643,8 +672,12 @@ def _cmd_prefix(cmd: any) -> list {
         if tk == "-m" and (i + 1) < len(toks) { pfx.append(str(toks[i + 1])); return pfx; }
         i += 1;
     }
-    # no script/module -> a bare CLI (pandoc, soffice, qpdf): just the executable.
-    return [str(toks[0])] if toks else [];
+    # No script/module -> a plain CLI invocation. Keep EVERY token, not just the
+    # executable: a fixed command like `git log --oneline -10` on a param-less
+    # tool has no other way to carry its args — truncating to `git` ran the bare
+    # binary (usage text, exit 1) and the whole downstream graph chewed on it.
+    # Params still append after the fixed tokens at run time (see _run_cmd).
+    return [str(tk2) for tk2 in toks];
 }
 
 # Rung-0: does this tool read/write the outside world at runtime (unscriptable)?
@@ -1059,7 +1092,7 @@ def _emit_slots(ir: any) -> str {
 
 # Use the guard's OWN field name (the IR guard names the routing field, e.g.
 # `mode in {...}`) so we route on the carry that actually exists.
-def _guard_to_cond(guard: any, member_to_enum: any) -> str {
+def _guard_to_cond(guard: any, member_to_enum: any, carries: any = None, types: any = None) -> str {
     g = str(guard).strip();
     m: any = re.match(r"(\w+)\s+in\s+\{(.+)\}", g);
     if m {
@@ -1073,21 +1106,46 @@ def _guard_to_cond(guard: any, member_to_enum: any) -> str {
         joined = _j(", ", terms);
         return f"self.{fld} in [{joined}]";
     }
-    m2: any = re.match(r"(\w+)\s*==\s*(\w+)", g);
+    m2: any = re.match(r"(\w+)\s*==\s*['\"]?(\w+)['\"]?\s*$", g);
     if m2 {
         fld2 = _safe(m2.group(1));
         mem2 = str(m2.group(2));
+        # A true/false RHS is a VERDICT, not an enum member. Quoting it compared a
+        # bool carry to the string "true" — both branches dead, the walker stalled
+        # at the route forever. Translate by the carry's declared type instead.
+        bt = _bool_guard(fld2, mem2, "==", carries, types);
+        if bt { return bt; }
         en2 = member_to_enum.get(mem2, "");
         return (f"self.{fld2} == {en2}.{mem2}") if en2 else (f"self.{fld2} == {_q(mem2)}");
     }
     return "True";
 }
 
+# Shared true/false-RHS translation for both guard lowerers. Returns "" when the
+# guard isn't a boolean verdict; carries/types decide the shape: a bool carry
+# lowers to its truthy form, a str/any carry to a case-normalized compare (the
+# model may have stringified the verdict either way).
+def _bool_guard(fld: str, rhs: str, op: str, carries: any, types: any) -> str {
+    rl = str(rhs).strip().lower();
+    if rl not in ["true", "false"] { return ""; }
+    want = (rl == "true");
+    if op == "!=" { want = not want; }
+    cd: any = carries or {};
+    ct = "";
+    if fld in list(cd) { ct = str(_jac_type(cd[fld].get("type"), (types or {}))[0]); }
+    if ct == "bool" { return (f"self.{fld}") if want else (f"not self.{fld}"); }
+    if ct in ["str", "any"] {
+        cmp = "==" if want else "!=";
+        return f"str(self.{fld}).lower() {cmp} \"true\"";
+    }
+    return (f"self.{fld} == True") if want else (f"self.{fld} == False");
+}
+
 # General guard -> Jac boolean expression. Handles enum-in, comparisons over carry
 # paths (`spec.optimize_for_size == true`, `recalc.status == "errors_found"`,
 # `build_attempts < 2`), and bare/negated carries. Falls back to True (advance) so
 # an unparseable guard never breaks compilation.
-def _guard_expr(g: any, m2e: any) -> str {
+def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str {
     s = str(g).strip();
     mi: any = re.match(r"(\w+)\s+in\s+\{(.+)\}$", s);
     if mi {
@@ -1111,6 +1169,12 @@ def _guard_expr(g: any, m2e: any) -> str {
         if not (rt.startswith("\"") or rt.startswith("'")) {
             rt = str(re.split(r"[\s(]", rt, 1)[0]);
         }
+        # true/false RHS — bare OR quoted — is a verdict: translate by carry type
+        # (see _bool_guard) so a bool carry never gets compared to a string.
+        if (op in ["==", "!="]) and ("." not in str(mc.group(2))) {
+            bg = _bool_guard(_safe(str(mc.group(2))), rt.strip("\"'"), op, carries, types);
+            if bg { return neg + bg; }
+        }
         rl = rt.lower();
         rv = "";
         if rl == "true" { rv = "True"; }
@@ -1132,7 +1196,7 @@ def _guard_expr(g: any, m2e: any) -> str {
 # Emit OSP control flow for a node from its out-edges + guards. Guarded edges ->
 # if/elif conditional visits; a total else advances to a forward default; unguarded
 # self-loops are never followed unconditionally (would be an infinite loop).
-def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any) -> list {
+def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = None, types: any = None) -> list {
     lines: list = [];
     guarded: list = [];
     fwd_default = "";
@@ -1156,7 +1220,7 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any) -> list {
         for gp in guarded {
             gpp: any = gp;
             kw = "if" if i == 0 else "elif";
-            lines.append(f"        {kw} {_guard_expr(gpp[0], m2e)} {{ visit [-->][?:{gpp[1]}]; }}");
+            lines.append(f"        {kw} {_guard_expr(gpp[0], m2e, carries, types)} {{ visit [-->][?:{gpp[1]}]; }}");
             i += 1;
         }
         if deflt { lines.append(f"        else {{ visit [-->][?:{deflt}]; }}"); }
@@ -1346,7 +1410,7 @@ def _emit_walker(ir: any) -> list {
                 tgt2 = tinfo[0];
                 g = e.get("guard");
                 if g and (str(g).strip().lower() not in GUARD_SENTINELS) {
-                    branches.append([_guard_to_cond(g, member_to_enum), tgt2]);
+                    branches.append([_guard_to_cond(g, member_to_enum, carries, types), tgt2]);
                 } else { default_target = str(tgt2); }
             }
             for (i, br) in enumerate(branches) {
@@ -1390,7 +1454,7 @@ def _emit_walker(ir: any) -> list {
             st3 = _node_tool(ir, nid, n);
             if st3 {
                 expr3 = _toolfn_prefix(str(st3[0])) + "(" + _bind_args(st3[1], reads, carries, types) + ")";
-                body.append(_assign_carry(tgt3, expr3, carries, types));
+                for al3 in _assign_writes(writes, expr3, carries, types) { body.append(al3); }
             } elif can_dispatch and tgt3 and (tgt3 in ckeys) {
                 body.append(f"        self.{_safe(tgt3)} = _run_sense(self.{route_field}.name, self.args);");
             } else {
@@ -1428,8 +1492,10 @@ def _emit_walker(ir: any) -> list {
             # a tool whose `serves` lists it) -> call it with carry-threaded args
             # (frames, builder, spec.width, …), realizing the IR's node separation.
             stA = _node_tool(ir, nid, n);
+            tool_exprA = False;
             if (not expr) and stA {
                 expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types, str(tgt5)) + ")";
+                tool_exprA = True;
             }
             if (not expr) and (owner == "model") {
                 # ACT owner=model with no tool = a cognitive emit (e.g. report,
@@ -1453,6 +1519,7 @@ def _emit_walker(ir: any) -> list {
                 }
             }
             if exprlines { for el in exprlines { body.append(el); } }
+            elif expr and tool_exprA { for alA in _assign_writes(writes, expr, carries, types) { body.append(alA); } }
             elif expr { body.append(_assign_carry(tgt5, expr, carries, types)); }
             else { body.append(f"        # ACT {nid} (no recognized tool dispatch)"); }
         } elif ntype == "CALL" {
@@ -1477,7 +1544,7 @@ def _emit_walker(ir: any) -> list {
             stL = _node_tool(ir, nid, n);
             if stL {
                 expr = _toolfn_prefix(str(stL[0])) + "(" + _bind_args(stL[1], reads, carries, types) + ")";
-                body.append(_assign_carry(writes[0] if writes else None, expr, carries, types));
+                for alL in _assign_writes(writes, expr, carries, types) { body.append(alL); }
             } elif owner == "model" {
                 slot = _slot_name(nid, carries);
                 creadsL = [r for r in reads if r in ckeys][:6];
@@ -1526,7 +1593,7 @@ def _emit_walker(ir: any) -> list {
             stC = _node_tool(ir, nid, n);
             if stC {
                 expr = _toolfn_prefix(str(stC[0])) + "(" + _bind_args(stC[1], reads, carries, types) + ")";
-                body.append(_assign_carry(writes[0] if writes else None, expr, carries, types));
+                for alC in _assign_writes(writes, expr, carries, types) { body.append(alC); }
             } elif n.get("body") {
                 tgtC = writes[0] if writes else None;
                 inb = textwrap.dedent(str(n.get("body"))).strip();
@@ -1549,7 +1616,7 @@ def _emit_walker(ir: any) -> list {
         # guard-aware OSP flow: guarded edges -> conditional visits, total else, and
         # no unconditional self-loop.
         if not has_flow {
-            for fl in _emit_flow(out_edges, nid, nidx, member_to_enum) { body.append(fl); }
+            for fl in _emit_flow(out_edges, nid, nidx, member_to_enum, carries, types) { body.append(fl); }
         }
         for b2 in body { out.append(b2); }
         out.append("    }");
