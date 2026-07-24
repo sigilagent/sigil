@@ -459,6 +459,26 @@ def _emit(data, args):
             f.write(data if isinstance(data, str) else str(data))
     return path
 
+def _unwrap(ret, key, idx=0, single=True):
+    # Resolve ONE write-carry from a tool's return. LIFT-authored bodies return
+    # {"carry_name": value, ...}; legacy bodies return the bare value; a sig like
+    # `-> (report, status)` returns a tuple bound positionally over the node's
+    # writes. Total by design: a miss yields "" (never None, never a raise) so the
+    # walker's typed coercions — str()/list()/bool() — stay safe on any shape.
+    if isinstance(ret, dict):
+        if key in ret:
+            v = ret[key]
+            return "" if v is None else v
+        if single and len(ret) == 1:
+            v = next(iter(ret.values()))
+            return "" if v is None else v
+        return ret if single else ""
+    if isinstance(ret, (list, tuple)) and not single:
+        return ret[idx] if idx < len(ret) else ""
+    if single or idx == 0:
+        return "" if ret is None else ret
+    return ""
+
 def _outname(task, fallback="output.txt"):
     # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the

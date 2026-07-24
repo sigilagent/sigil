@@ -339,7 +339,7 @@ test "a by-llm slot is bracketed so its inputs and output are visible" {
 
 test "a bool verdict is assigned to its carry, not discarded" {
     src = transpile_ir(GATE_IR, "checker");
-    assert "self.is_short = bool(_check_len(self.sentence));" in src;
+    assert "self.is_short = bool(_unwrap(_check_len(self.sentence), \"is_short\", 0, True));" in src;
     assert "carry keeps default" not in src;
 }
 
@@ -351,4 +351,188 @@ test "the delegating call forwards params by name and Nones the rest" {
     src = transpile_ir(ir, "shout_extra");
     # `text` is a wrapper param, `style` is not — it must not be invented.
     assert "    return upcase(text, None)" in src;
+}
+
+test "a body with helper defs delegates to `run`, not to nothing" {
+    # LIFT's multi-def convention: helpers above, entry def named `run`. Bailing
+    # on nfn != 1 left the wrapper defining functions and returning None.
+    ir = DEF_BODY_IR.replace(
+        "      def upcase(text):\n          return (text or \"\").upper()",
+        "      def clean(s):\n          return (s or \"\").strip()\n\n      def run(text):\n          return clean(text).upper()"
+    );
+    src = transpile_ir(ir, "shout_helpers");
+    assert "    return run(text)" in src;             # the entry def is CALLED
+    assert "\n    return clean(" not in src;          # …not the helper (line-anchored:
+                                                      # the body's own `return clean(...)`
+                                                      # sits deeper inside `def run`)
+}
+
+# A verification tool that reports two carries at once — `-> (report, ok)`. The
+# old lowering stuffed the stringified whole return into writes[0] and left every
+# later write at its default: the verdict never landed, so no guard downstream
+# could ever see a failed check.
+glob MULTI_WRITE_IR: str = """---
+name: checker2
+description: Check a sentence and report.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  verify_all:
+    sig: "(sentence: str) -> (verdict_report, ok)"
+    surface: SENSE
+    doc: "Report on the sentence; ok iff it passes."
+    body: |
+      def run(sentence):
+          ok = len((sentence or "").split()) <= 25
+          return {"verdict_report": "words ok" if ok else "too long", "ok": ok}
+walker:
+  name: Check2Agent
+  carries:
+    task:
+      type: str
+      role: input
+    sentence:
+      type: str
+      role: input
+    verdict_report:
+      type: str
+      produced_by: check_it
+    ok:
+      type: bool
+      produced_by: check_it
+nodes:
+  - id: check_it
+    type: SENSE
+    owner: code
+    op: verify_all
+    tool: verify_all
+    reads: [sentence]
+    writes: [verdict_report, ok]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: check_it, to: done, modality: mandatory}
+""";
+
+test "a multi-write tool is destructured into EVERY carry it writes" {
+    src = transpile_ir(MULTI_WRITE_IR, "checker2");
+    assert "_rw = _verify_all(self.sentence);" in src;
+    assert "self.verdict_report = str(_unwrap(_rw, \"verdict_report\", 0, False));" in src;
+    assert "self.ok = bool(_unwrap(_rw, \"ok\", 1, False));" in src;
+}
+
+# A code ROUTE branching on a bool verdict — guards authored `ok == true` /
+# `ok == false`. Quoting the RHS compared a bool carry to the string "true":
+# both branches dead, the walker stalled at the route with no deliverable.
+glob BOOL_ROUTE_IR: str = """---
+name: gatekeeper
+description: Pass or fix based on a check.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  check_len:
+    sig: "(sentence: str) -> bool"
+    surface: SENSE
+    doc: "True if the sentence is 25 words or fewer."
+    body: |
+      def run(sentence):
+          return len((sentence or "").split()) <= 25
+walker:
+  name: GateAgent
+  carries:
+    task:
+      type: str
+      role: input
+    sentence:
+      type: str
+      role: input
+    ok:
+      type: bool
+      produced_by: check_it
+    fixed:
+      type: str
+      produced_by: fix_it
+nodes:
+  - id: check_it
+    type: SENSE
+    owner: code
+    op: check_len
+    tool: check_len
+    reads: [sentence]
+    writes: [ok]
+  - id: route_it
+    type: ROUTE
+    owner: code
+    reads: [ok]
+  - id: fix_it
+    type: GEN-EDIT
+    owner: model
+    reads: [sentence]
+    writes: [fixed]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: check_it, to: route_it, modality: mandatory}
+  - {from: route_it, to: done, modality: discretionary, guard: "ok == true"}
+  - {from: route_it, to: fix_it, modality: discretionary, guard: "ok == false"}
+  - {from: fix_it, to: done, modality: mandatory}
+""";
+
+test "a bool-carry guard lowers to its truthy form, never a string compare" {
+    src = transpile_ir(BOOL_ROUTE_IR, "gatekeeper");
+    assert "if self.ok { visit" in src;
+    assert "elif not self.ok { visit" in src;
+    assert '== "true"' not in src;                    # the dead-stall shape
+}
+
+# A param-less tool whose IR carries a FIXED command — the whole invocation is in
+# the command string, there are no params to thread. Truncating to the executable
+# ran `git` bare (usage text, exit 1) and the graph chewed on the error output.
+glob FIXED_CMD_IR: str = """---
+name: logger
+description: Read recent git history.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  git_log_10:
+    sig: "() -> text"
+    surface: SENSE
+    doc: "The last ten commits, one line each."
+    command: git log --oneline -10
+walker:
+  name: LogAgent
+  carries:
+    task:
+      type: str
+      role: input
+    log_text:
+      type: str
+      produced_by: read_log
+nodes:
+  - id: read_log
+    type: SENSE
+    owner: code
+    op: git_log_10
+    tool: git_log_10
+    reads: []
+    writes: [log_text]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: read_log, to: done, modality: mandatory}
+""";
+
+test "a fixed command keeps every token, not just the executable" {
+    src = transpile_ir(FIXED_CMD_IR, "logger");
+    assert '_run_cmd(["git", "log", "--oneline", "-10"], [])' in src;
+    assert '_run_cmd(["git"], [])' not in src;        # the bare-binary bug
 }
