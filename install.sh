@@ -15,14 +15,20 @@
 # Env knobs:
 #   SIGIL_HOME     where the source lives      (default: ~/.sigil/app)
 #   SIGIL_BIN_DIR  where the launcher goes     (default: ~/.local/bin)
-#   SIGIL_REF      branch / tag / commit       (default: main)
+#   SIGIL_REF      branch / tag / commit       (default: main in the repo copy;
+#                  a release asset is rewritten to pin its own tag — see below)
 
 set -euo pipefail
 
 REPO="sigilagent/sigil"
 SIGIL_HOME="${SIGIL_HOME:-$HOME/.sigil/app}"
 BIN_DIR="${SIGIL_BIN_DIR:-$HOME/.local/bin}"
-REF="${SIGIL_REF:-main}"
+# Self-pinning releases: the release workflow rewrites DEFAULT_REF to the tag in
+# the copy it attaches to a GitHub Release, so `releases/latest/download/install.sh`
+# installs exactly the released commit — not whatever main happens to be. The repo
+# copy stays on main. SIGIL_REF always overrides either.
+DEFAULT_REF="main"
+REF="${SIGIL_REF:-$DEFAULT_REF}"
 
 # ---- pretty output -----------------------------------------------------------
 if [ -t 1 ]; then
