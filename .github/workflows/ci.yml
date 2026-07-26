@@ -56,11 +56,21 @@ jobs:
       - name: Show jac version
         run: jac --version
 
-      # byLLM is bundled in the native binary, but a couple of Python deps are not:
-      # PyYAML (the AG-IR compiler parses YAML) and httpx (byLLM's streaming path
-      # imports it — chat mode streams the reply token-by-token). Provision both.
-      - name: Provision runtime dependencies (PyYAML, httpx)
-        run: jac install pyyaml httpx
+      # byLLM is bundled in the native binary, but some Python deps are not (PyYAML
+      # for the AG-IR compiler, rich + prompt_toolkit for the chat REPL). Bare
+      # `jac install` provisions exactly what jac.toml declares — do NOT re-list
+      # packages here: an explicit list silently drifts from jac.toml, which is how
+      # `sigil chat` once shipped dead with "No module named 'rich'" (#87).
+      - name: Provision runtime dependencies (from jac.toml)
+        run: jac install
+
+      # Guards the drift above: the test suite never imports the chat REPL, so a
+      # missing REPL dependency was invisible until a user ran `sigil chat`. This
+      # boots the real CLI entry point and quits at the prompt — it exits non-zero
+      # if any of sigil_chat.jac's imports are unprovisioned. No API key needed:
+      # /exit returns before a model is ever called.
+      - name: Smoke-test the chat REPL
+        run: printf '/exit\n' | jac run main.jac -s "$RUNNER_TEMP/ci.session" -- chat
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
       # test (present and future) automatically; report_fix_tests.jac is a standalone
