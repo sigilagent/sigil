@@ -433,6 +433,18 @@
 ./agent.jac <span class="s">"extract the tables from report.pdf"</span></code></pre>
           </div>
         </div>
+        <div class="hero-install" style="margin-bottom:18px">
+          <span class="hero-install-label">Or run the worked example &mdash; fully local, no API key</span>
+          <div class="code" data-code>
+            <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">examples/csv-clean</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="k">git</span> clone https://github.com/sigilagent/sigil
+<span class="k">cd</span> sigil/examples/csv-clean
+<span class="k">ollama</span> pull gemma4:e4b
+
+<span class="k">SIGIL_MODEL</span>=ollama_chat/gemma4:e4b ./csv-clean.jac messy.csv</code></pre>
+          </div>
+          <p class="hero-tag" style="margin-top:10px">Messy headers in &mdash; <span class="s">Cust. E-mail (primary)</span>, <span class="s">Total Spend ($)</span> &mdash; verified <code>cleaned.csv</code> out. 16 nodes, only <strong>two</strong> call the model; six checks fan into a gate. Compiled artifacts ship with the repo, so the run needs nothing but a local model. Allow 1&ndash;8 min on a laptop.</p>
+        </div>
         <div class="hero-install">
           <span class="hero-install-label">Install · macOS &amp; Linux</span>
           <div class="oneliner" data-code>

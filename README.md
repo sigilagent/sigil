@@ -26,8 +26,37 @@ check in the skill becomes structure the model cannot skip.
 ```bash
 sigil compile ./SKILL.md -e agent.jac    # SKILL.md  →  one runnable agent
 ./agent.jac "extract the tables from report.pdf"
-SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
+SIGIL_MODEL=ollama_chat/gemma4:e4b ./agent.jac "..."   # any model can run it
 ```
+
+**Try it in two minutes — no API key for the run.** The
+[`csv-clean`](examples/csv-clean) example ships the compiled artifacts, so you
+only need a local model:
+
+```bash
+git clone https://github.com/sigilagent/sigil && cd sigil/examples/csv-clean
+ollama pull gemma4:e4b
+
+SIGIL_MODEL=ollama_chat/gemma4:e4b ./csv-clean.jac messy.csv
+cat cleaned.csv
+```
+
+`messy.csv` has headers a literal transform mangles — `Cust. E-mail (primary)`,
+`Total Spend ($)`, `First  Name` — plus blank rows. The compiled agent renames
+them by meaning, drops the blanks, writes the file and **verifies its own
+output** before reporting done:
+
+```
+first_name,last_name,customer_email,signup_date,total_spend
+```
+
+Sixteen nodes, of which exactly **two** call the model: one typed judgment slot
+for the renames, and a repair slot. The renaming, row-dropping and file write are
+code — the model never touches your data rows. Six checks fan out into a gate
+that will not let a wrong answer through.
+
+Expect **1–8 minutes** on a laptop: it is a 9.6 GB model running locally, and the
+gate re-runs the model when a check fails.
 
 <table align="center"><tr>
 <td width="50%"><img src="docs/assets/term-compile.svg" alt="sigil compile — the live build view: spec loop, workflow spine, annotator flows, assemble, gates, each with counts and timing"></td>
@@ -259,6 +288,15 @@ sigil solve "pull the tables out of invoice.pdf"   # HIT — runs the compiled s
 sigil library                                # the compiled skills, with run stats
 sigil soul                                   # identity, config, skills & memory
 sigil teach "always give me CSV with a header row"
+```
+
+Run the worked example end to end, compiler included (`compile` needs a frontier
+key; the run does not):
+
+```bash
+cd examples/csv-clean
+sigil compile SKILL.md -e csv-clean.jac                      # SKILL.md → AG-IR → runnable
+SIGIL_MODEL=ollama_chat/gemma4:e4b ./csv-clean.jac messy.csv # runs fully local
 ```
 
 Cognition is configured on the graph (or seeded from env on first boot):
