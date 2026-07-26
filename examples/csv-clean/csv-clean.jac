@@ -440,6 +440,28 @@ def _strip_fences(code):
         c = "\n".join(lines)
     return c
 
+def _clean_strlist(v):
+    # byLLM's structured output over a small local model leaks JSON structure into
+    # list elements: a 5-item answer comes back with a trailing "" or a fragment
+    # like '"},{"'. Downstream that is indistinguishable from a real 6th item, so a
+    # column-count check fails and the repair slot "fixes" the blank by NAMING it
+    # (extra_column, empty_field) instead of dropping it — the gate rejects that too
+    # and the route loops until the step budget blows.
+    #
+    # Drop elements that carry no content. Only whitespace and JSON punctuation
+    # qualify, so a legitimately meaningful value is never discarded.
+    if not isinstance(v, (list, tuple)):
+        return v
+    out = []
+    for x in v:
+        s = str(x if x is not None else "").strip()
+        if not s:
+            continue
+        if not s.strip('{}[](),:;"\'`\\ \t\r\n'):
+            continue                       # pure structural punctuation, no content
+        out.append(x)
+    return out
+
 def _exec_script(script, args=None):
     # The author writes a self-contained script that either writes an output file OR
     # prints the answer to stdout. We run it and return the PATH of the deliverable.
@@ -797,7 +819,7 @@ body:
 - The cleaned data MUST be written to `cleaned.csv` — do not just print it.""";
 def spawn_verifications_worker(task: str) -> str by llm;
 sem spawn_verifications_worker = "Fan out independent verification checks. You are ONE parallel worker handling a single sub-task from a larger fan-out. Do just this sub-task fully and return a short result of what you did and where any output landed.";
-def fix_output(proposed_headers: list[str], check_parse_ok: bool, check_regex_ok: bool, check_unique_ok: bool, check_colcount_ok: bool, check_rowcount_ok: bool) -> list[str] by llm;
+def fix_output(input_headers: list[str], proposed_headers: list[str], check_parse_ok: bool, check_regex_ok: bool, check_unique_ok: bool, check_colcount_ok: bool, check_rowcount_ok: bool, check_order_ok: bool) -> list[str] by llm;
 sem fix_output =
 """If verification fails, revise header names and try again. NEVER violate: No leading, trailing or doubled underscores.; Do not drop, add, merge or reorder columns.; do not just print it.
 
@@ -888,7 +910,7 @@ walker CleanCsvAgent {
     can n_decide_column_meanings with DecideColumnMeanings entry {
         _progress("decide_column_meanings");
         _tui_llm_in("decide_column_meanings", [("input_headers", self.input_headers)]);
-        self.proposed_headers = decide_column_meanings(self.input_headers);
+        self.proposed_headers = _clean_strlist(decide_column_meanings(self.input_headers));
         _tui_llm_out(self.proposed_headers);
         visit [-->][?:ApplyHeaderRename];
     }
@@ -987,8 +1009,8 @@ walker CleanCsvAgent {
 
     can n_fix_output with FixOutput entry {
         _progress("fix_output");
-        _tui_llm_in("fix_output", [("proposed_headers", self.proposed_headers), ("check_parse_ok", self.check_parse_ok), ("check_regex_ok", self.check_regex_ok), ("check_unique_ok", self.check_unique_ok), ("check_colcount_ok", self.check_colcount_ok), ("check_rowcount_ok", self.check_rowcount_ok)]);
-        self.proposed_headers = fix_output(self.proposed_headers, self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok);
+        _tui_llm_in("fix_output", [("input_headers", self.input_headers), ("proposed_headers", self.proposed_headers), ("check_parse_ok", self.check_parse_ok), ("check_regex_ok", self.check_regex_ok), ("check_unique_ok", self.check_unique_ok), ("check_colcount_ok", self.check_colcount_ok), ("check_rowcount_ok", self.check_rowcount_ok), ("check_order_ok", self.check_order_ok)]);
+        self.proposed_headers = _clean_strlist(fix_output(self.input_headers, self.proposed_headers, self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok, self.check_order_ok));
         _tui_llm_out(self.proposed_headers);
         visit [-->][?:ApplyHeaderRename];
     }

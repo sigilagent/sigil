@@ -252,6 +252,28 @@ def _strip_fences(code):
         c = "\n".join(lines)
     return c
 
+def _clean_strlist(v):
+    # byLLM's structured output over a small local model leaks JSON structure into
+    # list elements: a 5-item answer comes back with a trailing "" or a fragment
+    # like '"},{"'. Downstream that is indistinguishable from a real 6th item, so a
+    # column-count check fails and the repair slot "fixes" the blank by NAMING it
+    # (extra_column, empty_field) instead of dropping it — the gate rejects that too
+    # and the route loops until the step budget blows.
+    #
+    # Drop elements that carry no content. Only whitespace and JSON punctuation
+    # qualify, so a legitimately meaningful value is never discarded.
+    if not isinstance(v, (list, tuple)):
+        return v
+    out = []
+    for x in v:
+        s = str(x if x is not None else "").strip()
+        if not s:
+            continue
+        if not s.strip('{}[](),:;"\'`\\ \t\r\n'):
+            continue                       # pure structural punctuation, no content
+        out.append(x)
+    return out
+
 def _exec_script(script, args=None):
     # The author writes a self-contained script that either writes an output file OR
     # prints the answer to stdout. We run it and return the PATH of the deliverable.
