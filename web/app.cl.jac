@@ -65,8 +65,8 @@ def:pub App() -> JsxElement {
             </div>
             <div style={{"padding": "12px 18px", "borderTop": "1px solid #1e293b", "display": "flex", "gap": "8px"}}>
                 <input value={task} placeholder="give the agent a task…"
-                       onChange={lambda e: ChangeEvent { task = e.target.value; }}
-                       onKeyDown={lambda e: KeyboardEvent { if e.key == "Enter" { launch(); } }}
+                       onChange={lambda (e: ChangeEvent) { task = e.target.value; }}
+                       onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { launch(); } }}
                        style={{"flex": "1", "padding": "9px 12px", "borderRadius": "8px",
                                "border": "1px solid #334155", "background": "#0f172a", "color": "#e2e8f0"}} />
                 <button onClick={lambda -> None { launch(); }}
@@ -85,18 +85,21 @@ def:pub App() -> JsxElement {
                 </div>
             </div>
             <div style={{"flex": "1", "overflow": "auto", "padding": "10px 14px", "fontSize": "12px"}}>
-                {[<div style={{"borderBottom": "1px solid #1e293b", "padding": "8px 0"}}>
-                    <div style={{"display": "flex", "justifyContent": "space-between", "color": "#94a3b8"}}>
-                        <span>{str(c.model) + "  ·  " + str(c.signature)}</span>
-                        <span>{"in " + str(c.prompt_tokens) + " out " + str(c.completion_tokens)
-                               + (" r" + str(c.reasoning_tokens) if c.reasoning_tokens else "")}</span>
+                {for (i, c) in enumerate(calls) {
+                    <div key={str(i)} style={{"borderBottom": "1px solid #1e293b", "padding": "8px 0"}}>
+                        <div style={{"display": "flex", "justifyContent": "space-between", "color": "#94a3b8"}}>
+                            <span>{str(c.model) + "  ·  " + str(c.signature)}</span>
+                            <span>{"in " + str(c.prompt_tokens) + " out " + str(c.completion_tokens)
+                                   + (" r" + str(c.reasoning_tokens) if c.reasoning_tokens else "")}</span>
+                        </div>
+                        <div style={{"color": "#cbd5e1", "whiteSpace": "pre-wrap"}}>{str(c.content)}</div>
+                        {if c.reasoning {
+                            <div style={{"color": "#64748b", "fontStyle": "italic"}}>
+                                {"reasoning: " + str(c.reasoning)}
+                            </div>
+                        }}
                     </div>
-                    <div style={{"color": "#cbd5e1", "whiteSpace": "pre-wrap"}}>{str(c.content)}</div>
-                    {(str(c.reasoning) if c.reasoning else "") and
-                        <div style={{"color": "#64748b", "fontStyle": "italic"}}>
-                            {"reasoning: " + str(c.reasoning)}
-                        </div>}
-                </div> for c in calls]}
+                }}
             </div>
         </div>
     </div>;
