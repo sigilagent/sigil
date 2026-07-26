@@ -121,6 +121,72 @@ test "an ACT tool's destination param resolves to a real path, never None" {
     assert "_write_note(self.note, None)" not in src;
 }
 
+# `task` is not always the only input the IR declares. A carry marked
+# `role: input` that no node produces can ONLY come from the invocation — bind
+# just `task` and that field keeps its "" default, so the first node reading it
+# dies on empty input. Same class as #85: the lowering dropping the IR's data on
+# the way to the walker.
+test "every unproduced input carry is bound at spawn, not just `task`" {
+    src = transpile_ir(ACT_PATH_IR, "saver");
+    assert "spawn SaveAgent(task=task, note=task)" in src;
+    assert "spawn SaveAgent(task=task);" not in src;
+}
+
+# The other half of that rule: binding is for inputs the invocation actually
+# supplies. A carry a node produces already has a source, and a non-str input
+# cannot take the task text — binding either would fabricate data.
+glob MIXED_INPUT_IR: str = """---
+name: mixed
+description: Inputs of several shapes.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  peek:
+    sig: "(src_path: str) -> bool"
+    surface: SENSE
+    doc: "True if the path is non-empty."
+    body: |
+      def peek(src_path):
+          return bool(src_path)
+walker:
+  name: MixedAgent
+  carries:
+    task:
+      type: str
+      role: input
+    src_path:
+      type: str
+      role: input
+    retries:
+      type: int
+      role: input
+    seen:
+      type: bool
+      produced_by: peek_it
+nodes:
+  - id: peek_it
+    type: SENSE
+    owner: code
+    op: peek
+    tool: peek
+    reads: [src_path]
+    writes: [seen]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: peek_it, to: done, modality: mandatory}
+""";
+
+test "spawn binding skips produced and non-string carries" {
+    src = transpile_ir(MIXED_INPUT_IR, "mixed");
+    assert "spawn MixedAgent(task=task, src_path=task)" in src;
+    assert "retries=task" not in src;   # int input: the task text is not an int
+    assert "seen=task" not in src;      # produced by peek_it, not by the caller
+}
+
 # A code-owned verification step writing a bool verdict — the shape every "check
 # that X holds" rule lowers to.
 glob GATE_IR: str = """---
