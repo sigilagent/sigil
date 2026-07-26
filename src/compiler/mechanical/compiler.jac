@@ -1678,7 +1678,25 @@ def _emit_run(ir: any, walker_name: any) -> str {
     }
     out.append("");
     if first {
-        out.append(f"    agent = {var[first]} spawn {walker_name}(task=task);");
+        # `task` is not always the only input the IR declares. A carry marked
+        # `role: input` that no node produces can ONLY come from the invocation —
+        # if we bind just `task`, that field keeps its "" default and the first
+        # node reading it dies on empty input. (Same class as #85: the lowering
+        # dropping IR data on the way to the walker.) Bind every such string
+        # input to the task text, which is what the invocation actually carries.
+        wcar = (ir.get("walker") or {}).get("carries");
+        extra_in: list = [];
+        for kv in _items(wcar) {
+            k = str(kv[0]);
+            meta = kv[1];
+            if (k == "task") or (not isinstance(meta, dict)) { continue; }
+            if str(meta.get("role")) != "input" { continue; }
+            if meta.get("produced_by") { continue; }
+            if str(_jac_type(meta.get("type"), types)[0]) != "str" { continue; }
+            extra_in.append(f"{k}=task");
+        }
+        sargs = _j(", ", ["task=task"] + extra_in);
+        out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
         out.append("    if not agent.report {");
         out.append("        # loud, not silent: an empty report means the walker stopped at a");
         out.append("        # dead-end/escape-hatch node without reaching TERMINAL (see the");
