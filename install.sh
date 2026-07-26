@@ -81,13 +81,17 @@ fi
 [ -f "$SIGIL_HOME/main.jac" ] || die "Sigil source looks incomplete (no main.jac in $SIGIL_HOME)."
 
 # ---- 3. runtime dependencies -------------------------------------------------
-# PyYAML (the compiler parses the crystallizer's YAML output) + the byLLM 'llm'
-# runtime the model calls need (litellm/httpx/loguru/pillow). byLLM itself is
-# bundled in the native jac binary, but that runtime closure is not — without it
-# the very first `solve` fails with "'litellm' is required for this feature".
-info "Provisioning dependencies (PyYAML + the LLM runtime)…"
-( cd "$SIGIL_HOME" && jac install pyyaml litellm httpx loguru pillow >/dev/null 2>&1 ) \
-  || warn "dependency install failed — run \`jac install pyyaml litellm httpx loguru pillow\` in $SIGIL_HOME before your first solve."
+# Bare `jac install` provisions everything in jac.toml's [dependencies] — notably
+# rich + prompt_toolkit, which the `chat` REPL imports. The byLLM 'llm' runtime
+# (litellm/loguru/pillow) and pyyaml/httpx ship inside the native jac runtime
+# closure, so they are NOT listed in jac.toml — litellm in particular has no wheel
+# for the bundled Python and would make this step fail outright.
+# Do NOT re-list packages here: an explicit list silently drifts from jac.toml, and
+# a dependency added there but missed here breaks that feature on a fresh install
+# (this is exactly how `sigil chat` shipped broken with "No module named 'rich'").
+info "Provisioning dependencies (the chat REPL + anything else jac.toml declares)…"
+( cd "$SIGIL_HOME" && jac install >/dev/null 2>&1 ) \
+  || warn "dependency install failed — run \`jac install\` in $SIGIL_HOME before your first solve."
 
 # ---- 4. launcher on PATH -----------------------------------------------------
 mkdir -p "$BIN_DIR"
