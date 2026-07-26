@@ -1,0 +1,511 @@
+---
+name: clean_csv
+description: Compiled by the sigil AI compiler (LIFT front-end).
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: CleanCsvAgent
+  carries:
+    task:
+      type: any
+      role: input
+    task_input_path:
+      type: str
+      role: input
+    input_csv_path:
+      type: str
+      produced_by: read_input_csv
+    input_headers:
+      type: list[str]
+      produced_by: read_input_csv
+    input_rows:
+      type: any
+      produced_by: read_input_csv
+    input_row_count:
+      type: int
+      produced_by: read_input_csv
+    input_col_count:
+      type: int
+      produced_by: read_input_csv
+    proposed_headers:
+      type: list[str]
+      produced_by: fix_output
+    renamed_rows:
+      type: any
+      produced_by: apply_header_rename
+    renamed_headers:
+      type: list[str]
+      produced_by: apply_header_rename
+    output_col_count:
+      type: int
+      produced_by: apply_header_rename
+    clean_rows:
+      type: any
+      produced_by: drop_empty_rows
+    removed_empty_row_count:
+      type: int
+      produced_by: drop_empty_rows
+    clean_row_count:
+      type: int
+      produced_by: drop_empty_rows
+    cleaned_csv_path:
+      type: str
+      produced_by: write_cleaned_csv
+    written_headers:
+      type: list[str]
+      produced_by: re_read_output_csv
+    written_rows:
+      type: any
+      produced_by: re_read_output_csv
+    written_row_count:
+      type: int
+      produced_by: re_read_output_csv
+    written_col_count:
+      type: int
+      produced_by: re_read_output_csv
+    check_parse_ok:
+      type: bool
+      produced_by: check_parses_with_header
+    check_regex_ok:
+      type: bool
+      produced_by: verify_header_regex
+    check_unique_ok:
+      type: bool
+      produced_by: verify_header_uniqueness
+    check_colcount_ok:
+      type: bool
+      produced_by: verify_column_count_equal
+    check_rowcount_ok:
+      type: bool
+      produced_by: verify_row_count_equals_input_minus_empty
+    check_order_ok:
+      type: bool
+      produced_by: verify_headers_match_proposed_order
+    all_checks_passed:
+      type: bool
+      produced_by: verification_gate
+nodes:
+- id: read_input_csv
+  type: SENSE
+  owner: code
+  doc: Read the input CSV file named in the task.
+  reads:
+  - task_input_path
+  writes:
+  - input_csv_path
+  - input_headers
+  - input_rows
+  - input_row_count
+  - input_col_count
+  traces_to:
+  - r1
+  - r2
+- id: decide_column_meanings
+  type: GEN-FILL
+  owner: model
+  doc: 'Decide each column''s meaning and produce clean snake_case header names (one
+    per input, original order). NEVER violate: No leading, trailing or doubled underscores.;
+    Do not drop, add, merge or reorder columns.; do not just print it.'
+  reads:
+  - input_headers
+  writes:
+  - proposed_headers
+  traces_to:
+  - r3
+  - r20
+- id: apply_header_rename
+  type: CODE
+  owner: code
+  doc: Apply the proposed header names to the data without changing column order/count.
+  reads:
+  - input_rows
+  - proposed_headers
+  writes:
+  - renamed_rows
+  - renamed_headers
+  - output_col_count
+  traces_to:
+  - r3
+- id: drop_empty_rows
+  type: CODE
+  owner: code
+  doc: Drop rows where every field is empty.
+  reads:
+  - renamed_rows
+  writes:
+  - clean_rows
+  - removed_empty_row_count
+  - clean_row_count
+  traces_to:
+  - r5
+- id: write_cleaned_csv
+  type: ACT
+  owner: code
+  doc: Write cleaned rows to cleaned.csv with header row first.
+  reads:
+  - clean_rows
+  - proposed_headers
+  writes:
+  - cleaned_csv_path
+  surface: ACT·artifact
+  traces_to:
+  - r1
+  - r6
+  - r13
+- id: re_read_output_csv
+  type: SENSE
+  owner: code
+  doc: Re-read cleaned.csv to obtain written headers and rows.
+  reads:
+  - cleaned_csv_path
+  writes:
+  - written_headers
+  - written_rows
+  - written_row_count
+  - written_col_count
+  traces_to:
+  - r15
+- id: spawn_verifications
+  type: SPAWN
+  owner: code
+  doc: Fan out independent verification checks.
+  traces_to:
+  - r7
+- id: check_parses_with_header
+  type: CODE
+  owner: code
+  doc: Confirm cleaned.csv parses as valid CSV with a header row.
+  reads:
+  - written_headers
+  - written_rows
+  writes:
+  - check_parse_ok
+  traces_to:
+  - r15
+- id: verify_header_regex
+  type: CODE
+  owner: code
+  doc: Confirm every header matches ^[a-z][a-z0-9]*(_[a-z0-9]+)*$.
+  reads:
+  - written_headers
+  writes:
+  - check_regex_ok
+  traces_to:
+  - r8
+  - r16
+- id: verify_header_uniqueness
+  type: CODE
+  owner: code
+  doc: Confirm header names are unique.
+  reads:
+  - written_headers
+  writes:
+  - check_unique_ok
+  traces_to:
+  - r12
+- id: verify_column_count_equal
+  type: CODE
+  owner: code
+  doc: Confirm output column count equals input column count.
+  reads:
+  - input_col_count
+  - written_col_count
+  writes:
+  - check_colcount_ok
+  traces_to:
+  - r17
+- id: verify_row_count_equals_input_minus_empty
+  type: CODE
+  owner: code
+  doc: Confirm output row count equals input row count minus removed empty rows.
+  reads:
+  - input_row_count
+  - removed_empty_row_count
+  - written_row_count
+  writes:
+  - check_rowcount_ok
+  traces_to:
+  - r18
+- id: verify_headers_match_proposed_order
+  type: CODE
+  owner: code
+  doc: Confirm written headers exactly equal the proposed headers (one per input,
+    original order).
+  reads:
+  - proposed_headers
+  - written_headers
+  writes:
+  - check_order_ok
+  traces_to:
+  - r10
+- id: verification_gate
+  type: ROUTE
+  owner: code
+  doc: Route on verification outcome.
+  reads:
+  - check_parse_ok
+  - check_regex_ok
+  - check_unique_ok
+  - check_colcount_ok
+  - check_rowcount_ok
+  - check_order_ok
+  writes:
+  - all_checks_passed
+  traces_to:
+  - r1
+  - r7
+- id: fix_output
+  type: GEN-EDIT
+  owner: model
+  doc: 'If verification fails, revise header names and try again. NEVER violate: No
+    leading, trailing or doubled underscores.; Do not drop, add, merge or reorder
+    columns.; do not just print it.'
+  reads:
+  - proposed_headers
+  - check_parse_ok
+  - check_regex_ok
+  - check_unique_ok
+  - check_colcount_ok
+  - check_rowcount_ok
+  - check_order_ok
+  writes:
+  - proposed_headers
+  traces_to:
+  - r19
+- id: done
+  type: TERMINAL
+  owner: code
+  doc: All checks passed; report success.
+  traces_to:
+  - r7
+edges:
+- from: read_input_csv
+  to: decide_column_meanings
+  modality: mandatory
+- from: decide_column_meanings
+  to: apply_header_rename
+  modality: mandatory
+- from: apply_header_rename
+  to: drop_empty_rows
+  modality: mandatory
+- from: drop_empty_rows
+  to: write_cleaned_csv
+  modality: mandatory
+- from: write_cleaned_csv
+  to: re_read_output_csv
+  modality: mandatory
+- from: re_read_output_csv
+  to: spawn_verifications
+  modality: mandatory
+- from: spawn_verifications
+  to: check_parses_with_header
+  modality: mandatory
+- from: spawn_verifications
+  to: verify_header_regex
+  modality: mandatory
+- from: spawn_verifications
+  to: verify_header_uniqueness
+  modality: mandatory
+- from: spawn_verifications
+  to: verify_column_count_equal
+  modality: mandatory
+- from: spawn_verifications
+  to: verify_row_count_equals_input_minus_empty
+  modality: mandatory
+- from: spawn_verifications
+  to: verify_headers_match_proposed_order
+  modality: mandatory
+- from: check_parses_with_header
+  to: verification_gate
+  modality: mandatory
+- from: verify_header_regex
+  to: verification_gate
+  modality: mandatory
+- from: verify_header_uniqueness
+  to: verification_gate
+  modality: mandatory
+- from: verify_column_count_equal
+  to: verification_gate
+  modality: mandatory
+- from: verify_row_count_equals_input_minus_empty
+  to: verification_gate
+  modality: mandatory
+- from: verify_headers_match_proposed_order
+  to: verification_gate
+  modality: mandatory
+- from: verification_gate
+  to: done
+  modality: mandatory
+  guard: all_checks_passed == true
+- from: verification_gate
+  to: fix_output
+  modality: mandatory
+  guard: all_checks_passed == false
+- from: fix_output
+  to: apply_header_rename
+  modality: mandatory
+tools:
+  read_input_csv:
+    sig: (task_input_path) -> (input_csv_path,input_headers,input_rows,input_row_count,input_col_count)
+    surface: SENSE
+    serves:
+    - read_input_csv
+    body: "def read_input_csv(task_input_path):\n    import csv\n    input_csv_path\
+      \ = task_input_path\n    with open(input_csv_path, newline='', encoding='utf-8')\
+      \ as f:\n        reader = csv.reader(f)\n        rows = list(reader)\n    if\
+      \ not rows:\n        input_headers = []\n        input_rows = []\n        input_row_count\
+      \ = 0\n        input_col_count = 0\n    else:\n        input_headers = rows[0]\n\
+      \        input_rows = rows[1:]\n        input_row_count = len(input_rows)\n\
+      \        input_col_count = len(input_headers)\n    return input_csv_path, input_headers,\
+      \ input_rows, input_row_count, input_col_count\n"
+  apply_header_rename:
+    sig: (input_rows,proposed_headers) -> (renamed_rows,renamed_headers,output_col_count)
+    surface: SENSE
+    serves:
+    - apply_header_rename
+    body: "def apply_header_rename(input_rows, proposed_headers):\n    renamed_headers\
+      \ = list(proposed_headers)\n    output_col_count = len(renamed_headers)\n  \
+      \  renamed_rows = [list(r) for r in input_rows]\n    return renamed_rows, renamed_headers,\
+      \ output_col_count\n"
+  drop_empty_rows:
+    sig: (renamed_rows) -> (clean_rows,removed_empty_row_count,clean_row_count)
+    surface: SENSE
+    serves:
+    - drop_empty_rows
+    body: "def drop_empty_rows(renamed_rows):\n    clean_rows = []\n    removed =\
+      \ 0\n    for r in renamed_rows:\n        if all((str(c).strip() == '') for c\
+      \ in r):\n            removed += 1\n        else:\n            clean_rows.append(list(r))\n\
+      \    clean_row_count = len(clean_rows)\n    removed_empty_row_count = removed\n\
+      \    return clean_rows, removed_empty_row_count, clean_row_count\n"
+  write_cleaned_csv:
+    sig: (clean_rows,proposed_headers) -> cleaned_csv_path
+    surface: ACT
+    serves:
+    - write_cleaned_csv
+    body: "def write_cleaned_csv(clean_rows, proposed_headers):\n    import csv, os\n\
+      \    path = os.path.join(os.getcwd(), 'cleaned.csv')\n    with open(path, 'w',\
+      \ newline='', encoding='utf-8') as f:\n        writer = csv.writer(f)\n    \
+      \    writer.writerow(list(proposed_headers))\n        for row in clean_rows:\n\
+      \            writer.writerow(list(row))\n    return path\n"
+  re_read_output_csv:
+    sig: (cleaned_csv_path) -> (written_headers,written_rows,written_row_count,written_col_count)
+    surface: SENSE
+    serves:
+    - re_read_output_csv
+    body: "def re_read_output_csv(cleaned_csv_path):\n    import csv\n    with open(cleaned_csv_path,\
+      \ newline='', encoding='utf-8') as f:\n        reader = csv.reader(f)\n    \
+      \    rows = list(reader)\n    if not rows:\n        written_headers = []\n \
+      \       written_rows = []\n        written_row_count = 0\n        written_col_count\
+      \ = 0\n    else:\n        written_headers = rows[0]\n        written_rows =\
+      \ rows[1:]\n        written_row_count = len(written_rows)\n        written_col_count\
+      \ = len(written_headers)\n    return written_headers, written_rows, written_row_count,\
+      \ written_col_count\n"
+  check_parses_with_header:
+    sig: (written_headers,written_rows) -> check_parse_ok
+    surface: SENSE
+    serves:
+    - check_parses_with_header
+    body: "def check_parses_with_header(written_headers, written_rows):\n    if not\
+      \ isinstance(written_headers, list):\n        return False\n    col_count =\
+      \ len(written_headers)\n    if col_count == 0:\n        return False\n    for\
+      \ r in written_rows:\n        if len(r) != col_count:\n            return False\n\
+      \    return True\n"
+  verify_header_regex:
+    sig: (written_headers) -> check_regex_ok
+    surface: SENSE
+    serves:
+    - verify_header_regex
+    body: "def verify_header_regex(written_headers):\n    import re\n    pat = re.compile(r'^[a-z][a-z0-9]*(_[a-z0-9]+)*$')\n\
+      \    return all(bool(pat.match(h)) for h in written_headers)\n"
+  verify_header_uniqueness:
+    sig: (written_headers) -> check_unique_ok
+    surface: SENSE
+    serves:
+    - verify_header_uniqueness
+    body: "def verify_header_uniqueness(written_headers):\n    return len(set(written_headers))\
+      \ == len(written_headers)\n"
+  verify_column_count_equal:
+    sig: (input_col_count,written_col_count) -> check_colcount_ok
+    surface: SENSE
+    serves:
+    - verify_column_count_equal
+    body: "def verify_column_count_equal(input_col_count, written_col_count):\n  \
+      \  return int(input_col_count) == int(written_col_count)\n"
+  verify_row_count_equals_input_minus_empty:
+    sig: (input_row_count,removed_empty_row_count,written_row_count) -> check_rowcount_ok
+    surface: SENSE
+    serves:
+    - verify_row_count_equals_input_minus_empty
+    body: "def verify_row_count_equals_input_minus_empty(input_row_count, removed_empty_row_count,\
+      \ written_row_count):\n    return int(written_row_count) == int(input_row_count)\
+      \ - int(removed_empty_row_count)\n"
+  verify_headers_match_proposed_order:
+    sig: (proposed_headers,written_headers) -> check_order_ok
+    surface: SENSE
+    serves:
+    - verify_headers_match_proposed_order
+    body: "def verify_headers_match_proposed_order(proposed_headers, written_headers):\n\
+      \    return list(proposed_headers) == list(written_headers)\n"
+  verification_gate:
+    sig: (check_parse_ok,check_regex_ok,check_unique_ok,check_colcount_ok,check_rowcount_ok,check_order_ok)
+      -> all_checks_passed
+    surface: SENSE
+    serves:
+    - verification_gate
+    body: "def verification_gate(check_parse_ok, check_regex_ok, check_unique_ok,\
+      \ check_colcount_ok, check_rowcount_ok, check_order_ok):\n    return all([bool(check_parse_ok),\
+      \ bool(check_regex_ok), bool(check_unique_ok), bool(check_colcount_ok), bool(check_rowcount_ok),\
+      \ bool(check_order_ok)])\n"
+knowledge:
+  header_renaming_guidance:
+    body: "2. Rename every column header to a clean, readable `snake_case` identifier.\n\
+      \   Real exports carry units, punctuation, vendor prefixes and parenthetical\n\
+      \   qualifiers that a literal character substitution mangles — decide what each\n\
+      \   column actually *means* and name it that. For example:\n\n   | messy header\
+      \ | good name | a literal transform gives |\n   |---|---|---|\n   | `Cust. E-mail\
+      \ (primary)` | `customer_email` | `cust__e_mail__primary_` |\n   | `Total Spend\
+      \ ($)` | `total_spend` | `total_spend____` |\n   | `Signup Date (UTC)` | `signup_date`\
+      \ | `signup_date__utc_` |\n   | `First  Name` | `first_name` | `first__name`\
+      \ |"
+    resident_on:
+    - decide_column_meanings
+    - fix_output
+  rules:
+    body: "- Every output header MUST be lowercase `snake_case`: letters, digits and\
+      \ single\n  underscores only. No leading, trailing or doubled underscores.\n\
+      - You MUST produce exactly one name per input column, in the original order.\n\
+      \  Do not drop, add, merge or reorder columns.\n- Header names MUST be unique.\n\
+      - The cleaned data MUST be written to `cleaned.csv` — do not just print it."
+    resident_on:
+    - decide_column_meanings
+    - verify_header_regex
+    - verify_header_uniqueness
+    - verify_column_count_equal
+    - verify_row_count_equals_input_minus_empty
+    - verify_headers_match_proposed_order
+    - verification_gate
+  verification_checks:
+    body: "- Re-read `cleaned.csv` and confirm it parses as valid CSV with a header\
+      \ row.\n- Confirm every header matches `^[a-z][a-z0-9]*(_[a-z0-9]+)*$`.\n- Confirm\
+      \ the output column count equals the input column count.\n- Confirm the output\
+      \ row count equals the input row count minus the fully-empty\n  rows that were\
+      \ removed.\n- If verification fails, fix the output and check again before reporting\
+      \ done."
+    resident_on:
+    - re_read_output_csv
+    - check_parses_with_header
+    - verify_header_regex
+    - verify_column_count_equal
+    - verify_row_count_equals_input_minus_empty
+    - verify_headers_match_proposed_order
+    - verification_gate
+    - fix_output
+concurrency:
+  spawn: none
+  reason: 'spawned: verification checks are independent, read-only over the same outputs,
+    so they are executed in parallel; verification_gate joins by reading all check
+    flags.'
+

@@ -1,0 +1,13 @@
+First  Name,Last-Name,Cust. E-mail (primary),Signup Date (UTC),Total Spend ($)
+Ada,Lovelace,ada@analytical.io,2024-01-14,1240.50
+Grace,Hopper,grace@navy.mil,2024-02-02,880.00
+,,,,
+Alan,Turing,alan@bletchley.uk,2024-02-19,415.25
+Katherine,Johnson,katherine@nasa.gov,2024-03-05,2310.75
+,,,,
+Barbara,Liskov,barbara@mit.edu,2024-03-21,1595.00
+Edsger,Dijkstra,edsger@tue.nl,2024-04-08,730.40
+Radia,Perlman,radia@spanning.net,2024-04-27,1120.00
+,,,,
+Margaret,Hamilton,margaret@apollo.gov,2024-05-11,1980.60
+Donald,Knuth,donald@stanford.edu,2024-06-01,655.15

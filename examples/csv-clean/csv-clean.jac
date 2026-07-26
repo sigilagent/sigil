@@ -1,0 +1,1121 @@
+#!/usr/bin/env -S jac run
+# clean_csv — standalone agent ejected by the sigil AI compiler.
+# Usage: ./clean_csv.jac "<task>"   (or: jac run clean_csv.jac -- "<task>")
+# Model: $SIGIL_MODEL, else $SIGIL_SMALL, else gpt-4o-mini.
+
+"""OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.
+
+Skill: clean_csv
+Shape: pipeline
+Mechanical lowering of the IR as written (not the hand-tuned production agent).
+"""
+
+import from jaclang.byllm.lib { Model }
+
+::py::
+import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile
+
+def _read_input_csv__impl(task_input_path=None):
+    def read_input_csv(task_input_path):
+        import csv
+        input_csv_path = task_input_path
+        with open(input_csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            input_headers = []
+            input_rows = []
+            input_row_count = 0
+            input_col_count = 0
+        else:
+            input_headers = rows[0]
+            input_rows = rows[1:]
+            input_row_count = len(input_rows)
+            input_col_count = len(input_headers)
+        return input_csv_path, input_headers, input_rows, input_row_count, input_col_count
+    return read_input_csv(task_input_path)
+
+def _read_input_csv(task_input_path=None):
+    return _tui_tool("read_input_csv", [("task_input_path", task_input_path)], lambda: _read_input_csv__impl(task_input_path))
+
+def _apply_header_rename__impl(input_rows=None, proposed_headers=None):
+    def apply_header_rename(input_rows, proposed_headers):
+        renamed_headers = list(proposed_headers)
+        output_col_count = len(renamed_headers)
+        renamed_rows = [list(r) for r in input_rows]
+        return renamed_rows, renamed_headers, output_col_count
+    return apply_header_rename(input_rows, proposed_headers)
+
+def _apply_header_rename(input_rows=None, proposed_headers=None):
+    return _tui_tool("apply_header_rename", [("input_rows", input_rows), ("proposed_headers", proposed_headers)], lambda: _apply_header_rename__impl(input_rows, proposed_headers))
+
+def _drop_empty_rows__impl(renamed_rows=None):
+    def drop_empty_rows(renamed_rows):
+        clean_rows = []
+        removed = 0
+        for r in renamed_rows:
+            if all((str(c).strip() == '') for c in r):
+                removed += 1
+            else:
+                clean_rows.append(list(r))
+        clean_row_count = len(clean_rows)
+        removed_empty_row_count = removed
+        return clean_rows, removed_empty_row_count, clean_row_count
+    return drop_empty_rows(renamed_rows)
+
+def _drop_empty_rows(renamed_rows=None):
+    return _tui_tool("drop_empty_rows", [("renamed_rows", renamed_rows)], lambda: _drop_empty_rows__impl(renamed_rows))
+
+def _write_cleaned_csv__impl(clean_rows=None, proposed_headers=None):
+    def write_cleaned_csv(clean_rows, proposed_headers):
+        import csv, os
+        path = os.path.join(os.getcwd(), 'cleaned.csv')
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(list(proposed_headers))
+            for row in clean_rows:
+                writer.writerow(list(row))
+        return path
+    return write_cleaned_csv(clean_rows, proposed_headers)
+
+def _write_cleaned_csv(clean_rows=None, proposed_headers=None):
+    return _tui_tool("write_cleaned_csv", [("clean_rows", clean_rows), ("proposed_headers", proposed_headers)], lambda: _write_cleaned_csv__impl(clean_rows, proposed_headers))
+
+def _re_read_output_csv__impl(cleaned_csv_path=None):
+    def re_read_output_csv(cleaned_csv_path):
+        import csv
+        with open(cleaned_csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            written_headers = []
+            written_rows = []
+            written_row_count = 0
+            written_col_count = 0
+        else:
+            written_headers = rows[0]
+            written_rows = rows[1:]
+            written_row_count = len(written_rows)
+            written_col_count = len(written_headers)
+        return written_headers, written_rows, written_row_count, written_col_count
+    return re_read_output_csv(cleaned_csv_path)
+
+def _re_read_output_csv(cleaned_csv_path=None):
+    return _tui_tool("re_read_output_csv", [("cleaned_csv_path", cleaned_csv_path)], lambda: _re_read_output_csv__impl(cleaned_csv_path))
+
+def _check_parses_with_header__impl(written_headers=None, written_rows=None):
+    def check_parses_with_header(written_headers, written_rows):
+        if not isinstance(written_headers, list):
+            return False
+        col_count = len(written_headers)
+        if col_count == 0:
+            return False
+        for r in written_rows:
+            if len(r) != col_count:
+                return False
+        return True
+    return check_parses_with_header(written_headers, written_rows)
+
+def _check_parses_with_header(written_headers=None, written_rows=None):
+    return _tui_tool("check_parses_with_header", [("written_headers", written_headers), ("written_rows", written_rows)], lambda: _check_parses_with_header__impl(written_headers, written_rows))
+
+def _verify_header_regex__impl(written_headers=None):
+    def verify_header_regex(written_headers):
+        import re
+        pat = re.compile(r'^[a-z][a-z0-9]*(_[a-z0-9]+)*$')
+        return all(bool(pat.match(h)) for h in written_headers)
+    return verify_header_regex(written_headers)
+
+def _verify_header_regex(written_headers=None):
+    return _tui_tool("verify_header_regex", [("written_headers", written_headers)], lambda: _verify_header_regex__impl(written_headers))
+
+def _verify_header_uniqueness__impl(written_headers=None):
+    def verify_header_uniqueness(written_headers):
+        return len(set(written_headers)) == len(written_headers)
+    return verify_header_uniqueness(written_headers)
+
+def _verify_header_uniqueness(written_headers=None):
+    return _tui_tool("verify_header_uniqueness", [("written_headers", written_headers)], lambda: _verify_header_uniqueness__impl(written_headers))
+
+def _verify_column_count_equal__impl(input_col_count=None, written_col_count=None):
+    def verify_column_count_equal(input_col_count, written_col_count):
+        return int(input_col_count) == int(written_col_count)
+    return verify_column_count_equal(input_col_count, written_col_count)
+
+def _verify_column_count_equal(input_col_count=None, written_col_count=None):
+    return _tui_tool("verify_column_count_equal", [("input_col_count", input_col_count), ("written_col_count", written_col_count)], lambda: _verify_column_count_equal__impl(input_col_count, written_col_count))
+
+def _verify_row_count_equals_input_minus_empty__impl(input_row_count=None, removed_empty_row_count=None, written_row_count=None):
+    def verify_row_count_equals_input_minus_empty(input_row_count, removed_empty_row_count, written_row_count):
+        return int(written_row_count) == int(input_row_count) - int(removed_empty_row_count)
+    return verify_row_count_equals_input_minus_empty(input_row_count, removed_empty_row_count, written_row_count)
+
+def _verify_row_count_equals_input_minus_empty(input_row_count=None, removed_empty_row_count=None, written_row_count=None):
+    return _tui_tool("verify_row_count_equals_input_minus_empty", [("input_row_count", input_row_count), ("removed_empty_row_count", removed_empty_row_count), ("written_row_count", written_row_count)], lambda: _verify_row_count_equals_input_minus_empty__impl(input_row_count, removed_empty_row_count, written_row_count))
+
+def _verify_headers_match_proposed_order__impl(proposed_headers=None, written_headers=None):
+    def verify_headers_match_proposed_order(proposed_headers, written_headers):
+        return list(proposed_headers) == list(written_headers)
+    return verify_headers_match_proposed_order(proposed_headers, written_headers)
+
+def _verify_headers_match_proposed_order(proposed_headers=None, written_headers=None):
+    return _tui_tool("verify_headers_match_proposed_order", [("proposed_headers", proposed_headers), ("written_headers", written_headers)], lambda: _verify_headers_match_proposed_order__impl(proposed_headers, written_headers))
+
+def _verification_gate__impl(check_parse_ok=None, check_regex_ok=None, check_unique_ok=None, check_colcount_ok=None, check_rowcount_ok=None, check_order_ok=None):
+    def verification_gate(check_parse_ok, check_regex_ok, check_unique_ok, check_colcount_ok, check_rowcount_ok, check_order_ok):
+        return all([bool(check_parse_ok), bool(check_regex_ok), bool(check_unique_ok), bool(check_colcount_ok), bool(check_rowcount_ok), bool(check_order_ok)])
+    return verification_gate(check_parse_ok, check_regex_ok, check_unique_ok, check_colcount_ok, check_rowcount_ok, check_order_ok)
+
+def _verification_gate(check_parse_ok=None, check_regex_ok=None, check_unique_ok=None, check_colcount_ok=None, check_rowcount_ok=None, check_order_ok=None):
+    return _tui_tool("verification_gate", [("check_parse_ok", check_parse_ok), ("check_regex_ok", check_regex_ok), ("check_unique_ok", check_unique_ok), ("check_colcount_ok", check_colcount_ok), ("check_rowcount_ok", check_rowcount_ok), ("check_order_ok", check_order_ok)], lambda: _verification_gate__impl(check_parse_ok, check_regex_ok, check_unique_ok, check_colcount_ok, check_rowcount_ok, check_order_ok))
+
+def _run_sense(op_name, args):
+    if op_name == "read_input_csv": return _read_input_csv(None)
+    if op_name == "apply_header_rename": return _apply_header_rename((args.inputs[0] if args.inputs else None), None)
+    if op_name == "drop_empty_rows": return _drop_empty_rows(None)
+    if op_name == "re_read_output_csv": return _re_read_output_csv(None)
+    if op_name == "check_parses_with_header": return _check_parses_with_header(None, None)
+    if op_name == "verify_header_regex": return _verify_header_regex(None)
+    if op_name == "verify_header_uniqueness": return _verify_header_uniqueness(None)
+    if op_name == "verify_column_count_equal": return _verify_column_count_equal((args.inputs[0] if args.inputs else None), None)
+    if op_name == "verify_row_count_equals_input_minus_empty": return _verify_row_count_equals_input_minus_empty((args.inputs[0] if args.inputs else None), None, None)
+    if op_name == "verify_headers_match_proposed_order": return _verify_headers_match_proposed_order(None, None)
+    if op_name == "verification_gate": return _verification_gate(None, None, None, None, None, None)
+    return None
+
+def _run_act(op_name, args):
+    if op_name == "write_cleaned_csv": return _write_cleaned_csv(None, None)
+    return None
+
+# ---- bundle on path: the skill's owned modules (core/, scripts/, …) are copied
+# into the run dir; make `from core.x import y` resolve for in-process tools and
+# the authored scripts they exec. Runs once at agent import. ----
+def _ensure_path():
+    import os, sys, shutil
+    here = ""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = ""
+    for d in (os.getcwd(), here):
+        if d and d not in sys.path:
+            sys.path.insert(0, d)
+    # Stage the skill's owned bundle resources (templates/, core/, scripts/, *.md,
+    # requirements.txt, …) from the agent dir into cwd, so the agent's relative file
+    # reads (open("templates/viewer.html")) and module imports (from core import x)
+    # resolve when it runs in a fresh bench workdir rather than inside the skill bundle.
+    cwd = os.getcwd()
+    # NEVER stage from a system temp root: a module placed directly in /tmp
+    # would "stage" every /tmp resident (browser locks, other sessions' dirs)
+    # into the invoking cwd. Bundles live in their own directories.
+    _tmp_roots = {"/tmp", "/private/tmp", "/var/tmp",
+                  os.path.realpath(os.environ.get("TMPDIR", "/nonexistent")).rstrip("/")}
+    if os.path.realpath(here or "/nonexistent").rstrip("/") in _tmp_roots:
+        return
+    if here and here != cwd and os.path.isdir(here):
+        _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
+                 "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
+        for _name in os.listdir(here):
+            if _name in _skip or _name.endswith((".jir", ".pyc", ".bak")):
+                continue
+            _src = os.path.join(here, _name); _dst = os.path.join(cwd, _name)
+            if os.path.exists(_dst):
+                continue
+            try:
+                if os.path.isdir(_src):
+                    shutil.copytree(_src, _dst)
+                else:
+                    shutil.copy2(_src, _dst)
+            except Exception:
+                pass
+
+_ensure_path()
+
+# ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
+def _progress(node):
+    import os, json, time
+    # ---- step budget: a walker cycling a graph (an unanswered HIL loop, a bad
+    # route) must abort LOUDLY, not spin to the harness timeout. Budget is
+    # env-tunable; the abort names the node and the visit count. ----
+    g = globals()
+    g["_NVISITS"] = g.get("_NVISITS", 0) + 1
+    budget = int(os.environ.get("AGIR_STEP_BUDGET", "256") or 256)
+    if g["_NVISITS"] > budget:
+        raise RuntimeError(
+            "step budget exhausted: %d node visits (budget %d), last node '%s' — "
+            "likely a loop with no converging guard; raise AGIR_STEP_BUDGET or fix the route"
+            % (g["_NVISITS"], budget, node))
+    _tui_node(node)
+    p = os.environ.get("AGIR_PROGRESS", "")
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            f.write(json.dumps({"node": node, "t": time.time()}))
+            f.write("\n")
+            f.flush()
+    except Exception:
+        pass
+
+# ---- artifact TUI: a compiled skill run IS a terminal experience. Pure ANSI,
+# zero dependencies (the ejected artifact stays self-contained). Auto-on when
+# stdout is a TTY; AGIR_TUI=0 forces off, AGIR_TUI=1 forces on (tests). Batch
+# and harness runs (captured stdout) are byte-identical to before. ----
+_TUI = {"last": None, "t0": None, "start": None}
+
+def _tui_on():
+    import os, sys
+    v = os.environ.get("AGIR_TUI", "")
+    if v == "0":
+        return False
+    if v == "1":
+        return True
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+_V = "\033[38;5;135m"   # violet
+_C = "\033[38;5;51m"    # cyan
+_D = "\033[2m"          # dim
+_R = "\033[0m"
+
+def _tui_banner(name, task):
+    import sys, time
+    if not _tui_on():
+        return
+    _TUI["start"] = time.time()
+    sys.stdout.write(_V + "\n  \u25c6 " + _R + str(name) + "\n")
+    sys.stdout.write(_D + "    " + str(task)[:120] + _R + "\n\n")
+    sys.stdout.flush()
+
+def _tui_close(now=None):
+    # Finish the in-place node line. A node whose detail already streamed was
+    # committed by _tui_sub, so there is nothing left to rewrite.
+    import sys, time
+    now = now or time.time()
+    if _TUI.get("open") and _TUI["last"] is not None:
+        dt = now - (_TUI["t0"] or now)
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"])
+                         + _D + "  %.1fs" % dt + _R + "\n")
+        sys.stdout.flush()
+    _TUI["open"] = False
+
+def _fmt_val(v, n=72):
+    # One line, collapsed whitespace, elided \u2014 a value preview, never a dump.
+    s = " ".join(str(v).split())
+    return s[:n] + ("\u2026" if len(s) > n else "")
+
+def _tui_sub(icon, color, text, tail=""):
+    # One indented detail line under the current node. The first one commits the
+    # node's in-place line (without its duration) so detail can stream beneath.
+    import sys
+    if not _tui_on():
+        return
+    if _TUI.get("open"):
+        sys.stdout.write("\r\033[2K  " + _V + "\u25c6 " + _R + str(_TUI["last"]) + "\n")
+        _TUI["open"] = False
+    sys.stdout.write("      " + color + icon + _R + " " + text
+                     + ((_D + "  " + tail + _R) if tail else "") + "\n")
+    sys.stdout.flush()
+
+def _tui_tool(name, args, fn):
+    # Run a tool with the call AND its return visible: what went in, what came
+    # back, how long it took. Errors surface as a failed call, then re-raise.
+    import time
+    if not _tui_on():
+        return fn()
+    shown = ", ".join("%s=%s" % (k, _fmt_val(v, 24)) for k, v in args if v is not None)
+    _tui_sub("\u2699", _C, str(name) + "(" + shown + ")")
+    t = time.time()
+    try:
+        out = fn()
+    except Exception as ex:
+        _tui_sub("\u2717", "\033[31m", "%s: %s" % (type(ex).__name__, _fmt_val(ex, 56)),
+                 "%.1fs" % (time.time() - t))
+        raise
+    _tui_sub("\u21b3", _D, _fmt_val(out), "%.1fs" % (time.time() - t))
+    return out
+
+def _tui_llm_in(slot, reads=None):
+    # A `by llm` slot is about to run: which slot, and what it was handed.
+    shown = ""
+    if reads:
+        shown = " " + _D + ", ".join("%s=%s" % (k, _fmt_val(v, 20)) for k, v in reads) + _R
+    _tui_sub("\u273b", _V, "llm " + str(slot) + shown)
+    _TUI["llm_t"] = __import__("time").time()
+
+def _tui_llm_out(val):
+    import time
+    dt = time.time() - (_TUI.get("llm_t") or time.time())
+    _tui_sub("\u21b3", _D, _fmt_val(val), "%.1fs" % dt)
+
+def _tui_node(node):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    _tui_close(now)
+    sys.stdout.write("  " + _V + "\u25c6 " + _R + str(node) + _D + " \u2026" + _R)
+    sys.stdout.flush()
+    _TUI["last"] = node
+    _TUI["t0"] = now
+    _TUI["open"] = True
+
+def _tui_finish(report, artifacts=None):
+    import sys, time
+    if not _tui_on():
+        return
+    now = time.time()
+    _tui_close(now)
+    total = now - (_TUI["start"] or now)
+    rep = str(report or "")
+    bad = rep.startswith("INCOMPLETE") or not rep
+    mark = "\033[31m\u2716" if bad else _C + "\u2714"
+    sys.stdout.write("\n  " + mark + _R + _D + "  %.1fs total" % total + _R + "\n")
+    sys.stdout.write("  " + ("\u2500" * 56) + "\n")
+    for line in (rep or "(no report)").splitlines()[:14]:
+        sys.stdout.write("  " + line[:110] + "\n")
+    if artifacts:
+        sys.stdout.write("  " + ("\u2500" * 56) + "\n  " + _D + "artifacts:" + _R + "\n")
+        for a in artifacts[:10]:
+            sys.stdout.write("    " + _C + str(a) + _R + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+# ---- human-in-the-loop channel: file-based Q&A (sigil chat/approvals attach it
+# via HIL_QA_FILE; the superpowers HIL session prototyped this). Batch-safe: with
+# no channel attached it returns an HONEST sentinel immediately — never blocks,
+# never fabricates a user. ----
+def _ask_user(question=None):
+    import os, time, json
+    qf = os.environ.get("HIL_QA_FILE", "")
+    if not qf:
+        # in a terminal, the human IS here: ask inline (the compiled skill's
+        # clarify loops and review gates become a real conversation)
+        if _tui_on():
+            import sys
+            sys.stdout.write("\r\033[2K\n  " + _C + "? " + _R + str(question) + "\n")
+            sys.stdout.flush()
+            try:
+                return input("  \u203a ")
+            except (EOFError, KeyboardInterrupt):
+                return "[user closed the prompt]"
+        return "[no human channel attached - proceeding without user input]"
+    _tui_sub("?", _C, _fmt_val(question, 88))
+    af = qf + ".answers"
+    n = 0
+    try:
+        n = sum(1 for _ in open(qf))
+    except Exception:
+        pass
+    try:
+        with open(qf, "a") as f:
+            f.write(json.dumps({"i": n, "q": str(question)}) + "\n")
+            f.flush()
+    except Exception:
+        return "[human channel write failed]"
+    deadline = time.time() + int(os.environ.get("HIL_TIMEOUT", "600") or 600)
+    while time.time() < deadline:
+        try:
+            for line in open(af):
+                rec = json.loads(line)
+                if rec.get("i") == n:
+                    ans = str(rec.get("a", ""))
+                    _tui_sub("↳", _D, _fmt_val(ans, 88), "human")
+                    return ans
+        except Exception:
+            pass
+        time.sleep(2)
+    _tui_sub("✗", "\033[31m", "no answer within HIL_TIMEOUT")
+    return "[human did not answer in time]"
+
+# ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
+def _strip_fences(code):
+    c = str(code).strip()
+    if c.startswith("```"):
+        lines = c.splitlines()[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        c = "\n".join(lines)
+    return c
+
+def _clean_strlist(v):
+    # byLLM's structured output over a small local model leaks JSON structure into
+    # list elements: a 5-item answer comes back with a trailing "" or a fragment
+    # like '"},{"'. Downstream that is indistinguishable from a real 6th item, so a
+    # column-count check fails and the repair slot "fixes" the blank by NAMING it
+    # (extra_column, empty_field) instead of dropping it — the gate rejects that too
+    # and the route loops until the step budget blows.
+    #
+    # Drop elements that carry no content. Only whitespace and JSON punctuation
+    # qualify, so a legitimately meaningful value is never discarded.
+    if not isinstance(v, (list, tuple)):
+        return v
+    out = []
+    for x in v:
+        s = str(x if x is not None else "").strip()
+        if not s:
+            continue
+        if not s.strip('{}[](),:;"\'`\\ \t\r\n'):
+            continue                       # pure structural punctuation, no content
+        out.append(x)
+    return out
+
+def _exec_script(script, args=None):
+    # The author writes a self-contained script that either writes an output file OR
+    # prints the answer to stdout. We run it and return the PATH of the deliverable.
+    with open("op.py", "w") as f:
+        f.write(_strip_fences(script))
+    # use THIS interpreter (sys.executable), not whatever `python3` is on PATH,
+    # so the script sees the same installed libs (openpyxl, reportlab, …).
+    r = _subprocess.run([sys.executable, "op.py"], capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise RuntimeError(f"script failed: {r.stderr[:800]}")
+    # 1) An explicit output file the script was asked to write.
+    try:
+        p = args.output_spec.path
+        if p and os.path.isfile(p):
+            return p
+    except Exception:
+        pass
+    # 2) Else the deliverable is whatever the script PRINTED — DON'T discard stdout
+    #    (that dropped every print-based answer). Persist it to a real file so the
+    #    verifier and the terminal report (_artifact_text) can read the actual answer.
+    out = (r.stdout or "").strip()
+    if out:
+        with open("output.txt", "w") as f:
+            f.write(out)
+        return "output.txt"
+    # 3) Nothing printed and no file — fall back to any spec path, else the script.
+    try:
+        return args.output_spec.path
+    except Exception:
+        return "op.py"
+
+# Side-channel for tool-produced data: a tools-ReAct slot returns a final TEXT
+# message (often not the script), but the real product was built inside a tool
+# call. Tools stash their product here; the author node retrieves it. Per-run
+# process, so it starts empty (no cross-run leakage).
+def _stash(key, value):
+    globals().setdefault("_OSP_PRODUCT", {})[key] = value
+    return value
+
+def _unstash(key):
+    v = globals().get("_OSP_PRODUCT", {}).get(key)
+    return v if v else []
+
+def _exec_var(script, varname):
+    # Execute an authored script and return the named product (e.g. `frames`) to
+    # thread into downstream OSP nodes. Accept either a bare `<varname>` list, a
+    # build_<varname>() factory, OR an object that accumulated it as an attribute
+    # (e.g. a GIFBuilder's `.frames`). Tolerate a mid-script error (the model may
+    # save to a bad path AFTER building) — keep whatever was produced first.
+    # Bundle modules resolve via cwd on sys.path.
+    ns = {}
+    code = _strip_fences(script)
+    try:
+        exec(code, ns)
+    except Exception:
+        pass  # partial ns retained: vars set before the failing line survive
+    val = ns.get(varname)
+    if not val and ("build_" + varname) in ns:
+        try:
+            val = ns["build_" + varname]()
+        except Exception:
+            val = None
+    if not val:
+        for v in ns.values():
+            attr = getattr(v, varname, None)
+            if isinstance(attr, list) and attr:
+                val = attr
+                break
+    return val if val else []
+
+def _exec_script_try(script, args=None):
+    # Run the authored script but DON'T raise — return {ok, error, path} so the
+    # node can hand a failure back to the model (repair_script) and retry, instead
+    # of crashing the whole agent. The error text is the model's repair signal.
+    try:
+        p = _exec_script(script, args)
+        return {"ok": True, "error": "", "path": p}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "path": ""}
+
+def _run_program(runner, target_file, content):
+    # CHANGE 3 author-run atom: an authoring tool whose command is `<runner> <bare-file>`
+    # (e.g. `node program.js`) receives the program CONTENT, not a path. Write the content
+    # to the target, run it, non-raising. Returns {ok, error, out} so an author-loop can
+    # re-author on failure (the discarded-output / node-content bugs from hand-tuning).
+    try:
+        with open(target_file, "w") as f:
+            f.write(_strip_fences(str(content)))
+    except Exception as e:
+        return {"ok": False, "error": "write failed: " + str(e)[:200], "out": ""}
+    try:
+        r = _subprocess.run([str(runner), str(target_file)], capture_output=True, text=True, timeout=180)
+        return {"ok": r.returncode == 0, "error": (r.stderr or "")[:800], "out": (r.stdout or "")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:400], "out": ""}
+
+def _run_cmd(prefix, args):
+    # EMBODIMENT LADDER rung 2: the tool's IR carried a `command` (a bundle-script/CLI
+    # invocation) but no inline body. Run it deterministically (owner=code) — prefix is the
+    # fixed executable+script, args are the tool's params threaded in order. Non-raising;
+    # returns combined stdout+stderr so a downstream verify can read it.
+    argv = list(prefix) + [str(a) for a in args if a is not None]
+    _tui_sub("$", _C, _fmt_val(" ".join(argv), 88))
+    try:
+        r = _subprocess.run(argv, capture_output=True, text=True, timeout=180)
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        _tui_sub("↳", _D, _fmt_val(out), "exit %s" % r.returncode)
+        return out
+    except Exception as e:
+        _tui_sub("✗", "\033[31m", _fmt_val(e, 56))
+        return "[cmd %s failed: %s]" % (" ".join(str(x) for x in prefix), str(e)[:200])
+
+def _live_tool(name, args):
+    # EMBODIMENT LADDER rung 0: a live-integration tool (reads the outside world) has no
+    # scriptable body. First try a REGISTERED MCP server (Sigil wires SIGIL_MCP with the
+    # user's servers); then a REAL web GET; otherwise an honest sentinel (never a hallucinated
+    # script, so a grounded verify can tell it wasn't real).
+    try:
+        import sigil_mcp
+        _m = sigil_mcp.dispatch(name, list(args) if args else [])
+        if _m is not None:
+            return _m["text"] if _m.get("ok") else "[mcp tool %s failed: %s]" % (name, _m.get("error", ""))
+    except Exception:
+        pass
+    a0 = str(args[0]) if args else ""
+    is_web = a0.startswith("http") or any(k in name for k in ("fetch", "_api", "_get", "web_", "search"))
+    if is_web:
+        url = a0 if a0.startswith("http") else ""
+        if not url:
+            return "[live tool %s: no URL argument provided]" % name
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=30) as r:
+                return r.read().decode("utf-8", "replace")[:100000]
+        except Exception as e:
+            return "[live fetch %s failed: %s]" % (name, str(e)[:200])
+    return "[live source '%s' unavailable in the batch harness]" % name
+
+def _scoped_author_run(context, out_path=None, tries=3):
+    # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
+    # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
+    # job, run it, verify the artifact appeared, and re-author on failure. Non-raising.
+    # The author is the module-level `_gen_scoped` by-llm slot (emitted whenever the
+    # compiler falls back at least one tool); scoped = it sees only this job's context.
+    import os
+    gen = globals().get("_gen_scoped")
+    if gen is None:
+        return out_path or ""
+    err = ""
+    for _ in range(max(1, int(tries))):
+        ctx = context if not err else (
+            context + "\n\nThe previous script failed with:\n" + err +
+            "\nReturn a corrected, COMPLETE, self-contained script.")
+        try:
+            script = _strip_fences(str(gen(ctx)))
+        except Exception as e:
+            err = "author error: " + str(e)[:300]
+            continue
+        res = _exec_script_try(script, None)
+        ok = res.get("ok") and ((not out_path) or (os.path.exists(out_path) and os.path.getsize(out_path) > 0))
+        if ok:
+            return out_path or res.get("path") or "op.py"
+        err = (res.get("error") or "the script produced no output file")[-500:]
+    return out_path if (out_path and os.path.exists(out_path)) else ""
+
+def _clean_path(p):
+    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
+    # verbatim writes the artifact to a garbage filename and the deliverable is lost.
+    # Strip trailing structural junk and cut at the first filename-illegal char after
+    # a recognizable extension, so 'out.txt},...' -> 'out.txt'.
+    import re
+    s = str(p or "").strip().strip('`"\' ')
+    s = re.sub(r'[}\]\)>,"\'`\s]+$', '', s)              # trailing }, ] ) , " ' ` ws
+    m = re.match(r'^(.*?\.[A-Za-z0-9]{1,6})(?:[^A-Za-z0-9._/\\-].*)?$', s)
+    if m:
+        s = m.group(1)                                   # keep up to the extension
+    return s
+
+def _emit(data, args):
+    spec = args.output_spec
+    if getattr(spec, "destination", "") == "stdout":
+        print(data)
+        return "stdout"
+    path = _clean_path(spec.path)
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    fmt = (ext or getattr(spec, "format", "") or "txt").lower()
+    if fmt == "json":
+        with open(path, "w") as f:
+            _json.dump(data, f, default=str)
+    elif fmt == "xlsx":
+        import pandas as pd
+        frames = [pd.DataFrame(t[1:], columns=t[0]) for t in data if t]
+        (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()).to_excel(path, index=False)
+    elif fmt == "csv":
+        import csv as _csv
+        tables = data if isinstance(data, list) else [data]
+        table = next((t for t in tables if t), [])
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            for row in table:
+                w.writerow([(c if c is not None else "") for c in row])
+    else:
+        with open(path, "w") as f:
+            f.write(data if isinstance(data, str) else str(data))
+    return path
+
+def _unwrap(ret, key, idx=0, single=True):
+    # Resolve ONE write-carry from a tool's return. LIFT-authored bodies return
+    # {"carry_name": value, ...}; legacy bodies return the bare value; a sig like
+    # `-> (report, status)` returns a tuple bound positionally over the node's
+    # writes. Total by design: a miss yields "" (never None, never a raise) so the
+    # walker's typed coercions — str()/list()/bool() — stay safe on any shape.
+    if isinstance(ret, dict):
+        if key in ret:
+            v = ret[key]
+            return "" if v is None else v
+        if single and len(ret) == 1:
+            v = next(iter(ret.values()))
+            return "" if v is None else v
+        return ret if single else ""
+    if isinstance(ret, (list, tuple)) and not single:
+        return ret[idx] if idx < len(ret) else ""
+    if single or idx == 0:
+        return "" if ret is None else ret
+    return ""
+
+def _outname(task, fallback="output.txt"):
+    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
+    # filename that follows a save/output/write verb; else the first bare filename; else fallback.
+    import re
+    t = task or ""
+    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
+    if m:
+        return m.group(1)
+    return fallback
+
+def _write_artifact(content, path):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content if isinstance(content, str) else str(content))
+    return path
+
+def _artifact_text(v, limit=8000):
+    # Surface the DELIVERED CONTENT, not just a path. Delivery ops return the path
+    # of the file the authored script wrote/printed; the caller wants the ANSWER, not
+    # the filename. If v names a TEXT file, return its (stripped, truncated) content;
+    # a BINARY file (pdf/img/xlsx/…) is surfaced as "path (N bytes)" not raw bytes;
+    # anything that isn't a file is returned as-is. Never raises.
+    try:
+        s = v if isinstance(v, str) else str(v)
+        if s and os.path.isfile(s):
+            _bin = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".xlsx", ".docx",
+                    ".pptx", ".zip", ".mp4", ".mp3", ".bin", ".parquet")
+            if s.lower().endswith(_bin):
+                return "%s (%d bytes)" % (s, os.path.getsize(s))
+            with open(s, "r", errors="replace") as f:
+                data = f.read().strip()
+            return data[:limit] + ("…[truncated]" if len(data) > limit else "")
+        return s
+    except Exception:
+        return str(v)
+
+def _emit_surface(content, spec):
+    # An ACT·artifact surface (sig only, no IR body) must still WRITE the deliverable
+    # to an app-controlled path — a bodyless surface lowered to `pass` silently drops
+    # the output (the internal-comms/etc. 0% bug). `spec` may be an ArtifactSpec (has
+    # .path/.destination/.format), a carrier that holds one (OpArgs.output_spec), or a dict.
+    if spec is not None and hasattr(spec, "output_spec"):
+        spec = spec.output_spec
+    def _g(o, k, d=None):
+        if o is None: return d
+        if isinstance(o, dict): return o.get(k, d)
+        return getattr(o, k, d)
+    text = content if isinstance(content, str) else ("" if content is None else str(content))
+    if (_g(spec, "destination", "") or "") == "stdout":
+        print(text); return "stdout"
+    path = _clean_path(_g(spec, "path", "") or "")
+    if not path:
+        path = "output." + str(_g(spec, "format", "") or "txt").lstrip(".")
+    return _write_artifact(text, path)
+
+def _read_module(relpath):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (relpath, os.path.join(here, relpath)):
+        if os.path.exists(cand):
+            with open(cand) as f:
+                return f.read()
+    return ""
+
+::py::
+
+# ===== KNOWLEDGE (static globs) =====
+glob HEADER_RENAMING_GUIDANCE: str =
+"""2. Rename every column header to a clean, readable `snake_case` identifier.
+   Real exports carry units, punctuation, vendor prefixes and parenthetical
+   qualifiers that a literal character substitution mangles — decide what each
+   column actually *means* and name it that. For example:
+
+   | messy header | good name | a literal transform gives |
+   |---|---|---|
+   | `Cust. E-mail (primary)` | `customer_email` | `cust__e_mail__primary_` |
+   | `Total Spend ($)` | `total_spend` | `total_spend____` |
+   | `Signup Date (UTC)` | `signup_date` | `signup_date__utc_` |
+   | `First  Name` | `first_name` | `first__name` |""";
+glob RULES: str =
+"""- Every output header MUST be lowercase `snake_case`: letters, digits and single
+  underscores only. No leading, trailing or doubled underscores.
+- You MUST produce exactly one name per input column, in the original order.
+  Do not drop, add, merge or reorder columns.
+- Header names MUST be unique.
+- The cleaned data MUST be written to `cleaned.csv` — do not just print it.""";
+glob VERIFICATION_CHECKS: str =
+"""- Re-read `cleaned.csv` and confirm it parses as valid CSV with a header row.
+- Confirm every header matches `^[a-z][a-z0-9]*(_[a-z0-9]+)*$`.
+- Confirm the output column count equals the input column count.
+- Confirm the output row count equals the input row count minus the fully-empty
+  rows that were removed.
+- If verification fails, fix the output and check again before reporting done.""";
+
+glob llm: Model = Model(model_name="gpt-4o-mini");
+
+# ===== COGNITIVE SLOTS (GEN-*) =====
+def decide_column_meanings(input_headers: list[str]) -> list[str] by llm;
+sem decide_column_meanings =
+"""Decide each column's meaning and produce clean snake_case header names (one per input, original order). NEVER violate: No leading, trailing or doubled underscores.; Do not drop, add, merge or reorder columns.; do not just print it.
+
+Resources resident on this node — USE these (owned helpers must be imported, not reinvented; rules/data are authoritative):
+
+[header_renaming_guidance]
+body:
+2. Rename every column header to a clean, readable `snake_case` identifier.
+   Real exports carry units, punctuation, vendor prefixes and parenthetical
+   qualifiers that a literal character substitution mangles — decide what each
+   column actually *means* and name it that. For example:
+
+   | messy header | good name | a literal transform gives |
+   |---|---|---|
+   | `Cust. E-mail (primary)` | `customer_email` | `cust__e_mail__primary_` |
+   | `Total Spend ($)` | `total_spend` | `total_spend____` |
+   | `Signup Date (UTC)` | `signup_date` | `signup_date__utc_` |
+   | `First  Name` | `first_name` | `first__name` |
+
+[rules]
+body:
+- Every output header MUST be lowercase `snake_case`: letters, digits and single
+  underscores only. No leading, trailing or doubled underscores.
+- You MUST produce exactly one name per input column, in the original order.
+  Do not drop, add, merge or reorder columns.
+- Header names MUST be unique.
+- The cleaned data MUST be written to `cleaned.csv` — do not just print it.""";
+def spawn_verifications_worker(task: str) -> str by llm;
+sem spawn_verifications_worker = "Fan out independent verification checks. You are ONE parallel worker handling a single sub-task from a larger fan-out. Do just this sub-task fully and return a short result of what you did and where any output landed.";
+def fix_output(input_headers: list[str], proposed_headers: list[str], check_parse_ok: bool, check_regex_ok: bool, check_unique_ok: bool, check_colcount_ok: bool, check_rowcount_ok: bool, check_order_ok: bool) -> list[str] by llm;
+sem fix_output =
+"""If verification fails, revise header names and try again. NEVER violate: No leading, trailing or doubled underscores.; Do not drop, add, merge or reorder columns.; do not just print it.
+
+Resources resident on this node — USE these (owned helpers must be imported, not reinvented; rules/data are authoritative):
+
+[header_renaming_guidance]
+body:
+2. Rename every column header to a clean, readable `snake_case` identifier.
+   Real exports carry units, punctuation, vendor prefixes and parenthetical
+   qualifiers that a literal character substitution mangles — decide what each
+   column actually *means* and name it that. For example:
+
+   | messy header | good name | a literal transform gives |
+   |---|---|---|
+   | `Cust. E-mail (primary)` | `customer_email` | `cust__e_mail__primary_` |
+   | `Total Spend ($)` | `total_spend` | `total_spend____` |
+   | `Signup Date (UTC)` | `signup_date` | `signup_date__utc_` |
+   | `First  Name` | `first_name` | `first__name` |
+
+[verification_checks]
+body:
+- Re-read `cleaned.csv` and confirm it parses as valid CSV with a header row.
+- Confirm every header matches `^[a-z][a-z0-9]*(_[a-z0-9]+)*$`.
+- Confirm the output column count equals the input column count.
+- Confirm the output row count equals the input row count minus the fully-empty
+  rows that were removed.
+- If verification fails, fix the output and check again before reporting done.""";
+
+# ===== NODES =====
+node ReadInputCsv {}
+node DecideColumnMeanings {}
+node ApplyHeaderRename {}
+node DropEmptyRows {}
+node WriteCleanedCsv {}
+node ReReadOutputCsv {}
+node SpawnVerifications {}
+node CheckParsesWithHeader {}
+node VerifyHeaderRegex {}
+node VerifyHeaderUniqueness {}
+node VerifyColumnCountEqual {}
+node VerifyRowCountEqualsInputMinusEmpty {}
+node VerifyHeadersMatchProposedOrder {}
+node VerificationGate {}
+node FixOutput {}
+node Done {}
+
+# ===== WALKER =====
+walker CleanCsvAgent {
+    has task: str;
+    has task_input_path: str = "";
+    has input_csv_path: str = "";
+    has input_headers: list[str] = [];
+    has input_rows: any = None;
+    has input_row_count: int = 0;
+    has input_col_count: int = 0;
+    has proposed_headers: list[str] = [];
+    has renamed_rows: any = None;
+    has renamed_headers: list[str] = [];
+    has output_col_count: int = 0;
+    has clean_rows: any = None;
+    has removed_empty_row_count: int = 0;
+    has clean_row_count: int = 0;
+    has cleaned_csv_path: str = "";
+    has written_headers: list[str] = [];
+    has written_rows: any = None;
+    has written_row_count: int = 0;
+    has written_col_count: int = 0;
+    has check_parse_ok: bool = False;
+    has check_regex_ok: bool = False;
+    has check_unique_ok: bool = False;
+    has check_colcount_ok: bool = False;
+    has check_rowcount_ok: bool = False;
+    has check_order_ok: bool = False;
+    has all_checks_passed: bool = False;
+    has report: str = "";
+
+    can n_read_input_csv with ReadInputCsv entry {
+        _progress("read_input_csv");
+        _rw = _read_input_csv(self.task_input_path);
+        self.input_csv_path = str(_unwrap(_rw, "input_csv_path", 0, False));
+        self.input_headers = list(_unwrap(_rw, "input_headers", 1, False));
+        self.input_rows = _unwrap(_rw, "input_rows", 2, False);
+        _unwrap(_rw, "input_row_count", 3, False);  # -> input_row_count (int); carry keeps default
+        _unwrap(_rw, "input_col_count", 4, False);  # -> input_col_count (int); carry keeps default
+        visit [-->][?:DecideColumnMeanings];
+    }
+
+    can n_decide_column_meanings with DecideColumnMeanings entry {
+        _progress("decide_column_meanings");
+        _tui_llm_in("decide_column_meanings", [("input_headers", self.input_headers)]);
+        self.proposed_headers = _clean_strlist(decide_column_meanings(self.input_headers));
+        _tui_llm_out(self.proposed_headers);
+        visit [-->][?:ApplyHeaderRename];
+    }
+
+    can n_apply_header_rename with ApplyHeaderRename entry {
+        _progress("apply_header_rename");
+        _rw = _apply_header_rename(self.input_rows, self.proposed_headers);
+        self.renamed_rows = _unwrap(_rw, "renamed_rows", 0, False);
+        self.renamed_headers = list(_unwrap(_rw, "renamed_headers", 1, False));
+        _unwrap(_rw, "output_col_count", 2, False);  # -> output_col_count (int); carry keeps default
+        visit [-->][?:DropEmptyRows];
+    }
+
+    can n_drop_empty_rows with DropEmptyRows entry {
+        _progress("drop_empty_rows");
+        _rw = _drop_empty_rows(self.renamed_rows);
+        self.clean_rows = _unwrap(_rw, "clean_rows", 0, False);
+        _unwrap(_rw, "removed_empty_row_count", 1, False);  # -> removed_empty_row_count (int); carry keeps default
+        _unwrap(_rw, "clean_row_count", 2, False);  # -> clean_row_count (int); carry keeps default
+        visit [-->][?:WriteCleanedCsv];
+    }
+
+    can n_write_cleaned_csv with WriteCleanedCsv entry {
+        _progress("write_cleaned_csv");
+        self.cleaned_csv_path = str(_unwrap(_write_cleaned_csv(self.clean_rows, self.proposed_headers), "cleaned_csv_path", 0, True));
+        visit [-->][?:ReReadOutputCsv];
+    }
+
+    can n_re_read_output_csv with ReReadOutputCsv entry {
+        _progress("re_read_output_csv");
+        _rw = _re_read_output_csv(self.cleaned_csv_path);
+        self.written_headers = list(_unwrap(_rw, "written_headers", 0, False));
+        self.written_rows = _unwrap(_rw, "written_rows", 1, False);
+        _unwrap(_rw, "written_row_count", 2, False);  # -> written_row_count (int); carry keeps default
+        _unwrap(_rw, "written_col_count", 3, False);  # -> written_col_count (int); carry keeps default
+        visit [-->][?:SpawnVerifications];
+    }
+
+    can n_spawn_verifications with SpawnVerifications entry {
+        _progress("spawn_verifications");
+        # SPAWN spawn_verifications: fan out workers concurrently (isolation: shared_read; siblings write-isolated by idx, worktree isolation deferred to host runtime)
+        _tasks = [self.task];
+        _futs = [flow (root spawn CleanCsvAgentSpawnVerificationsSib(task=_t, idx=_i)) for (_i, _t) in enumerate(_tasks)];
+        _sibs = [wait _f for _f in _futs];
+        _spawn_results = [_s.result for _s in _sibs];
+        visit [-->][?:CheckParsesWithHeader];
+        visit [-->][?:VerifyHeaderRegex];
+        visit [-->][?:VerifyHeaderUniqueness];
+        visit [-->][?:VerifyColumnCountEqual];
+        visit [-->][?:VerifyRowCountEqualsInputMinusEmpty];
+        visit [-->][?:VerifyHeadersMatchProposedOrder];
+    }
+
+    can n_check_parses_with_header with CheckParsesWithHeader entry {
+        _progress("check_parses_with_header");
+        self.check_parse_ok = bool(_unwrap(_check_parses_with_header(self.written_headers, self.written_rows), "check_parse_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verify_header_regex with VerifyHeaderRegex entry {
+        _progress("verify_header_regex");
+        self.check_regex_ok = bool(_unwrap(_verify_header_regex(self.written_headers), "check_regex_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verify_header_uniqueness with VerifyHeaderUniqueness entry {
+        _progress("verify_header_uniqueness");
+        self.check_unique_ok = bool(_unwrap(_verify_header_uniqueness(self.written_headers), "check_unique_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verify_column_count_equal with VerifyColumnCountEqual entry {
+        _progress("verify_column_count_equal");
+        self.check_colcount_ok = bool(_unwrap(_verify_column_count_equal(self.input_col_count, self.written_col_count), "check_colcount_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verify_row_count_equals_input_minus_empty with VerifyRowCountEqualsInputMinusEmpty entry {
+        _progress("verify_row_count_equals_input_minus_empty");
+        self.check_rowcount_ok = bool(_unwrap(_verify_row_count_equals_input_minus_empty(self.input_row_count, self.removed_empty_row_count, self.written_row_count), "check_rowcount_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verify_headers_match_proposed_order with VerifyHeadersMatchProposedOrder entry {
+        _progress("verify_headers_match_proposed_order");
+        self.check_order_ok = bool(_unwrap(_verify_headers_match_proposed_order(self.proposed_headers, self.written_headers), "check_order_ok", 0, True));
+        visit [-->][?:VerificationGate];
+    }
+
+    can n_verification_gate with VerificationGate entry {
+        _progress("verification_gate");
+        self.all_checks_passed = bool(_unwrap(_verification_gate(self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok, self.check_order_ok), "all_checks_passed", 0, True));
+        if self.all_checks_passed { visit [-->][?:Done]; }
+        elif not self.all_checks_passed { visit [-->][?:FixOutput]; }
+    }
+
+    can n_fix_output with FixOutput entry {
+        _progress("fix_output");
+        _tui_llm_in("fix_output", [("input_headers", self.input_headers), ("proposed_headers", self.proposed_headers), ("check_parse_ok", self.check_parse_ok), ("check_regex_ok", self.check_regex_ok), ("check_unique_ok", self.check_unique_ok), ("check_colcount_ok", self.check_colcount_ok), ("check_rowcount_ok", self.check_rowcount_ok), ("check_order_ok", self.check_order_ok)]);
+        self.proposed_headers = _clean_strlist(fix_output(self.input_headers, self.proposed_headers, self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok, self.check_order_ok));
+        _tui_llm_out(self.proposed_headers);
+        visit [-->][?:ApplyHeaderRename];
+    }
+
+    can n_done with Done entry {
+        _progress("done");
+        self.report = f"CleanCsvAgent cleaned_csv_path={_artifact_text(self.cleaned_csv_path)}";
+        disengage;
+    }
+
+}
+
+walker CleanCsvAgentSpawnVerificationsSib {
+    has task: str;
+    has idx: int = 0;
+    has result: str = "";
+    has ok: bool = True;
+    can run with Root entry {
+        try {
+            self.result = str(spawn_verifications_worker(self.task));
+        } except Exception as _e {
+            self.result = "spawn worker error: " + str(_e)[:200];
+            self.ok = False;
+        }
+    }
+}
+
+# ===== ENTRYPOINT =====
+def run(task: str, model: Model, skill: str) -> str {
+    llm = model;
+
+    n_read_input_csv = ReadInputCsv();
+    n_decide_column_meanings = DecideColumnMeanings();
+    n_apply_header_rename = ApplyHeaderRename();
+    n_drop_empty_rows = DropEmptyRows();
+    n_write_cleaned_csv = WriteCleanedCsv();
+    n_re_read_output_csv = ReReadOutputCsv();
+    n_spawn_verifications = SpawnVerifications();
+    n_check_parses_with_header = CheckParsesWithHeader();
+    n_verify_header_regex = VerifyHeaderRegex();
+    n_verify_header_uniqueness = VerifyHeaderUniqueness();
+    n_verify_column_count_equal = VerifyColumnCountEqual();
+    n_verify_row_count_equals_input_minus_empty = VerifyRowCountEqualsInputMinusEmpty();
+    n_verify_headers_match_proposed_order = VerifyHeadersMatchProposedOrder();
+    n_verification_gate = VerificationGate();
+    n_fix_output = FixOutput();
+    n_done = Done();
+
+    root ++> n_read_input_csv;
+    n_read_input_csv ++> n_decide_column_meanings;
+    n_decide_column_meanings ++> n_apply_header_rename;
+    n_apply_header_rename ++> n_drop_empty_rows;
+    n_drop_empty_rows ++> n_write_cleaned_csv;
+    n_write_cleaned_csv ++> n_re_read_output_csv;
+    n_re_read_output_csv ++> n_spawn_verifications;
+    n_spawn_verifications ++> n_check_parses_with_header;
+    n_spawn_verifications ++> n_verify_header_regex;
+    n_spawn_verifications ++> n_verify_header_uniqueness;
+    n_spawn_verifications ++> n_verify_column_count_equal;
+    n_spawn_verifications ++> n_verify_row_count_equals_input_minus_empty;
+    n_spawn_verifications ++> n_verify_headers_match_proposed_order;
+    n_check_parses_with_header ++> n_verification_gate;
+    n_verify_header_regex ++> n_verification_gate;
+    n_verify_header_uniqueness ++> n_verification_gate;
+    n_verify_column_count_equal ++> n_verification_gate;
+    n_verify_row_count_equals_input_minus_empty ++> n_verification_gate;
+    n_verify_headers_match_proposed_order ++> n_verification_gate;
+    n_verification_gate ++> n_done;
+    n_verification_gate ++> n_fix_output;
+    n_fix_output ++> n_apply_header_rename;
+
+    agent = n_read_input_csv spawn CleanCsvAgent(task=task, task_input_path=task);
+    if not agent.report {
+        # loud, not silent: an empty report means the walker stopped at a
+        # dead-end/escape-hatch node without reaching TERMINAL (see the
+        # AGIR_PROGRESS trace for the exact node).
+        return "INCOMPLETE: traversal ended without reaching TERMINAL — no deliverable was produced";
+    }
+    return agent.report;
+}
+
+with entry:__main__ {
+    import sys;
+    import os;
+    # accept both `./prog.jac task...` and `jac run prog.jac -- task...`
+    _ej_raw = sys.argv;
+    _ej_args = _ej_raw[_ej_raw.index("--") + 1:] if "--" in _ej_raw else _ej_raw[1:];
+    _ej_args = [str(a) for a in _ej_args if not str(a).startswith("-")];
+    _ej_task = str(" ".join(_ej_args));
+    if (not _ej_task) and _tui_on() {
+        # a terminal with no task: the artifact ASKS — it is a TUI app
+        print("");
+        _ej_task = str(input("  clean_csv › "));
+    }
+    if not _ej_task {
+        print("usage: clean_csv.jac \"<task>\"");
+    } else {
+        _ej_name = os.environ.get("SIGIL_MODEL", os.environ.get("SIGIL_SMALL", "gpt-4o-mini"));
+        _tui_banner("clean_csv", _ej_task);
+        _ej_before = set(os.listdir("."));
+        _ej_rep = run(_ej_task, Model(model_name=_ej_name), "");
+        _ej_after = set(os.listdir("."));
+        _ej_diff = _ej_after - _ej_before;   # jac: no binary ops inside a comprehension iterable
+        _ej_new = sorted([str(f) for f in _ej_diff if (str(f)[:1] != ".") and (str(f)[:1] != "_") and (str(f) != "op.py")]);
+        if _tui_on() { _tui_finish(_ej_rep, _ej_new); }
+        else { print(_ej_rep); }
+    }
+}

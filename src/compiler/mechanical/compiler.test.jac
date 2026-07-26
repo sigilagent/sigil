@@ -180,11 +180,225 @@ edges:
   - {from: peek_it, to: done, modality: mandatory}
 """;
 
+# A fan-out into independent checks that converge on a gate — the shape every
+# "verify these N things, then decide" rule lowers to.
+glob FANOUT_GATE_IR: str = """---
+name: fanchk
+description: Fan out two checks, then gate on both.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  check_a:
+    sig: "(text: str) -> bool"
+    surface: SENSE
+    doc: "First check."
+    body: |
+      def check_a(text):
+          return bool(text)
+  check_b:
+    sig: "(text: str) -> bool"
+    surface: SENSE
+    doc: "Second check."
+    body: |
+      def check_b(text):
+          return len(text) > 1
+  gate_all:
+    sig: "(a_ok: bool, b_ok: bool) -> bool"
+    surface: SENSE
+    doc: "True when both checks hold."
+    body: |
+      def gate_all(a_ok, b_ok):
+          return bool(a_ok) and bool(b_ok)
+walker:
+  name: FanAgent
+  carries:
+    task:
+      type: str
+      role: input
+    a_ok:
+      type: bool
+      produced_by: run_check_a
+    b_ok:
+      type: bool
+      produced_by: run_check_b
+    all_ok:
+      type: bool
+      produced_by: gate
+nodes:
+  - id: fan
+    type: SPAWN
+    owner: code
+  - id: run_check_a
+    type: CODE
+    owner: code
+    op: check_a
+    tool: check_a
+    reads: [task]
+    writes: [a_ok]
+  - id: run_check_b
+    type: CODE
+    owner: code
+    op: check_b
+    tool: check_b
+    reads: [task]
+    writes: [b_ok]
+  - id: gate
+    type: ROUTE
+    owner: code
+    op: gate_all
+    tool: gate_all
+    reads: [a_ok, b_ok]
+    writes: [all_ok]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: fan, to: run_check_a, modality: mandatory}
+  - {from: fan, to: run_check_b, modality: mandatory}
+  - {from: run_check_a, to: gate, modality: mandatory}
+  - {from: run_check_b, to: gate, modality: mandatory}
+  - {from: gate, to: done, guard: "all_ok == true"}
+  - {from: gate, to: fan, guard: "all_ok == false"}
+""";
+
+# Taking only the first forward edge left run_check_b unreachable, so `b_ok` kept
+# its default and the gate could never pass.
+test "a fan-out visits every unguarded forward edge, not just the first" {
+    src = transpile_ir(FANOUT_GATE_IR, "fanchk");
+    assert "visit [-->][?:RunCheckA];" in src;
+    assert "visit [-->][?:RunCheckB];" in src;
+}
+
+# A code ROUTE has to DECIDE before it branches: emitting only the branch left
+# `all_ok` at its `False` default forever, so the route looped through its repair
+# edge until the step budget blew.
+test "a code ROUTE calls the tool that computes its own guard" {
+    src = transpile_ir(FANOUT_GATE_IR, "fanchk");
+    assert "self.all_ok = " in src;
+    assert "_gate_all(self.a_ok, self.b_ok)" in src;
+}
+
 test "spawn binding skips produced and non-string carries" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
     assert "spawn MixedAgent(task=task, src_path=task)" in src;
     assert "retries=task" not in src;   # int input: the task text is not an int
     assert "seen=task" not in src;      # produced by peek_it, not by the caller
+}
+
+# A verify-then-repair skill: a model proposes, code checks six ways, a gate folds
+# the verdicts, and a GEN-EDIT repairs on failure. The shape any skill with a
+# verification gate lowers to — and where three separate lowering faults met.
+glob REPAIR_IR: str = """---
+name: fixer
+description: Propose names, verify them, repair on failure.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  run_checks:
+    sig: "(answer) -> (c1,c2,c3,c4,c5,c6)"
+    surface: SENSE
+    doc: "Six independent verdicts."
+    body: |
+      def run_checks(answer):
+          n = len(answer or [])
+          return (n > 0, n > 1, n > 2, n > 3, n > 4, n > 5)
+  gate_all:
+    sig: "(c1,c2,c3,c4,c5,c6) -> all_ok"
+    surface: SENSE
+    doc: "True when every verdict holds."
+    body: |
+      def gate_all(c1, c2, c3, c4, c5, c6):
+          return all([c1, c2, c3, c4, c5, c6])
+walker:
+  name: FixAgent
+  carries:
+    task:
+      type: str
+      role: input
+    source:
+      type: list[str]
+      role: input
+    answer:
+      type: list[str]
+      produced_by: propose
+    c1: {type: bool, produced_by: checks}
+    c2: {type: bool, produced_by: checks}
+    c3: {type: bool, produced_by: checks}
+    c4: {type: bool, produced_by: checks}
+    c5: {type: bool, produced_by: checks}
+    c6: {type: bool, produced_by: checks}
+    all_ok:
+      type: bool
+      produced_by: gate
+nodes:
+  - id: propose
+    type: GEN-FILL
+    owner: model
+    doc: "Propose one name per source item."
+    reads: [source]
+    writes: [answer]
+  - id: checks
+    type: CODE
+    owner: code
+    op: run_checks
+    tool: run_checks
+    reads: [answer]
+    writes: [c1, c2, c3, c4, c5, c6]
+  - id: gate
+    type: ROUTE
+    owner: code
+    op: gate_all
+    tool: gate_all
+    reads: [c1, c2, c3, c4, c5, c6]
+    writes: [all_ok]
+  - id: fixit
+    type: GEN-EDIT
+    owner: model
+    doc: "Repair the answer."
+    reads: [answer, c1, c2, c3, c4, c5, c6]
+    writes: [answer]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: propose, to: checks, modality: mandatory}
+  - {from: checks, to: gate, modality: mandatory}
+  - {from: gate, to: done, guard: "all_ok == true"}
+  - {from: gate, to: fixit, guard: "all_ok == false"}
+  - {from: fixit, to: checks, modality: mandatory}
+""";
+
+# Wired to read only the REJECTED attempt and the verdicts, a repair is blind: told
+# THAT a check failed but never what the input was, it cannot know the answer, and a
+# small model fills the gap by inventing. Give it the producer's inputs.
+test "a repair slot inherits the reads of the node that produced its carry" {
+    src = transpile_ir(REPAIR_IR, "fixer");
+    assert "def fixit(source: list[str]" in src;
+}
+
+# The arity cap used to be a bare `[:6]` duplicated across seven sites. `fixit`
+# declares SEVEN reads, so the tail was dropped with no diagnostic — and raising one
+# copy emitted a slot whose call site passed fewer args than it declared.
+test "a slot keeps every declared read, and its call site matches its arity" {
+    src = transpile_ir(REPAIR_IR, "fixer");
+    decl = src.split("def fixit(")[1].split(")")[0];
+    call = src.split("fixit(self.")[1].split(");")[0];
+    # scope the check to the SIGNATURE — the walker also declares `has c6: bool`,
+    # so searching the whole module would pass even with the read truncated away.
+    assert "c6: bool" in decl;
+    assert len(decl.split(",")) == len(call.split(","));
+}
+
+# byLLM leaks JSON structure into list elements ('' or '"},{"'). Downstream that is
+# indistinguishable from a real item, so a count check fails and the repair "fixes"
+# the blank by NAMING it instead of dropping it.
+test "a list-returning slot's result is stripped of contentless elements" {
+    src = transpile_ir(REPAIR_IR, "fixer");
+    assert "_clean_strlist(propose(" in src;
 }
 
 # A code-owned verification step writing a bool verdict — the shape every "check

@@ -30,6 +30,14 @@ glob GEN_TYPES: list = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
 # guard values that mean "unconditional" — never lower as a literal condition
 glob GUARD_SENTINELS: list = ["", "otherwise", "default", "else", "always", "true", "_"];
 
+# Max carries handed to a by-llm slot. ONE constant on purpose: the slot's
+# declared arity and every call site that invokes it must agree, and when this
+# was duplicated as a bare `[:6]` in seven places, raising one emitted an
+# 8-param slot called with 6 arguments. It also has to be generous enough not
+# to silently drop declared reads — a verification-gate repair reads the
+# attempt plus one verdict per check and blows straight past six.
+glob SLOT_ARITY_CAP: int = 12;
+
 # Tool params that name a DESTINATION rather than a value — an ACT tool's write
 # path. Kept in sync with the `ppar` sniff in the embodiment ladder.
 glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
@@ -1034,7 +1042,12 @@ def _emit_slots(ir: any) -> str {
         }
         if not is_slot { continue; }
         slot = _slot_name(n["id"], carries);
-        creads = [r for r in _list(n.get("reads")) if r in list(carries)][:6];
+        # Cap the slot's arity so byLLM's schema stays manageable — but 6 was low
+        # enough to silently drop real inputs: a verification-gate repair reads the
+        # attempt + one verdict per check and blows past it, losing the tail with no
+        # diagnostic. Losing a declared read makes the slot unable to do its job, so
+        # keep the ceiling generous.
+        creads = [r for r in _list(n.get("reads")) if r in list(carries)][:SLOT_ARITY_CAP];
         if (nt == "CALL") and (not creads) and ("task" in list(carries)) { creads = ["task"]; }
         params: list = [];
         for r in creads {
@@ -1199,6 +1212,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
 def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = None, types: any = None) -> list {
     lines: list = [];
     guarded: list = [];
+    fwd_all: list = [];
     fwd_default = "";
     first_fwd = "";
     sentinels = GUARD_SENTINELS;
@@ -1212,6 +1226,7 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = Non
         if str(e.get("to")) != str(nid) {
             if not first_fwd { first_fwd = tgt; }
             if (not real) and (not fwd_default) { fwd_default = tgt; }
+            if (not real) and (tgt not in fwd_all) { fwd_all.append(tgt); }
         }
     }
     deflt = fwd_default if fwd_default else first_fwd;
@@ -1225,6 +1240,13 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = Non
         }
         if deflt { lines.append(f"        else {{ visit [-->][?:{deflt}]; }}"); }
         else { lines.append("        else { disengage; }"); }
+    } elif len(fwd_all) > 1 {
+        # FAN-OUT: several unguarded forward edges (a SPAWN's parallel checks). Visit
+        # EVERY one — taking only the first left the siblings unreachable, so the
+        # carries they produce kept their defaults and any downstream gate reading
+        # them could never pass. The visit queue is breadth-first, so all of these
+        # run before the node they converge on.
+        for t in fwd_all { lines.append(f"        visit [-->][?:{t}];"); }
     } elif deflt {
         # no guards: advance to the forward target (avoids following any self-loop)
         lines.append(f"        visit [-->][?:{deflt}];");
@@ -1337,7 +1359,10 @@ def _emit_walker(ir: any) -> list {
         body: list = [];
         can_dispatch = ("args" in ckeys) and (route_field in ckeys);
         if ntype in GEN_TYPES {
-            creads = [r for r in reads if r in ckeys][:6];
+            # MUST match the cap in _emit_slots: that one fixes the slot's declared
+            # arity, this one the call site. Let them drift and the emitted program
+            # calls an 8-param slot with 6 arguments.
+            creads = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
             call_args = _slot_args(creads, carries, types);
             call = f"{_slot_name(nid, carries)}({call_args})";
             tgt = writes[0] if writes else None;
@@ -1345,6 +1370,10 @@ def _emit_walker(ir: any) -> list {
                 tt = _jac_type(carries[tgt].get("type"), types)[0];
                 val = call;
                 if (ntype == "GEN-RAW") and (tt == "str") { val = f"str(_strip_fences({call}))"; }
+                # A list-returning slot is where byLLM's JSON leakage shows up as a
+                # phantom element ("" or '"},{"'), which every downstream count check
+                # then reads as a real item. Strip contentless entries at the source.
+                if str(tt).startswith("list") { val = f"_clean_strlist({call})"; }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));
@@ -1402,6 +1431,16 @@ def _emit_walker(ir: any) -> list {
                 body.append(f"        {call};");
             }
         } elif (ntype == "ROUTE") and (owner == "code") {
+            # A code ROUTE usually DECIDES before it branches: its tool folds the
+            # carries it reads into the verdict its guards test (six check_*_ok
+            # flags -> all_checks_passed). Emitting only the branch left that carry
+            # at its `False` default forever, so the guard could never go true and
+            # the route looped through its repair edge until the step budget blew.
+            stR = _node_tool(ir, nid, n);
+            if stR and writes {
+                exprR = _toolfn_prefix(str(stR[0])) + "(" + _bind_args(stR[1], reads, carries, types) + ")";
+                for alR in _assign_writes(writes, exprR, carries, types) { body.append(alR); }
+            }
             branches: list = [];
             default_target = "";
             for e in out_edges {
@@ -1428,7 +1467,7 @@ def _emit_walker(ir: any) -> list {
             # GEN step + branch: call its slot, assign, then route.
             if writes and (not _node_tool(ir, nid, n)) {
                 slot = _slot_name(nid, carries);
-                creadsR = [r for r in reads if r in ckeys][:6];
+                creadsR = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
                 callR = f"{slot}({_slot_args(creadsR, carries, types)})";
                 body.append(_assign_carry(writes[0], callR, carries, types));
             }
@@ -1464,7 +1503,7 @@ def _emit_walker(ir: any) -> list {
             # bounded cognitive fetch: a by-llm slot (may ReAct over autonomy.tools)
             tgt3m = writes[0] if writes else None;
             slot = _slot_name(nid, carries);
-            creads3 = [r for r in reads if r in ckeys][:6];
+            creads3 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
             call3 = f"{slot}({_slot_args(creads3, carries, types)})";
             body.append(_assign_carry(tgt3m, call3, carries, types));
         } elif ntype == "ACT" {
@@ -1501,7 +1540,7 @@ def _emit_walker(ir: any) -> list {
                 # ACT owner=model with no tool = a cognitive emit (e.g. report,
                 # completion tips) -> a by-llm slot over its reads.
                 slot = _slot_name(nid, carries);
-                creads5 = [r for r in reads if r in ckeys][:6];
+                creads5 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
                 expr = f"{slot}({_slot_args(creads5, carries, types)})";
             }
             # ACT with no tool but a str content carry it reads -> write it to a
@@ -1528,7 +1567,7 @@ def _emit_walker(ir: any) -> list {
             # script into the target's artifact carry.
             tgtc = writes[0] if writes else None;
             slot = _slot_name(nid, carries);
-            ccreads = [r for r in reads if r in ckeys][:6];
+            ccreads = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
             if (not ccreads) and ("task" in ckeys) { ccreads = ["task"]; }
             callc = f"{slot}({_slot_args(ccreads, carries, types)})";
             if "script" in ckeys {
@@ -1547,7 +1586,7 @@ def _emit_walker(ir: any) -> list {
                 for alL in _assign_writes(writes, expr, carries, types) { body.append(alL); }
             } elif owner == "model" {
                 slot = _slot_name(nid, carries);
-                creadsL = [r for r in reads if r in ckeys][:6];
+                creadsL = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
                 body.append(_assign_carry(writes[0] if writes else None, f"{slot}({_slot_args(creadsL, carries, types)})", carries, types));
             } else {
                 body.append(f"        # LOOP {nid}");
@@ -1714,8 +1753,49 @@ def _emit_run(ir: any, walker_name: any) -> str {
 # ---------------------------------------------------------------------------
 # top-level
 # ---------------------------------------------------------------------------
+# A repair node (GEN-EDIT) rewrites a carry that another node already produced.
+# LIFT tends to wire it to read only the REJECTED attempt plus the gate's boolean
+# verdicts — which makes it repair blind: told THAT the column count is wrong but
+# never what the input was, it cannot know the answer, and a small model fills the
+# gap by inventing (`extra_column`, `placeholder_column`). The gate then rejects
+# that too and the route loops until the step budget blows.
+#
+# Give the repair the same inputs the ORIGINAL producer had. Only carries are
+# added, never anything the repair itself writes, so this cannot introduce a
+# self-referential read.
+def _widen_repair_reads(ir: any) -> None {
+    nodes = _list(ir.get("nodes"));
+    ck = list(_dict(_dict(ir.get("walker")).get("carries")));
+    for n in nodes {
+        if str(n.get("type")) != "GEN-EDIT" { continue; }
+        writes = [str(w) for w in _list(n.get("writes"))];
+        if not writes { continue; }
+        reads: list = [str(r) for r in _list(n.get("reads"))];
+        extra: list = [];
+        for p in nodes {
+            if str(p.get("id")) == str(n.get("id")) { continue; }
+            pw = [str(w) for w in _list(p.get("writes"))];
+            shared = False;
+            for w in writes {
+                if w in pw { shared = True; }
+            }
+            if not shared { continue; }
+            for r in _list(p.get("reads")) {
+                rr = str(r);
+                if (rr in ck) and (rr not in reads) and (rr not in extra) and (rr not in writes) {
+                    extra.append(rr);
+                }
+            }
+        }
+        # FRONT, not back: slot params are capped, so the ground truth the repair
+        # is derived from must not be the thing that falls off the end.
+        if extra { n["reads"] = extra + reads; }
+    }
+}
+
 def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     ir = _load_ir(ir_text);
+    _widen_repair_reads(ir);
     fm = _dict(ir.get("_frontmatter"));
     _FALLBACKS.clear();                 # embodiment-ladder fallbacks for THIS transpile
     tools_block = _emit_tools(ir);
