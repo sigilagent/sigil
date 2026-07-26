@@ -239,3 +239,6 @@ src/*_v[0-9]*.jac
 # native build artifacts (platform-specific)
 bin/
 _site/
+
+# demo output produced by running examples/csv-clean
+examples/csv-clean/cleaned.csv

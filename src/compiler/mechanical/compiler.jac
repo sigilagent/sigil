@@ -1199,6 +1199,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
 def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = None, types: any = None) -> list {
     lines: list = [];
     guarded: list = [];
+    fwd_all: list = [];
     fwd_default = "";
     first_fwd = "";
     sentinels = GUARD_SENTINELS;
@@ -1212,6 +1213,7 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = Non
         if str(e.get("to")) != str(nid) {
             if not first_fwd { first_fwd = tgt; }
             if (not real) and (not fwd_default) { fwd_default = tgt; }
+            if (not real) and (tgt not in fwd_all) { fwd_all.append(tgt); }
         }
     }
     deflt = fwd_default if fwd_default else first_fwd;
@@ -1225,6 +1227,13 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = Non
         }
         if deflt { lines.append(f"        else {{ visit [-->][?:{deflt}]; }}"); }
         else { lines.append("        else { disengage; }"); }
+    } elif len(fwd_all) > 1 {
+        # FAN-OUT: several unguarded forward edges (a SPAWN's parallel checks). Visit
+        # EVERY one — taking only the first left the siblings unreachable, so the
+        # carries they produce kept their defaults and any downstream gate reading
+        # them could never pass. The visit queue is breadth-first, so all of these
+        # run before the node they converge on.
+        for t in fwd_all { lines.append(f"        visit [-->][?:{t}];"); }
     } elif deflt {
         # no guards: advance to the forward target (avoids following any self-loop)
         lines.append(f"        visit [-->][?:{deflt}];");
@@ -1402,6 +1411,16 @@ def _emit_walker(ir: any) -> list {
                 body.append(f"        {call};");
             }
         } elif (ntype == "ROUTE") and (owner == "code") {
+            # A code ROUTE usually DECIDES before it branches: its tool folds the
+            # carries it reads into the verdict its guards test (six check_*_ok
+            # flags -> all_checks_passed). Emitting only the branch left that carry
+            # at its `False` default forever, so the guard could never go true and
+            # the route looped through its repair edge until the step budget blew.
+            stR = _node_tool(ir, nid, n);
+            if stR and writes {
+                exprR = _toolfn_prefix(str(stR[0])) + "(" + _bind_args(stR[1], reads, carries, types) + ")";
+                for alR in _assign_writes(writes, exprR, carries, types) { body.append(alR); }
+            }
             branches: list = [];
             default_target = "";
             for e in out_edges {
