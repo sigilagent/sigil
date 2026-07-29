@@ -76,6 +76,39 @@ test "a lossless join assembles with no issues" {
     assert "NEVER violate" in res.ir_text;   # the FORBIDDEN constraint rides the Mind node's doc
 }
 
+# Folding EVERY constraint into EVERY Mind slot put ~30 unrelated prohibitions on
+# each one — a decl-syntax rule lecturing the node that curls an endpoint. A
+# prohibition rides only the slots it governs, and one scoped to a code node
+# escalates to the model slot that PRODUCES what that node consumes.
+test "a prohibition is scoped to the slots it governs, not sprayed on all of them" {
+    wf = _wf();
+    wf.nodes.append(AgirNode(id="pick_name", ntype=NodeType.GEN_ENUM, owner=Owner.MODEL,
+                             doc="Choose a short label for the run.",
+                             reads=["task"], writes=["label"], traces_to=["r2"]));
+    views = _views();
+    views.io.carries.append(Carry(name="label", ctype="str", produced_by="pick_name"));
+    res = assemble(_spec(), wf, views, "csv-toy");
+    ir = res.ir_text;
+    # `summarize` writes the summary that `emit` outputs — the Unicode-subscript
+    # prohibition binds there...
+    idx_sum = ir.find("id: summarize");
+    idx_pick = ir.find("id: pick_name");
+    assert idx_sum >= 0 and idx_pick >= 0;
+    seg_sum = ir[idx_sum:idx_pick] if idx_sum < idx_pick else ir[idx_sum:];
+    assert "NEVER violate" in seg_sum;
+    # ...and NOT on a slot that has nothing to do with the output
+    seg_pick = ir[idx_pick:] if idx_pick > idx_sum else ir[idx_pick:idx_sum];
+    assert "NEVER violate" not in seg_pick;
+}
+
+test "an unplaceable constraint stays global and is reported, never dropped" {
+    wf = _wf();
+    wf.constraints = ["r4: Zzzqqx yyywwv."];   # shares no token with any node
+    res = assemble(_spec(), wf, _views(), "csv-toy");
+    assert "NEVER violate" in res.ir_text;     # never silently dropped
+    assert len([i for i in res.issues if "could not be scoped" in i]) == 1;
+}
+
 test "the assembled IR round-trips LIVE through the mechanical half" {
     res = assemble(_spec(), _wf(), _views(), "csv-toy");
     v = compile_gate(res.ir_text, "csv_toy");

@@ -16,6 +16,7 @@ Issues never block emission — assemble returns the IR WITH its issue list, and
 the caller (lift) decides. Honest output, never a silent success.
 """
 
+import re;
 import yaml;
 import from .lift_types { Modality, RuleKind }
 import from .spec_loop { RuleSet }
@@ -86,6 +87,26 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     for ki in vb.kn.knowledge {
         if not ki.content.strip() { issues.append("knowledge '" + ki.key + "' has no content (prose-pointer)"); }
     }
+
+    # ---- lowering completeness: no hollow code stations ---------------------
+    # A code-owned CODE/SENSE/ACT node lowers through a tool. With no tool
+    # serving it the mechanical half has nothing to emit and writes a marker
+    # comment: the walker visits the station and does nothing. That is the
+    # worst realization in the system — it looks like a gate in the graph, it
+    # reads like a gate in the compiled module, and it enforces nothing. Catch
+    # it HERE, where the repair loop can still bind a tool, rather than letting
+    # it reach a green compile.
+    served: list = [];
+    for td in vb.kn.tools { for sv in td.serves { served.append(sv); } }
+    tool_lowered = [NodeType.CODE, NodeType.SENSE, NodeType.ACT];
+    for n in wf.nodes {
+        if (n.owner != Owner.CODE) or (n.ntype not in tool_lowered) { continue; }
+        if n.id in served { continue; }
+        issues.append("node '" + n.id + "' (" + _ntype_str(n.ntype)
+            + ", owner=code) has NO tool serving it — it lowers to a marker comment and enforces nothing."
+            + " Add a tool with a body/command whose serves includes '" + n.id
+            + "', or re-own the step to MODEL if it genuinely needs a guess.");
+    }
     for hp in vb.hil.points {
         if hp.node not in node_ids { issues.append("HIL point targets unknown node '" + hp.node + "'"); }
     }
@@ -126,9 +147,68 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
                     + 'return _ask_user(("' + kind + ': " + q) if q else "' + static + '")'});
     }
 
-    con_texts: list[str] = [];
+    # ---- constraint residency: a prohibition rides only the slots it governs ---
+    # Folding EVERY constraint into EVERY Mind node's doc put ~30 unrelated
+    # prohibitions (3kB) on each slot — a decl-syntax rule lecturing the node
+    # that curls an endpoint. That is the whole-guide-per-block shape, and it
+    # lures a model into applying the wrong rule to the wrong step; scoping is
+    # what makes a rule land. Same precedence knowledge already uses:
+    #   1. provenance — the node's traces_to names the FORBIDDEN rule;
+    #   2. lexical    — the prohibition shares a distinctive token with the
+    #      node's identity (id / doc / carries it reads and writes);
+    #   3. neither    — the constraint cannot be placed. Keep it global so the
+    #      prohibition is never silently dropped, and SAY SO, because an
+    #      unplaceable constraint is a gap the front-end should close.
+    mind = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
+    mind_ids: list[str] = [n0.id for n0 in wf.nodes
+                           if (n0.owner == Owner.MODEL) and (n0.ntype in mind)];
+    reads_of: dict[str, list[str]] = {};
+    for n0 in wf.nodes { reads_of[n0.id] = list(n0.reads); }
+    producer_of: dict[str, str] = {};
+    for cr0 in vb.io.carries {
+        if cr0.produced_by { producer_of[cr0.name] = cr0.produced_by; }
+    }
+    con_by_node: dict[str, list[str]] = {};
+    con_global: list[str] = [];
     for c0 in wf.constraints {
-        if ":" in c0 { con_texts.append(str(c0.split(":", 1)[1]).strip()); }
+        if ":" not in c0 { continue; }
+        cid = str(c0.split(":", 1)[0]).strip();
+        ctext = str(c0.split(":", 1)[1]).strip();
+        if not ctext { continue; }
+        owners: list[str] = [n0.id for n0 in wf.nodes if cid in n0.traces_to];
+        if not owners {
+            toks = set([t.lower() for t in re.findall(r"[A-Za-z_]{4,}", ctext)]);
+            for n1 in wf.nodes {
+                ident = " ".join([n1.id, n1.doc] + list(n1.reads) + list(n1.writes)).lower();
+                if [t for t in toks if t in ident] { owners.append(n1.id); }
+            }
+        }
+        # Only Mind slots carry the fold, so a prohibition scoped to code nodes
+        # alone would vanish. Escalate it to the model slot that PRODUCES what
+        # that node consumes — "never emit X" binds on whoever writes X, not on
+        # the mechanical step that hands it onward.
+        mind_owners: list[str] = [oid for oid in owners if oid in mind_ids];
+        if not mind_owners {
+            for oid in owners {
+                for rd0 in reads_of.get(oid, []) {
+                    p0 = producer_of.get(rd0, "");
+                    if p0 and (p0 in mind_ids) and (p0 not in mind_owners) { mind_owners.append(p0); }
+                }
+            }
+        }
+        if mind_owners { owners = mind_owners; }
+        if owners {
+            for oid in owners {
+                cur3: list[str] = list(con_by_node.get(oid, []));
+                if ctext not in cur3 { cur3.append(ctext); }
+                con_by_node[oid] = cur3;
+            }
+        } else {
+            con_global.append(ctext);
+            issues.append("constraint '" + cid + "' could not be scoped to any node — it rides"
+                + " every model slot. Trace it from the node(s) it governs, or name those nodes"
+                + " in the constraint text: " + ctext[:80]);
+        }
     }
     hil_by_node: dict[str, list[str]] = {};
     for hp in vb.hil.points {
@@ -136,15 +216,15 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         cur2.append(hp.kind + ": " + hp.prompt);
         hil_by_node[hp.node] = cur2;
     }
-    mind = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
 
     # ---- emit ----------------------------------------------------------------
     nodes_out: list = [];
     for n in wf.nodes {
         doc = n.doc;
-        if con_texts and (n.owner == Owner.MODEL) and (n.ntype in mind) {
+        mine = list(con_by_node.get(n.id, [])) + con_global;
+        if mine and (n.owner == Owner.MODEL) and (n.ntype in mind) {
             sep = " " if doc else "";
-            doc = doc + sep + "NEVER violate: " + "; ".join(con_texts);
+            doc = doc + sep + "NEVER violate: " + "; ".join(mine);
         }
         if n.id in hil_by_node {
             sep2 = " " if doc else "";

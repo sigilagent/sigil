@@ -280,6 +280,69 @@ test "a code ROUTE calls the tool that computes its own guard" {
     assert "_gate_all(self.a_ok, self.b_ok)" in src;
 }
 
+glob BUDGET_ROUTE_IR: str = """---
+name: budgeted
+description: A bounded repair loop — the route's budget guard is the bound.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: BudgetedAgent
+  carries:
+    task: {type: str, role: input}
+    errors: {type: str, produced_by: check_it}
+    ok: {type: bool, produced_by: check_it}
+    round: {type: int, produced_by: bump}
+nodes:
+  - id: check_it
+    type: ROUTE
+    owner: code
+    op: check_it
+    tool: check_it
+    reads: [task]
+    writes: [errors, ok]
+  - id: bump
+    type: CODE
+    owner: code
+    op: bump
+    tool: bump
+    reads: [round]
+    writes: [round]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: check_it, to: done, guard: "ok == true"}
+  - {from: check_it, to: bump, guard: "round < 3"}
+  - {from: check_it, to: done, guard: "errors != \\"\\""}
+  - {from: bump, to: check_it, modality: mandatory}
+tools:
+  check_it:
+    sig: (task) -> (errors,ok)
+    body: |
+      def check_it(task):
+          return "", True
+  bump:
+    sig: (round) -> round
+    body: |
+      def bump(round):
+          return int(round or 0) + 1
+""";
+
+# A ROUTE guard the enum/equality shapes don't recognize used to fall through to
+# a bare `True`, which is an ALWAYS-TAKEN branch: the repair edge lost its round
+# budget (unbounded loop) and every edge behind it went unreachable. Numeric and
+# string comparisons belong to _guard_expr, which has always handled them for
+# non-ROUTE edges.
+test "a ROUTE guard outside the enum shapes lowers to its real comparison" {
+    src = transpile_ir(BUDGET_ROUTE_IR, "budgeted");
+    assert "self.round < 3" in src;
+    assert 'self.errors != ""' in src;
+    assert "elif True {" not in src;
+    assert "if True {" not in src;
+}
+
 test "spawn binding skips produced and non-string carries" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
     assert "spawn MixedAgent(task=task, src_path=task)" in src;
