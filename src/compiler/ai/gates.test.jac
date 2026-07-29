@@ -98,6 +98,31 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }
 
+test "G5 does not score a HOLLOW code station as gated" {
+    # The ability exists but its body is only the marker the mechanical half
+    # emits when nothing bound a tool: the walker visits the station and does
+    # nothing. Scoring that `gated` reports a hollow gate as the strongest
+    # realization there is, which is how a compile goes green with its
+    # verification stations empty.
+    spec = RuleSet(rules=[
+        Rule(id="r1", quote="compile checkpoint", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    wf = WorkflowView(nodes=[
+        AgirNode(id="compile_checkpoint", ntype=NodeType.CODE, owner=Owner.CODE, traces_to=["r1"])
+    ]);
+    hollow = "can n_compile_checkpoint with Z entry {\n    # CODE compile_checkpoint\n    visit [-->];\n}";
+    sc = gate_struct_cov(spec, wf, hollow);
+    assert sc.gated == [];
+    assert sc.missing == ["r1"];
+    assert len([i for i in sc.issues if "HOLLOW" in i and "compile_checkpoint" in i]) == 1;
+
+    # the same node WITH a lowered body still earns `gated`
+    real = "can n_compile_checkpoint with Z entry {\n    self.compile_log = _jac_check(self.decl_surface);\n    visit [-->];\n}";
+    sc2 = gate_struct_cov(spec, wf, real);
+    assert sc2.gated == ["r1"];
+    assert sc2.issues == [];
+}
+
 test "G3-hard: IO mandates must chain to an embodied artifact write" {
     spec = RuleSet(rules=[
         Rule(id="r1", quote="write the plan", kind=RuleKind.IO, modality=Modality.MANDATORY),

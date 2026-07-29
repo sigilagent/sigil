@@ -1131,7 +1131,24 @@ def _guard_to_cond(guard: any, member_to_enum: any, carries: any = None, types: 
         en2 = member_to_enum.get(mem2, "");
         return (f"self.{fld2} == {en2}.{mem2}") if en2 else (f"self.{fld2} == {_q(mem2)}");
     }
-    return "True";
+    # Anything else — `budget < 3`, `errors != ""`, `n >= limit` — goes to the
+    # general comparison lowerer rather than degrading to `True`. The two shapes
+    # above are the ROUTE-specific ones (enum membership, enum equality); the
+    # rest of the guard grammar is _guard_expr's job and it has always handled
+    # it for non-ROUTE edges. Returning `True` here made an unsupported guard an
+    # ALWAYS-TAKEN branch: a repair edge guarded on a round budget became
+    # unbounded, and the give-up edge behind it became unreachable.
+    #
+    # Delegate ONLY when the guard's subject is a real carry. A guard naming
+    # nothing the walker holds ("more", "finished") is not lowerable at all:
+    # `self.more` reads a field that does not exist, so BOTH branches go dead and
+    # the route falls through instead of looping. Those keep the permissive
+    # default they have always had — narrowing that is a separate change, and it
+    # needs an issue channel to report the unlowerable guard rather than guess.
+    cd: any = carries or {};
+    subj: any = re.match(r"^(?:not\s+)?([A-Za-z_]\w*)", g);
+    if cd and subj and (_safe(str(subj.group(1))) not in list(cd)) { return "True"; }
+    return _guard_expr(g, member_to_enum, carries, types);
 }
 
 # Shared true/false-RHS translation for both guard lowerers. Returns "" when the

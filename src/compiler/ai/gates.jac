@@ -125,6 +125,26 @@ def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> l
 # G5 — STRUCT-COV / no-monolith, static on the COMPILED module
 # ---------------------------------------------------------------------------
 
+# The markers the mechanical half emits when a code-owned node had nothing to
+# lower — no tool bound, no inline body. The ability is still generated (it has
+# to be, the walker must traverse it), so its NAME appears in the module either
+# way; only the marker distinguishes a real gate from a pass-through.
+glob HOLLOW_MARKERS: list[str] = ["# CODE ", "# SENSE ", "# ACT "];
+
+"""Did this node lower to a marker comment instead of to work?
+
+`can n_compile_checkpoint … { _progress(…); # CODE compile_checkpoint; visit …; }`
+is a station the walker visits and which does nothing. Scoring that `gated`
+("guaranteed by construction") is strictly worse than scoring it `missing`: a
+missing rule is reported, a hollow one is reported as the strongest realization
+there is. Checking `("can n_" + nid) in module_src` cannot tell them apart."""
+def _lowered_hollow(node_id: str, module_src: str) -> bool {
+    for m in HOLLOW_MARKERS {
+        if (m + node_id) in module_src { return True; }
+    }
+    return False;
+}
+
 def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructCov {
     # For each MANDATORY STEP/IO rule: how does the compiled agent realize it?
     #   gated      owner=code ability  -> guaranteed by construction
@@ -151,11 +171,18 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
             continue;
         }
         best = "";
+        hollow_on: list[str] = [];
         for n2 in owners {
             nid = re.sub(r"[^0-9a-zA-Z_]", "_", str(n2.id));
             has_ability = ("can n_" + nid) in module_src;
             if not has_ability { continue; }
             if n2.owner == Owner.CODE {
+                # owner=CODE only earns `gated` if the node actually lowered to
+                # work. A marker-comment body is a gate in name only.
+                if _lowered_hollow(str(n2.id), module_src) {
+                    hollow_on.append(str(n2.id));
+                    continue;
+                }
                 best = "gated";
                 break;
             }
@@ -168,6 +195,11 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
         elif best == "monolithic" {
             sc.monolithic.append(r.id);
             sc.issues.append("G5: rule '" + r.id + "' realized MONOLITHICALLY (node '" + owners[0].id + "' has no dedicated slot) — split it or add a code gate");
+        } elif hollow_on {
+            sc.missing.append(r.id);
+            sc.issues.append("G5: rule '" + r.id + "' realized HOLLOW — code node(s) [" + ", ".join(hollow_on)
+                + "] lowered to a marker comment, so the station is visited but does nothing."
+                + " Bind a tool (body or command) to it, or re-own the rule to MODEL.");
         } else {
             sc.missing.append(r.id);
             sc.issues.append("G5: rule '" + r.id + "' traced to node(s) that never lowered to an ability — structural gap");
