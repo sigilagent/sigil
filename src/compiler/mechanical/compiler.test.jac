@@ -343,6 +343,20 @@ test "a ROUTE guard outside the enum shapes lowers to its real comparison" {
     assert "if True {" not in src;
 }
 
+# ...but ONLY when the guard's subject is a real carry. A bare word naming
+# nothing the walker holds is not lowerable: `self.more` reads a field that does
+# not exist, so BOTH branches go dead and a loop that should spin falls straight
+# through instead (runtime_budget's step-budget scenario is exactly this shape).
+# Those keep the permissive default.
+test "a ROUTE guard whose subject is no carry stays permissive" {
+    ir = BUDGET_ROUTE_IR.replace('guard: "round < 3"', 'guard: "more"')
+                        .replace('guard: "errors != \\"\\""', 'guard: "finished"');
+    src = transpile_ir(ir, "budgeted");
+    assert "self.more" not in src;
+    assert "self.finished" not in src;
+    assert "if True {" in src;
+}
+
 test "spawn binding skips produced and non-string carries" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
     assert "spawn MixedAgent(task=task, src_path=task)" in src;

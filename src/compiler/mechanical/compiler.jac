@@ -1138,6 +1138,16 @@ def _guard_to_cond(guard: any, member_to_enum: any, carries: any = None, types: 
     # it for non-ROUTE edges. Returning `True` here made an unsupported guard an
     # ALWAYS-TAKEN branch: a repair edge guarded on a round budget became
     # unbounded, and the give-up edge behind it became unreachable.
+    #
+    # Delegate ONLY when the guard's subject is a real carry. A guard naming
+    # nothing the walker holds ("more", "finished") is not lowerable at all:
+    # `self.more` reads a field that does not exist, so BOTH branches go dead and
+    # the route falls through instead of looping. Those keep the permissive
+    # default they have always had — narrowing that is a separate change, and it
+    # needs an issue channel to report the unlowerable guard rather than guess.
+    cd: any = carries or {};
+    subj: any = re.match(r"^(?:not\s+)?([A-Za-z_]\w*)", g);
+    if cd and subj and (_safe(str(subj.group(1))) not in list(cd)) { return "True"; }
     return _guard_expr(g, member_to_enum, carries, types);
 }
 
