@@ -29,10 +29,22 @@ Model names are litellm strings (via byLLM), so every provider litellm supports 
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | Google | `gemini/gemini-2.0-flash` | `GOOGLE_API_KEY` |
 | Ollama (local) | `ollama_chat/qwen3:8b` | none — local daemon |
+| Claude Code CLI | `claude-cc/opus` | none — your Claude Code login |
 
 The frontier tier needs its provider key; the small/chat tiers can be fully local.
 A weaker chat model tends to over-reach for tools — if chat behaves oddly, try a
 stronger `chat_model`.
+
+## No key at all: your Claude Code CLI
+
+`--claude` puts every tier on the Claude Code CLI you already have installed, using
+your own subscription instead of a provider key:
+
+```bash
+sigil --claude compile ./SKILL.md
+```
+
+Full details, costs and limits: [claude-code](claude-code.md).
 
 ## Aliases and fallbacks
 

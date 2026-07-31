@@ -14,10 +14,12 @@ typed AG-IR + its lowered OSP + run statistics — not the run artifacts.
 import os;
 import json;
 import from .sigil_mcp { digest, tools_for }
+import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .compiler.mechanical.compiler { transpile_ir }
 import from .sigil_runtime {
-    write_module, execute_module, default_contract, repo_root, agir_name, install_osp
+    write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
+    skill_description
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
@@ -35,6 +37,12 @@ glob ROUTER_NAME: str   = os.getenv("SIGIL_ROUTER", os.getenv("SIGIL_SMALL", "ol
 glob frontier: any = Model(model_name=FRONTIER_NAME);
 glob small: any    = Model(model_name=SMALL_NAME);
 glob router: any   = Model(model_name=ROUTER_NAME);
+
+# `--claude` (or SIGIL_CLAUDE=1): every tier is answered by the local Claude Code
+# CLI instead of a provider API — one subscription, no keys, and the whole LIFT
+# front-end authored by Claude. Read at bind time, so flipping it before awaken()
+# is enough. See sigil_claude_cc.
+glob CLAUDE_TIERS: bool = bool(os.getenv("SIGIL_CLAUDE", ""));
 
 glob WORKDIR: str  = repo_root();
 glob CONTRACT: str = default_contract();
@@ -218,6 +226,14 @@ def latest_by_sig(compiled_lib: list[TaskGraph]) -> list[TaskGraph] {
 # not env or files). Mirrors how a compiled agent rebinds `llm` in run().
 # ---------------------------------------------------------------------------
 def model_for(name: str) -> Model {
+    # A `claude-cc/...` tier is answered by the local Claude Code CLI instead of a
+    # provider API: register the litellm handler on first use, and declare no
+    # native tool support so byLLM carries the tool list and the output schema as
+    # prose, which is all a `claude -p` reply can be. See sigil_claude_cc.
+    if is_claude_cc(name) {
+        install_claude_cc();
+        return Model(model_name=name, config={"native_tools": False});
+    }
     return Model(model_name=name);
 }
 
@@ -225,16 +241,40 @@ def _resolve_alias(soul: Soul, name: str) -> str {
     return str(soul.model_aliases.get(name, name));
 }
 
+def use_claude_code(on: bool = True) {
+    # Flip every tier onto Claude Code. Call BEFORE awaken() — that is where the
+    # tiers bind. Also arms the compiler's escalation path: with Claude Code
+    # already the compiler, a failed compile gets a tool-using session that can
+    # run the oracle itself (compiler/ai/repair.jac reads this via env, so the
+    # compiler keeps no back-edge to the runtime that imports it).
+    CLAUDE_TIERS = on;
+    os.environ["SIGIL_CLAUDE_REPAIR"] = "1" if on else "";
+}
+
+def _claude_tier_model(tier: str) -> str {
+    # frontier/chat author and compile — the expensive, rare, judgment-heavy work.
+    # small/router execute an already-compiled procedure and classify: cheap tier.
+    if (tier == "frontier") or (tier == "chat") {
+        return os.getenv("SIGIL_CLAUDE_FRONTIER", "claude-cc/opus");
+    }
+    return os.getenv("SIGIL_CLAUDE_SMALL", "claude-cc/haiku");
+}
+
+def _effective_tier(tier: str, name: str) -> str {
+    # What the tier will actually bind to, after the claude-mode override.
+    return _claude_tier_model(tier) if (CLAUDE_TIERS and not is_claude_cc(name)) else name;
+}
+
 def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
     # Resolve the tier's model (through any alias) and, if the tier has a fallback
     # chain configured, return a byLLM ModelPool that fails over primary -> fallbacks.
-    primary = _resolve_alias(soul, tier_model);
+    primary = _effective_tier(tier, _resolve_alias(soul, tier_model));
     fb = str(soul.model_fallbacks.get(tier, "")).strip();
-    if not fb { return Model(model_name=primary); }
-    models: list = [Model(model_name=primary)];
+    if not fb { return model_for(primary); }
+    models: list = [model_for(primary)];
     for m in fb.split(",") {
         mm = _resolve_alias(soul, m.strip());
-        if mm { models.append(Model(model_name=mm)); }
+        if mm { models.append(model_for(mm)); }
     }
     return ModelPool(models=models, strategy="fallback");
 }
@@ -268,9 +308,12 @@ def model_set_fallback(tier: str, csv: str) -> str {
 
 def models_info() -> dict {
     soul = awaken();
+    # In claude mode the graph's tier names are overridden at bind time, so report
+    # what will actually run — not the config it shadows.
     return {
-        "frontier": soul.frontier_model, "small": soul.small_model,
-        "router": (soul.router_model if soul.router_model else soul.small_model),
+        "frontier": _effective_tier("frontier", soul.frontier_model),
+        "small": _effective_tier("small", soul.small_model),
+        "router": _effective_tier("router", soul.router_model if soul.router_model else soul.small_model),
         "aliases": dict(soul.model_aliases), "fallbacks": dict(soul.model_fallbacks)
     };
 }
@@ -303,10 +346,11 @@ def awaken() -> Soul {
     # rebind cognition from the graph
     frontier = _bind_tier(soul, "frontier", soul.frontier_model);
     small = _bind_tier(soul, "small", soul.small_model);
-    SMALL_NAME = soul.small_model;
+    # Not soul.small_model directly: this name is handed to the compiled module's
+    # subprocess as SIGIL_MODEL, so it has to be the EFFECTIVE tier, or claude mode
+    # would cover the compiler and leave execution on the graph's configured model.
+    SMALL_NAME = _effective_tier("small", soul.small_model);
     router = _bind_tier(soul, "router", soul.router_model if soul.router_model else soul.small_model);
-    ETHOS = "\n".join(["- " + e for e in soul.ethos]);
-    router = model_for(soul.router_model if soul.router_model else soul.small_model);
     PROMPT_MODE = soul.prompt_mode if soul.prompt_mode else "full";
     # ethos is woven into compilation only in full mode; minimal/none keep the
     # compiler to the structural contract (contract is always required for valid AG-IR).
@@ -587,7 +631,9 @@ def register_skill(source: str, kind: str) -> dict {
         sig = agir_name(agir);
         osp = transpile_ir(agir, sig);
         path = write_module(osp, sig, 1, WORKDIR);
-        tg = _persist(reg, sig, "lifted from SKILL.md", agir, path, "lifted-skill", 1);
+        ldesc = skill_description(source);
+        tg = _persist(reg, sig, ldesc if ldesc else "lifted from SKILL.md",
+                      agir, path, "lifted-skill", 1);
     }
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
@@ -613,7 +659,9 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "", progre
                 "compile_errors": lr.compile_errors, "repairs": lr.repairs};
     }
     path = write_module(lr.module_src, sig, 1, WORKDIR);
-    tg = _persist(reg, sig, "compiled from SKILL.md (AI compiler)", lr.ir_text, path, "compiled-skill", 1);
+    desc = skill_description(source);
+    tg = _persist(reg, sig, desc if desc else "compiled from SKILL.md (AI compiler)",
+                  lr.ir_text, path, "compiled-skill", 1);
     ejected = "";
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
@@ -760,7 +808,8 @@ def library() -> list {
     for tg in latest_by_sig([reg[0] -->][?:TaskGraph]) {
         out.append({
             "signature": tg.signature, "version": tg.version, "origin": tg.origin,
-            "runs": tg.runs, "successes": tg.successes, "module": tg.module
+            "runs": tg.runs, "successes": tg.successes, "module": tg.module,
+            "intent": tg.intent   # what the skill is for — the MCP tool description
         });
     }
     return out;

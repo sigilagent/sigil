@@ -24,7 +24,7 @@ import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
     eval_skill, relearn, forget,
-    model_alias, model_set_fallback, models_info,
+    model_alias, model_set_fallback, models_info, use_claude_code,
     tool_group_set, tool_allowed, tools_policy_info
 }
 import from src.cron {
@@ -43,16 +43,27 @@ import from src.sigil_migrate { migrate_openclaw }
 import from src.sigil_runtime { _jac_bin }
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
+glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
+
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
     # everything after '--' if present, else drop argv[0] and skip -s <file>.
-    if "--" in raw { return raw[raw.index("--") + 1:]; }
+    args: list = [];
+    if "--" in raw {
+        args = raw[raw.index("--") + 1:];
+    } else {
+        eat_next = False;
+        for a in raw[1:] {
+            if eat_next { eat_next = False; continue; }
+            if (a == "-s") or (a == "--session") { eat_next = True; continue; }
+            args.append(a);
+        }
+    }
+    # `--claude` is global, not per-command: strip it wherever it lands so no
+    # command's positional args shift, and record it for the dispatch below.
     out: list = [];
-    eat_next = False;
-    for a in raw[1:] {
-        if eat_next { eat_next = False; continue; }
-        if (a == "-s") or (a == "--session") { eat_next = True; continue; }
-        out.append(a);
+    for a in args {
+        if a == "--claude" { _CLAUDE_MODE = True; } else { out.append(a); }
     }
     return out;
 }
@@ -159,6 +170,15 @@ def serve_observatory(port: str) {
 with entry:__main__ {
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
+
+    # Must precede any awaken() — that is where the tiers bind.
+    if _CLAUDE_MODE {
+        use_claude_code(True);
+        # stderr, not stdout: this is a status line, and `mcp-serve` gives stdout
+        # to the JSON-RPC wire where a stray line is a protocol violation.
+        print(chr(27) + "[2m" + chr(0x2726) + " claude mode: every tier runs on your local Claude Code CLI"
+              + chr(27) + "[0m", file=sys.stderr);
+    }
 
     if (cmd == "serve") or (cmd == "observatory") {
         serve_observatory(_arg(argv, 1));
@@ -368,6 +388,37 @@ with entry:__main__ {
                     print("ejected runnable: " + str(r["eject"]));
                     print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");
                 }
+            }
+        }
+    } elif cmd == "mcp-serve" {
+        # mcp-serve — expose this agent's compiled skills to any MCP client (a
+        # Claude Code session, most usefully) as one tool per skill:
+        #   claude mcp add sigil -- sigil mcp-serve
+        # Sigil's own functions are passed in so the server module stays free of
+        # graph imports. Nothing may print to stdout past this point — serve_stdio
+        # owns it as the wire.
+        import from src.sigil_mcp_serve { serve_stdio }
+        sys.exit(serve_stdio(library, run_task, solve_task));
+    } elif cmd == "gate" {
+        # gate <file.agir> [name] — run G4, the compile oracle, over one AG-IR and
+        # exit nonzero if it fails. This is the compiler's own ground truth exposed
+        # as a command, so anything outside the process (a repair agent, a CI step,
+        # a human iterating on a hand-written IR) can check an IR the same way the
+        # pipeline does.
+        irp = _arg(argv, 1);
+        if not irp {
+            print("usage: gate <file.agir> [name]");
+        } else {
+            import from src.compiler.ai.gates { compile_gate }
+            with open(irp) as f { ir_src = f.read(); }
+            gname = _arg(argv, 2) if len(argv) > 2 else os.path.splitext(os.path.basename(irp))[0];
+            gv = compile_gate(ir_src, gname);
+            if gv.ok {
+                print("gate: ok  (" + str(len(gv.module_src.splitlines())) + " lines lowered)");
+            } else {
+                print("gate: FAILED");
+                print(gv.errors);
+                sys.exit(1);
             }
         }
     } elif cmd == "replay" {

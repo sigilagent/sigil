@@ -266,6 +266,24 @@ Cognition is configured on the graph (or seeded from env on first boot):
 execution model, default `ollama_chat/qwen3:32b`, can be fully local),
 `SIGIL_ROUTER`. An ejected runnable picks its model from `SIGIL_MODEL`.
 
+### Both ways with Claude Code
+
+No provider key at all — run every tier on the Claude Code CLI you already have,
+and publish the skills you compile back into it as tools:
+
+```bash
+sigil --claude compile ./SKILL.md            # compile on your Claude subscription
+claude mcp add sigil -- sigil mcp-serve      # each compiled skill = a Claude Code tool
+```
+
+`--claude` routes byLLM through a headless `claude -p` (no API key, no proxy);
+`mcp-serve` publishes one MCP tool per compiled skill, described by the skill's
+own `description:` frontmatter. Claude Code decides *when*; the compiled harness
+decides *how* — inside the tool call there's no prompt left to drift from. With
+`--claude` on, a compile that fails its gate also escalates to a tool-using
+Claude Code session that runs the compile oracle (`sigil gate`) until it passes.
+Details: [`docs/reference/claude-code.md`](docs/reference/claude-code.md).
+
 ## Layout
 
 ```

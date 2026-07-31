@@ -30,6 +30,7 @@ glob OBS_LOG: str = "observability/live.jsonl";
 glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
     "import from jaclang.byllm.lib {{ Model }}\n"
     "import sigil_observe;\n"
+    "import sigil_claude_cc;\n"
     "import os;\n"
     "\n"
     "with entry:__main__ {{\n"
@@ -37,7 +38,12 @@ glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
     "    sig = os.getenv(\"SIGIL_SIG\", \"\");\n"
     "    sigil_observe.install(obs, sig);\n"
     "    model_name = os.getenv(\"SIGIL_MODEL\", \"gpt-4o-mini\");\n"
-    "    m = Model(model_name=model_name);\n"
+    "    cfg: dict = {{}};\n"
+    "    if sigil_claude_cc.is_claude_cc(model_name) {{\n"
+    "        sigil_claude_cc.install();\n"
+    "        cfg = {{\"native_tools\": False}};\n"
+    "    }}\n"
+    "    m = Model(model_name=model_name, config=cfg);\n"
     "    task = os.getenv(\"SIGIL_TASK\", \"\");\n"
     "    skill = os.getenv(\"SIGIL_SKILL\", \"\");\n"
     "    out = run(task, m, skill);\n"
@@ -111,6 +117,30 @@ def agir_name(text: str) -> str {
         }
     }
     return _slug((text or "")[:48]);
+}
+
+# Best-effort human description from a SKILL.md: its frontmatter `description:`.
+# A SKILL.md description is written to be a TRIGGER — "use when …" — so it is the
+# one string that tells another harness when to reach for the compiled skill.
+# Carry it through the compile instead of replacing it with provenance boilerplate
+# (see sigil_mcp_serve, where it becomes the MCP tool description).
+def skill_description(text: str) -> str {
+    lines = (text or "").splitlines();
+    started = False;
+    for line in lines {
+        s = line.strip();
+        if not started {
+            if not s { continue; }
+            if s != "---" { return ""; }   # no frontmatter at all
+            started = True;
+            continue;
+        }
+        if s == "---" { break; }           # end of frontmatter
+        if s.lower().startswith("description:") {
+            return s.split(":", 1)[1].strip().strip('"').strip("'");
+        }
+    }
+    return "";
 }
 
 # Drop a precompiled OSP module into crystallized/ and return its new path.
