@@ -161,3 +161,72 @@ test "an agent session carries the caller's persona, not a borrowed one" {
     assert "only what the diagnostic requires" not in AUTHOR[2];
     assert "never add, drop or re-modalize" in AUTHOR[2];
 }
+
+test "_parse surfaces the CLI's own reason, not a dump of its usage counters" {
+    import json;
+    # the shape that actually shipped: exit 1, is_error, and the reason buried in
+    # ~600 chars of token counters — which is what the raw dump truncated to
+    blob = json.dumps({
+        "type": "result", "subtype": "success", "is_error": True,
+        "api_error_status": 400, "result": "Credit balance is too low",
+        "usage": {"input_tokens": 0, "output_tokens": 0}
+    });
+    msg = "";
+    try {
+        _parse(blob, "", 1);
+    } except Exception as e {
+        msg = str(e);
+    }
+    assert "out of credit" in msg;
+    assert "usage" not in msg;          # no counter dump
+    assert "input_tokens" not in msg;
+    assert len(msg) < 400;              # one readable line, not three screens
+}
+
+test "a terminal CLI failure is an auth error so byLLM stops retrying it" {
+    import json;
+    import litellm;
+    # byLLM retries APIConnectionError three times — three tracebacks for one
+    # billing problem. AuthenticationError is not in its retry set.
+    blob = json.dumps({"is_error": True, "result": "Credit balance is too low"});
+    kind = "";
+    try {
+        _parse(blob, "", 1);
+    } except Exception as e {
+        kind = type(e).__name__;
+    }
+    assert kind == "AuthenticationError";
+    for reason in ["Please run /login", "OAuth token has expired", "Invalid API key"] {
+        k2 = "";
+        try {
+            _parse(json.dumps({"is_error": True, "result": reason}), "", 1);
+        } except Exception as e2 {
+            k2 = type(e2).__name__;
+        }
+        assert k2 == "AuthenticationError";
+    }
+}
+
+test "an unrecognized failure still reports its status and reason, not raw json" {
+    import json;
+    msg = "";
+    try {
+        _parse(json.dumps({"is_error": True, "api_error_status": 529,
+                           "result": "Overloaded"}), "", 1);
+    } except Exception as e {
+        msg = str(e);
+    }
+    assert "529" in msg;
+    assert "Overloaded" in msg;
+}
+
+test "_parse still handles output that is not json at all" {
+    ok = False;
+    try { _parse("", "boom", 1); } except Exception as e { ok = "boom" in str(e); }
+    assert ok;
+    ok2 = False;
+    try { _parse("not json", "", 0); } except Exception as e2 { ok2 = "unparseable" in str(e2); }
+    assert ok2;
+}
+
+

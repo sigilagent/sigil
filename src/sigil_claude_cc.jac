@@ -199,16 +199,72 @@ def _argv(model: str) -> list:
     return argv
 
 
+# Failures the CLI will keep producing until a human does something. byLLM retries
+# an APIConnectionError three times, so a billing or login problem used to print
+# three full JSON dumps and three tracebacks for one actionable sentence. Matching
+# on the CLI's own wording, keyed to what the user has to do about it.
+_TERMINAL_ERRORS = [
+    ("credit balance is too low",
+     "the Anthropic account backing the `claude` CLI is out of credit"),
+    ("please run /login",
+     "the `claude` CLI is not logged in — run `claude` once and sign in"),
+    ("oauth token has expired",
+     "the `claude` CLI login has expired — run `claude` once to sign in again"),
+    ("invalid api key",
+     "the API key the `claude` CLI is using was rejected"),
+    ("invalid bearer token",
+     "the credential the `claude` CLI is using was rejected"),
+]
+
+
+def _billing_advice() -> str:
+    # Deliberately does NOT blame ANTHROPIC_API_KEY. Sigil invokes the CLI in its
+    # normal (non---bare) mode, where it authenticates with the Claude Code login
+    # and ignores that variable — verified by running `claude -p` with a junk key
+    # and still getting a reply. The balance at issue is the one behind the login.
+    return (
+        " Check the account behind `claude` (run `claude` once to see its status); "
+        "or point the tier at another provider with `sigil models set <tier> <model>`."
+    )
+
+
+def _raise_cli_error(data: dict, code: int) -> None:
+    reason = str(data.get("result") or data.get("subtype") or "").strip()
+    low = reason.casefold()
+    for (needle, human) in _TERMINAL_ERRORS:
+        if needle in low:
+            msg = "claude-cc: " + human + "." + (_billing_advice() if "credit" in needle else "")
+            try:
+                from litellm.exceptions import AuthenticationError
+            except Exception:
+                raise ClaudeCCError(msg)
+            # Raised as an auth error on purpose: byLLM retries connection errors
+            # and does NOT retry this, so the user gets one clear line.
+            raise AuthenticationError(message=msg, llm_provider=PROVIDER, model=PROVIDER)
+    status = data.get("api_error_status") or ("exit %d" % code)
+    raise ClaudeCCError("claude-cc: the CLI failed (%s): %s" % (status, reason[:400] or "no reason given"))
+
+
 def _parse(stdout: str, stderr: str, code: int) -> dict:
-    if code != 0:
-        detail = (stderr or stdout or "").strip()[:600]
-        raise ClaudeCCError("claude exited %d: %s" % (code, detail or "no output"))
-    try:
-        data = json.loads(stdout)
-    except Exception as e:
-        raise ClaudeCCError("claude produced unparseable output (%s): %s" % (e, stdout[:300]))
-    if data.get("is_error"):
-        raise ClaudeCCError("claude reported an error: %s" % str(data.get("result"))[:600])
+    # `claude -p --output-format json` reports failures INSIDE the json (is_error)
+    # and also exits nonzero. The json carries the human-readable reason; the exit
+    # code carries nothing. So parse first and only fall back to a raw dump when
+    # there is genuinely no json to read — dumping stdout on a nonzero exit is what
+    # buried "Credit balance is too low" inside 600 characters of usage counters.
+    text = (stdout or "").strip()
+    data = None
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except Exception:
+            data = None
+    if data is None:
+        detail = (stderr or text or "").strip()[:400]
+        if code != 0:
+            raise ClaudeCCError("claude-cc: the CLI exited %d: %s" % (code, detail or "no output"))
+        raise ClaudeCCError("claude-cc: unparseable CLI output: %s" % (detail or "empty"))
+    if data.get("is_error") or code != 0:
+        _raise_cli_error(data, code)
     return data
 
 

@@ -82,6 +82,19 @@ tools instead of emitting the tool-call text byLLM parses — the run then dies 
 - Claude Code on `PATH` (`claude --version`), signed in.
 - A recent enough CLI to support `--agents` / `--agent` (custom agent definitions).
 
+### Which account pays
+
+The Claude Code **login**, not an API key. Sigil invokes the CLI in its normal
+mode, where it authenticates with that login and ignores `ANTHROPIC_API_KEY` —
+verified by running `claude -p` with a deliberately invalid key and still getting
+a reply. So an `ANTHROPIC_API_KEY` left in your shell profile changes nothing
+here, in either direction: it is not used, and unsetting it will not fix a
+billing error.
+
+If a call comes back with a billing or login failure, it is the account behind
+`claude` itself. Run `claude` once to see its status, or move the tier to another
+provider with `sigil models set <tier> <model>`.
+
 ## Environment
 
 | Variable | Default | What it does |
