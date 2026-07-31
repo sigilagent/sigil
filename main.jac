@@ -25,7 +25,8 @@ import from src.sigil {
     add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info, use_claude_code,
-    tool_group_set, tool_allowed, tools_policy_info
+    tool_group_set, tool_allowed, tools_policy_info,
+    compile_stage_label, compile_stage_line, compile_stage_secs
 }
 import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
@@ -70,33 +71,11 @@ def cli_args(raw: list) -> list {
 
 glob _CV: dict = {"open": ""};   # current in-flight stage line
 
-def _cts(ev: dict) -> str {
-    # one-line completion summary per stage
-    s = str(ev["stage"]);
-    if s == "spec" {
-        m = "ok" if (ev["sound"] and ev["complete"] and not ev["drift"]) else "issues";
-        return str(ev["rules"]) + " rules · " + str(ev["rounds"]) + " rounds · " + m;
-    } elif s == "spine" {
-        return str(ev["nodes"]) + " nodes · " + str(ev["edges"]) + " edges · " + str(ev["rounds"]) + " rounds" + ((" · " + str(ev["issues"]) + " issues") if ev["issues"] else "");
-    } elif s == "flows" {
-        return str(ev["carries"]) + " carries · " + str(ev["tools"]) + " tools · " + str(ev["knowledge"]) + " knowledge · " + str(ev["hil"]) + " HIL";
-    } elif s == "author" {
-        return str(ev["lines"]) + " IR lines";
-    } elif s == "assemble" {
-        return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
-    } elif s == "gates" {
-        return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
-    }
-    return "";
-}
-
 def _compile_ev(ev: dict) -> None {
     # live build view: start opens the stage line, done rewrites it with counts
-    # + timing. Only ever touches the CURRENT line (portable ANSI).
-    names: dict = {"spec": "spec loop", "spine": "workflow spine", "flows": "annotator flows",
-                   "assemble": "assemble", "gates": "gates", "repair": "repair",
-                   "author": "claude authoring"};
-    label = str(names.get(str(ev["stage"]), str(ev["stage"])));
+    # + timing. Only ever touches the CURRENT line (portable ANSI). The stage
+    # label and summary come from sigil.jac so chat's trace says the same thing.
+    label = compile_stage_label(str(ev["stage"]));
     if str(ev.get("state")) == "start" {
         if str(ev["stage"]) == "repair" {
             sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views")) + chr(10));
@@ -106,9 +85,7 @@ def _compile_ev(ev: dict) -> None {
         }
         sys.stdout.flush();
     } elif str(ev.get("state")) == "done" {
-        secs = float(ev.get("secs", 0.0));
-        tm = (str(int(secs // 60)) + "m " + str(int(secs % 60)) + "s") if secs >= 60.0 else ("%.1f" % secs) + "s";
-        sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + _cts(ev) + "  " + chr(27) + "[2m" + tm + chr(27) + "[0m" + chr(10));
+        sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + compile_stage_line(ev) + "  " + chr(27) + "[2m" + compile_stage_secs(ev) + chr(27) + "[0m" + chr(10));
         _CV["open"] = "";
         sys.stdout.flush();
     }
@@ -230,6 +207,7 @@ with entry:__main__ {
         print("  persona : " + str(s["persona"]));
         print("  models  : frontier=" + str(s["frontier_model"])
               + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
+        print("  tools   : workspace=" + str(s["workspace"]) + "  sandbox=" + str(s["sandbox"]));
         print("  channels: " + ", ".join([str(c) for c in s["channels"]]) + "   prompt-mode: " + str(s["prompt_mode"]));
         eths = list(s["ethos"]);
         mems = list(s["memories"]);
