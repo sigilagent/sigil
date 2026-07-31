@@ -185,25 +185,20 @@ test "_parse surfaces the CLI's own reason, not a dump of its usage counters" {
 
 test "a terminal CLI failure is an auth error so byLLM stops retrying it" {
     import json;
-    import litellm;
     # byLLM retries APIConnectionError three times — three tracebacks for one
-    # billing problem. AuthenticationError is not in its retry set.
-    blob = json.dumps({"is_error": True, "result": "Credit balance is too low"});
-    kind = "";
-    try {
-        _parse(blob, "", 1);
-    } except Exception as e {
-        kind = type(e).__name__;
-    }
-    assert kind == "AuthenticationError";
-    for reason in ["Please run /login", "OAuth token has expired", "Invalid API key"] {
-        k2 = "";
+    # billing problem. AuthenticationError is not in its retry set. Without
+    # litellm there is no such class to raise (and no dispatch to this handler
+    # either), so the contract there is just: still a clean ClaudeCCError.
+    want = "AuthenticationError" if _has_litellm() else "ClaudeCCError";
+    for reason in ["Credit balance is too low", "Please run /login",
+                   "OAuth token has expired", "Invalid API key"] {
+        kind = "";
         try {
             _parse(json.dumps({"is_error": True, "result": reason}), "", 1);
-        } except Exception as e2 {
-            k2 = type(e2).__name__;
+        } except Exception as e {
+            kind = type(e).__name__;
         }
-        assert k2 == "AuthenticationError";
+        assert kind == want;
     }
 }
 
