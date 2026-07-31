@@ -111,3 +111,28 @@ test "install: claims the claude-cc prefix with litellm, idempotently" {
     assert "claude-cc" in litellm.provider_list;
     assert "claude-cc" in litellm._custom_providers;
 }
+
+test "an agent session gets its own timeout, not the one-completion slot budget" {
+    import os;
+    # A slot is one completion; an authoring session is dozens of turns. Sharing
+    # the slot timeout silently killed long runs mid-flight.
+    assert _agent_timeout() > _timeout();
+    prev = os.environ.get("SIGIL_CLAUDE_AGENT_TIMEOUT", "");
+    os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = "120";
+    assert _agent_timeout() == 120.0;
+    os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = "not-a-number";
+    assert _agent_timeout() == 3600.0;      # never crash on a bad env value
+    os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = prev;
+}
+
+test "an agent session carries the caller's persona, not a borrowed one" {
+    assert FIXER[0] == "sigil-fixer";
+    assert AUTHOR[0] == "sigil-author";
+    assert "Repairs" in FIXER[1];
+    assert "Authors" in AUTHOR[1];
+    # the standing instructions must differ: a repairer is told to change only
+    # what the diagnostic requires, which is wrong advice for authoring
+    assert "only what the diagnostic requires" in FIXER[2];
+    assert "only what the diagnostic requires" not in AUTHOR[2];
+    assert "never add, drop or re-modalize" in AUTHOR[2];
+}

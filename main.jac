@@ -80,6 +80,8 @@ def _cts(ev: dict) -> str {
         return str(ev["nodes"]) + " nodes · " + str(ev["edges"]) + " edges · " + str(ev["rounds"]) + " rounds" + ((" · " + str(ev["issues"]) + " issues") if ev["issues"] else "");
     } elif s == "flows" {
         return str(ev["carries"]) + " carries · " + str(ev["tools"]) + " tools · " + str(ev["knowledge"]) + " knowledge · " + str(ev["hil"]) + " HIL";
+    } elif s == "author" {
+        return str(ev["lines"]) + " IR lines";
     } elif s == "assemble" {
         return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
     } elif s == "gates" {
@@ -92,7 +94,8 @@ def _compile_ev(ev: dict) -> None {
     # live build view: start opens the stage line, done rewrites it with counts
     # + timing. Only ever touches the CURRENT line (portable ANSI).
     names: dict = {"spec": "spec loop", "spine": "workflow spine", "flows": "annotator flows",
-                   "assemble": "assemble", "gates": "gates", "repair": "repair"};
+                   "assemble": "assemble", "gates": "gates", "repair": "repair",
+                   "author": "claude authoring"};
     label = str(names.get(str(ev["stage"]), str(ev["stage"])));
     if str(ev.get("state")) == "start" {
         if str(ev["stage"]) == "repair" {
@@ -358,13 +361,14 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--agent]");
         } else {
-            eject = False; eject_path = "";
+            eject = False; eject_path = ""; agent_author = False;
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
-                if (flg == "-e") or (flg == "--eject") {
+                if flg == "--agent" { agent_author = True; }
+                elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
                     if nxt and (not nxt.startswith("-")) { eject_path = nxt; i += 1; }
@@ -374,7 +378,8 @@ with entry:__main__ {
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             if _tty { print(chr(10) + "  Compiling " + path); }
-            r = compile_skill(open(path).read(), eject, eject_path, _compile_ev if _tty else None);
+            r = compile_skill(open(path).read(), eject, eject_path,
+                              _compile_ev if _tty else None, agent_author);
             if _tty { print(""); }
             if not r["ok"] {
                 print("compile FAILED for '" + str(r["signature"]) + "':");

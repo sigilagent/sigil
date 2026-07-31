@@ -66,7 +66,13 @@ sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runna
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
 sigil register-skill ./y.jac osp         # drop in a precompiled module
 sigil replay agent.jac obs.jsonl "task"  # re-run a recorded run's cognition — free
+sigil gate ./x.agir                      # run G4, the compile oracle, on its own
 ```
+
+An opt-in alternate front-end swaps the staged LIFT authoring for a Claude Code
+session that writes the AG-IR against the compile oracle, keeping the grounded
+spec loop and the gate battery: `sigil --claude compile ./SKILL.md --agent`. See
+[claude-code](claude-code.md) for what that trades away.
 
 ## Running a compiled artifact
 

@@ -638,7 +638,8 @@ def register_skill(source: str, kind: str) -> dict {
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
 
-def compile_skill(source: str, eject: bool = False, eject_path: str = "", progress: any = None) -> dict {
+def compile_skill(source: str, eject: bool = False, eject_path: str = "",
+                  progress: any = None, agent: bool = False) -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the gated AI lift, always:
     # spec loop -> spine -> flows -> assemble -> G1/G4/G5 + bounded repair.
     # ok=False returns the issues (the CLI prints them; nothing is persisted).
@@ -652,7 +653,16 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "", progre
     pin_all_lift_llms(frontier);
     set_lift_progress(progress);
     sig = agir_name(source);
-    lr = lift(source, sig);
+    if agent {
+        # `--agent`: keep the grounded spec loop and the gate battery, but let a
+        # Claude Code session author the AG-IR against the compile oracle instead
+        # of the staged slot pipeline. Opt-in — see compiler/ai/author_agent.jac
+        # for what that trades away.
+        import from .compiler.ai.author_agent { agent_lift }
+        lr = agent_lift(source, sig, progress);
+    } else {
+        lr = lift(source, sig);
+    }
     issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
     if not lr.ok {
         return {"ok": False, "signature": sig, "issues": issues,

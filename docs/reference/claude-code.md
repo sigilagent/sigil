@@ -90,7 +90,8 @@ tools instead of emitting the tool-call text byLLM parses — the run then dies 
 | `SIGIL_CLAUDE_FRONTIER` | `claude-cc/opus` | model for the `frontier` / `chat` tiers |
 | `SIGIL_CLAUDE_SMALL` | `claude-cc/haiku` | model for the `small` / `router` tiers |
 | `SIGIL_CLAUDE_BIN` | `claude` | path to the Claude Code binary |
-| `SIGIL_CLAUDE_CC_TIMEOUT` | `600` | seconds before one call is killed |
+| `SIGIL_CLAUDE_CC_TIMEOUT` | `600` | seconds before one slot call is killed |
+| `SIGIL_CLAUDE_AGENT_TIMEOUT` | `3600` | seconds before an agent session (authoring, repair) is killed |
 | `SIGIL_CLAUDE_CC_CWD` | temp dir | working directory for the subprocess |
 
 The subprocess deliberately runs outside your project, with MCP servers and
@@ -156,6 +157,52 @@ fresh session — MCP tool lists are read at startup.
 
 This is the mirror of `sigil add-mcp`, which points the *other* way: there Sigil
 consumes a tool server so the compiler can bind its tools into new skills.
+
+## Letting an agent author the AG-IR
+
+`--agent` swaps the compiler's front-end: instead of authoring the AG-IR through
+a staged pipeline of byLLM slots, a Claude Code session writes it directly,
+verifying each draft against the compile oracle.
+
+```bash
+sigil --claude compile ./SKILL.md --agent
+```
+
+It is **opt-in**, and the reason is worth being precise about. What it keeps:
+
+- the **spec loop**, unchanged — every rule must quote your skill verbatim, so a
+  hallucinated obligation is still dropped mechanically before authoring starts;
+- the **gate battery** — G1 (embodiment), G4 (compile oracle, with the same
+  bounded repair loop), G5 (every mandatory rule realized by a node).
+
+What it drops: LIFT's staged authoring — the workflow spine, the annotator flows,
+the assemble step, and the view repair that routes each issue back to the flow
+that owns it, plus the coverage critics that hunt for dropped obligations across
+several rounds.
+
+So it is faster, and it runs on a subscription instead of a frontier key. It is
+**not** more trustworthy. The honest framing is *agent-authored, gate-verified* —
+not *verified the way LIFT verifies*. Use the default pipeline when faithfulness
+is the priority.
+
+The session gets a workspace with four files and nothing else on its path:
+
+| File | What it is |
+|---|---|
+| `writing-agir/SKILL.md` | the meta-skill: how to write an AG-IR, and what the gates check |
+| `SKILL.md` | the skill being compiled |
+| `rules.md` | the frozen rule set, with ids — the contract the IR is audited against |
+| `agir-template.md` | the compiler-exact YAML shape (plus the full reference files) |
+
+It writes `agent.ir` and runs `sigil gate agent.ir <name>` after every edit. Each
+node carries `traces_to: [r3, r7]` naming the rules it realizes, which is what G5
+audits — so "it compiles" is never mistaken for "it covers the skill".
+
+`SIGIL_CLAUDE_AUTHOR_TURNS` (default `80`) bounds the session.
+
+`--agent` only needs the `claude` binary — the authoring session always runs on
+it. Combining it with `--claude` additionally puts the spec loop on Claude Code;
+without `--claude` the spec loop runs on your configured `frontier` tier as usual.
 
 ## When a compile fails
 

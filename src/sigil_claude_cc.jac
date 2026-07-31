@@ -122,6 +122,16 @@ def _timeout() -> float:
         return 600.0
 
 
+def _agent_timeout() -> float:
+    # A byLLM slot is one completion; an agent session is dozens of turns with
+    # tool calls in between, so it gets its own, much larger budget. Sharing the
+    # slot timeout silently kills long authoring runs mid-flight.
+    try:
+        return float(os.environ.get("SIGIL_CLAUDE_AGENT_TIMEOUT", "3600"))
+    except ValueError:
+        return 3600.0
+
+
 def _alias(model: str) -> str:
     """`claude-cc/opus` -> `opus`. litellm may already have stripped the prefix."""
     name = str(model or "")
@@ -316,6 +326,28 @@ def _chunk(resp) -> dict:
 
 _AGENT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 
+# The session's own identity, not just the task in the message. A repair agent
+# told "change only what the diagnostic requires" and an authoring agent told to
+# write an artifact from scratch want different standing instructions, so the
+# caller picks one; the default is repair.
+FIXER = (
+    "sigil-fixer",
+    "Repairs a Sigil compiler artifact until its gate passes.",
+    "You are a repair agent inside Sigil's compiler. Work only in the current "
+    "directory. Read the instructions in the message, fix the named file in "
+    "place, and verify with the command you are given until it passes. Change "
+    "only what the diagnostic requires.",
+)
+
+AUTHOR = (
+    "sigil-author",
+    "Authors a Sigil compiler artifact and verifies it against the compile oracle.",
+    "You are the front-end of Sigil's compiler. Work only in the current "
+    "directory. Read the instructions in the message, author the named file, and "
+    "verify it with the command you are given until it passes. Faithfulness to "
+    "the source beats elegance: never add, drop or re-modalize an obligation.",
+)
+
 
 def agent_run(
     prompt: str,
@@ -324,6 +356,7 @@ def agent_run(
     model: str = "",
     max_turns: int = 40,
     timeout: float = 0.0,
+    persona: tuple = FIXER,
 ) -> dict:
     """Run a tool-using Claude Code agent in `cwd`. Returns its result JSON.
 
@@ -331,24 +364,14 @@ def agent_run(
     the user's MCP servers and skills off, so it cannot reach into the project.
     """
     allowed = list(tools if tools is not None else _AGENT_TOOLS)
-    spec = {
-        "sigil-fixer": {
-            "description": "Repairs a Sigil compiler artifact until its gate passes.",
-            "tools": allowed,
-            "prompt": (
-                "You are a repair agent inside Sigil's compiler. Work only in the "
-                "current directory. Read the instructions in the message, fix the "
-                "named file in place, and verify with the command you are given "
-                "until it passes. Change only what the diagnostic requires."
-            ),
-        }
-    }
+    (agent_name, agent_desc, agent_prompt) = persona
+    spec = {agent_name: {"description": agent_desc, "tools": allowed, "prompt": agent_prompt}}
     argv = [
         _bin(),
         "-p",
         "--output-format", "json",
         "--agents", json.dumps(spec, sort_keys=True),
-        "--agent", "sigil-fixer",
+        "--agent", agent_name,
         "--allowedTools", " ".join(allowed),
         "--permission-mode", "acceptEdits",
         "--strict-mcp-config",
@@ -365,13 +388,16 @@ def agent_run(
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=(timeout or _timeout()),
+            timeout=(timeout or _agent_timeout()),
             cwd=cwd,
         )
     except FileNotFoundError:
         raise ClaudeCCError("`%s` not found on PATH — install Claude Code" % _bin())
     except subprocess.TimeoutExpired:
-        raise ClaudeCCError("claude agent timed out after %.0fs" % (timeout or _timeout()))
+        raise ClaudeCCError(
+            "claude agent timed out after %.0fs (SIGIL_CLAUDE_AGENT_TIMEOUT)"
+            % (timeout or _agent_timeout())
+        )
     # An agent run that burns its turns is a normal outcome here, not an error:
     # the caller re-gates the artifact and decides. Only a hard failure raises.
     if proc.returncode != 0 and not proc.stdout.strip().startswith("{"):

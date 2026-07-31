@@ -772,8 +772,12 @@
 <pre><code><span class="c"># every model tier runs on the claude CLI you already have</span>
 <span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md
 
-<span class="c"># a failed gate escalates to a session that runs the oracle itself</span>
-<span class="k">sigil</span> gate agent.ir <span class="c"># ...the compile oracle, as a command</span></code></pre>
+<span class="c"># opt-in: an agent authors the AG-IR against the compile oracle,</span>
+<span class="c"># keeping the grounded spec loop and the whole gate battery</span>
+<span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md <span class="p">--agent</span>
+
+<span class="c"># the oracle is a command — for a hand-written IR, or CI</span>
+<span class="k">sigil</span> gate agent.ir</code></pre>
       </div>
 
       <div class="code" data-code>
