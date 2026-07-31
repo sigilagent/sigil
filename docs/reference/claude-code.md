@@ -12,6 +12,10 @@ On top of the first, a failed compile can escalate to a tool-using Claude Code
 session that runs the compile oracle itself — see [when a compile
 fails](#when-a-compile-fails).
 
+Setting this up for the first time? [claude-code-setup](claude-code-setup.md)
+is the step-by-step version — prerequisites, verification at each step, and a
+troubleshooting table. This page is the explanation behind it.
+
 ## Claude Code as the model
 
 Sigil can run its cognition on the **Claude Code CLI you already have installed**,
@@ -272,5 +276,6 @@ silent default.
 
 ## See also
 
+- [claude-code-setup](claude-code-setup.md) — the step-by-step setup guide
 - [models](models.md) — the tier system, aliases, and fallback chains
 - [skill-compilation](skill-compilation.md) — what the frontier tier is actually doing
