@@ -832,9 +832,13 @@ def describe_soul() -> dict {
     nskills = len(latest_by_sig([regs[0] -->[?:TaskGraph]])) if regs else 0;
     return {
         "name": soul.name, "persona": soul.persona, "ethos": soul.ethos,
-        "frontier_model": soul.frontier_model, "small_model": soul.small_model,
-        "router_model": (soul.router_model if soul.router_model else soul.small_model),
-        "chat_model": (soul.chat_model if soul.chat_model else soul.frontier_model),
+        # EFFECTIVE tiers, not the graph values they shadow — the chat banner reads
+        # `chat_model` to tell you who you are talking to, and in claude mode the
+        # graph still says gpt-4o-mini while every word comes from Claude.
+        "frontier_model": _effective_tier("frontier", soul.frontier_model),
+        "small_model": _effective_tier("small", soul.small_model),
+        "router_model": _effective_tier("router", soul.router_model if soul.router_model else soul.small_model),
+        "chat_model": _effective_tier("chat", soul.chat_model if soul.chat_model else soul.frontier_model),
         "workspace": (soul.workspace if soul.workspace else "~/.sigil/workspace"),
         "sandbox_mode": (soul.sandbox_mode if soul.sandbox_mode else "jail"),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
