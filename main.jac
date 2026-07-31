@@ -176,11 +176,26 @@ with entry:__main__ {
 
     # Must precede any awaken() — that is where the tiers bind.
     if _CLAUDE_MODE {
+        # `--claude` promises the SUBSCRIPTION. Check before binding a single tier:
+        # discovering there is no login on the first model call wastes the call and
+        # reports it as a provider error, which reads like Sigil's fault.
+        import from src.sigil_claude_cc { auth_status }
+        _auth = auth_status();
+        if str(_auth["mode"]) == "none" {
+            print("xx --claude needs a Claude Code subscription login, and this machine has none.",
+                  file=sys.stderr);
+            print("   Run `claude` once and sign in, then re-run.", file=sys.stderr);
+            print("   To bill an approved ANTHROPIC_API_KEY instead: SIGIL_CLAUDE_ALLOW_API_KEY=1",
+                  file=sys.stderr);
+            sys.exit(1);
+        }
         use_claude_code(True);
         # stderr, not stdout: this is a status line, and `mcp-serve` gives stdout
         # to the JSON-RPC wire where a stray line is a protocol violation.
-        print(chr(27) + "[2m" + chr(0x2726) + " claude mode: every tier runs on your local Claude Code CLI"
-              + chr(27) + "[0m", file=sys.stderr);
+        _who = ("api key" if str(_auth["mode"]) == "api-key"
+                else (str(_auth["account"]) if _auth["account"] else "your subscription"));
+        print(chr(27) + "[2m" + chr(0x2726) + " claude mode: every tier runs on your local Claude Code CLI ("
+              + _who + ")" + chr(27) + "[0m", file=sys.stderr);
     }
 
     if (cmd == "serve") or (cmd == "observatory") {

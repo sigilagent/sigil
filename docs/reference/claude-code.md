@@ -82,6 +82,41 @@ tools instead of emitting the tool-call text byLLM parses — the run then dies 
 - Claude Code on `PATH` (`claude --version`), signed in.
 - A recent enough CLI to support `--agents` / `--agent` (custom agent definitions).
 
+### Which account pays
+
+**Your Claude subscription — by construction.** `--claude` names the account it
+is using when it starts:
+
+```
+✦ claude mode: every tier runs on your local Claude Code CLI (you@example.com)
+```
+
+Left to itself, Claude Code would prefer an `ANTHROPIC_API_KEY` you had once
+approved (it asks the first time it sees one and records the answer in
+`~/.claude.json` under `customApiKeyResponses`). That would quietly turn "runs on
+your subscription" into console billing. So Sigil **withholds the variable from
+the CLI subprocess** — your own environment is never modified, the child simply
+does not receive it — and the subscription login is what answers.
+
+If there is no login to use, `--claude` **stops before binding a single tier**
+rather than failing on the first model call:
+
+```
+xx --claude needs a Claude Code subscription login, and this machine has none.
+   Run `claude` once and sign in, then re-run.
+   To bill an approved ANTHROPIC_API_KEY instead: SIGIL_CLAUDE_ALLOW_API_KEY=1
+```
+
+`SIGIL_CLAUDE_ALLOW_API_KEY=1` is the opt-out for anyone who *wants* API-key
+billing: the key is passed through, and the startup line says `(api key)` so the
+choice stays visible.
+
+To see what the CLI itself would do:
+
+```bash
+jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
+```
+
 ## Environment
 
 | Variable | Default | What it does |
@@ -92,6 +127,7 @@ tools instead of emitting the tool-call text byLLM parses — the run then dies 
 | `SIGIL_CLAUDE_BIN` | `claude` | path to the Claude Code binary |
 | `SIGIL_CLAUDE_CC_TIMEOUT` | `600` | seconds before one slot call is killed |
 | `SIGIL_CLAUDE_AGENT_TIMEOUT` | `3600` | seconds before an agent session (authoring, repair) is killed |
+| `SIGIL_CLAUDE_ALLOW_API_KEY` | unset | pass `ANTHROPIC_API_KEY` through, billing it instead of the subscription |
 | `SIGIL_CLAUDE_CC_CWD` | temp dir | working directory for the subprocess |
 
 The subprocess deliberately runs outside your project, with MCP servers and

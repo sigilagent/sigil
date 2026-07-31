@@ -132,6 +132,51 @@ def _agent_timeout() -> float:
         return 3600.0
 
 
+def _config_path() -> str:
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return os.path.join(d, ".claude.json") if d else os.path.expanduser("~/.claude.json")
+
+
+def auth_status() -> dict:
+    """Which account a `claude-cc` call would bill, before spending one.
+
+    Claude Code asks once about an ANTHROPIC_API_KEY it finds in the environment
+    and records the answer in ~/.claude.json. Returns
+    {"mode": "subscription"|"api-key"|"none"|"unknown", "account": str}.
+    """
+    try:
+        with open(_config_path()) as f:
+            cfg = json.load(f)
+    except Exception:
+        # No readable config is not proof of anything — say so rather than guess.
+        return {"mode": "unknown", "account": ""}
+    account = str(((cfg.get("oauthAccount") or {}).get("emailAddress")) or "")
+    key = os.environ.get("ANTHROPIC_API_KEY") or ""
+    approved = (cfg.get("customApiKeyResponses") or {}).get("approved") or []
+    if key and (key[-20:] in approved) and _allow_api_key():
+        return {"mode": "api-key", "account": ""}
+    if account:
+        return {"mode": "subscription", "account": account}
+    return {"mode": "none", "account": ""}
+
+
+def _allow_api_key() -> bool:
+    return bool(os.environ.get("SIGIL_CLAUDE_ALLOW_API_KEY"))
+
+
+def _env() -> dict:
+    # `--claude` means "runs on your Claude subscription". Claude Code would
+    # otherwise prefer an ANTHROPIC_API_KEY the user once approved, silently
+    # turning that promise into console billing — so the child does not get the
+    # variable at all unless SIGIL_CLAUDE_ALLOW_API_KEY says the user wants it.
+    # The caller's own environment is never modified.
+    env = dict(os.environ)
+    if not _allow_api_key():
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    return env
+
+
 def _alias(model: str) -> str:
     """`claude-cc/opus` -> `opus`. litellm may already have stripped the prefix."""
     name = str(model or "")
@@ -199,16 +244,74 @@ def _argv(model: str) -> list:
     return argv
 
 
+# Failures the CLI will keep producing until a human does something. byLLM retries
+# an APIConnectionError three times, so a billing or login problem used to print
+# three full JSON dumps and three tracebacks for one actionable sentence. Matching
+# on the CLI's own wording, keyed to what the user has to do about it.
+_TERMINAL_ERRORS = [
+    ("credit balance is too low",
+     "the Anthropic account backing the `claude` CLI is out of credit"),
+    ("please run /login",
+     "the `claude` CLI is not logged in — run `claude` once and sign in"),
+    ("oauth token has expired",
+     "the `claude` CLI login has expired — run `claude` once to sign in again"),
+    ("invalid api key",
+     "the API key the `claude` CLI is using was rejected"),
+    ("invalid bearer token",
+     "the credential the `claude` CLI is using was rejected"),
+]
+
+
+def _billing_advice() -> str:
+    # Which account this drains is the user's own earlier decision, not something
+    # Sigil sets: Claude Code asks once about an ANTHROPIC_API_KEY it finds in the
+    # environment and records the answer in ~/.claude.json. Approved -> the CLI
+    # bills that key; rejected or unanswered -> the subscription login, and the
+    # variable is inert. Point at the answer rather than guess which one it is.
+    return (
+        " Which account that is depends on Claude Code's own API-key decision — "
+        "check `jq '.customApiKeyResponses' ~/.claude.json`. Or move the tier "
+        "elsewhere with `sigil models set <tier> <model>`."
+    )
+
+
+def _raise_cli_error(data: dict, code: int) -> None:
+    reason = str(data.get("result") or data.get("subtype") or "").strip()
+    low = reason.casefold()
+    for (needle, human) in _TERMINAL_ERRORS:
+        if needle in low:
+            msg = "claude-cc: " + human + "." + (_billing_advice() if "credit" in needle else "")
+            try:
+                from litellm.exceptions import AuthenticationError
+            except Exception:
+                raise ClaudeCCError(msg)
+            # Raised as an auth error on purpose: byLLM retries connection errors
+            # and does NOT retry this, so the user gets one clear line.
+            raise AuthenticationError(message=msg, llm_provider=PROVIDER, model=PROVIDER)
+    status = data.get("api_error_status") or ("exit %d" % code)
+    raise ClaudeCCError("claude-cc: the CLI failed (%s): %s" % (status, reason[:400] or "no reason given"))
+
+
 def _parse(stdout: str, stderr: str, code: int) -> dict:
-    if code != 0:
-        detail = (stderr or stdout or "").strip()[:600]
-        raise ClaudeCCError("claude exited %d: %s" % (code, detail or "no output"))
-    try:
-        data = json.loads(stdout)
-    except Exception as e:
-        raise ClaudeCCError("claude produced unparseable output (%s): %s" % (e, stdout[:300]))
-    if data.get("is_error"):
-        raise ClaudeCCError("claude reported an error: %s" % str(data.get("result"))[:600])
+    # `claude -p --output-format json` reports failures INSIDE the json (is_error)
+    # and also exits nonzero. The json carries the human-readable reason; the exit
+    # code carries nothing. So parse first and only fall back to a raw dump when
+    # there is genuinely no json to read — dumping stdout on a nonzero exit is what
+    # buried "Credit balance is too low" inside 600 characters of usage counters.
+    text = (stdout or "").strip()
+    data = None
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except Exception:
+            data = None
+    if data is None:
+        detail = (stderr or text or "").strip()[:400]
+        if code != 0:
+            raise ClaudeCCError("claude-cc: the CLI exited %d: %s" % (code, detail or "no output"))
+        raise ClaudeCCError("claude-cc: unparseable CLI output: %s" % (detail or "empty"))
+    if data.get("is_error") or code != 0:
+        _raise_cli_error(data, code)
     return data
 
 
@@ -261,6 +364,7 @@ def _call(model: str, messages: list):
             text=True,
             timeout=_timeout(),
             cwd=_cwd(),
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError(
@@ -280,6 +384,7 @@ async def _acall(model: str, messages: list):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=_cwd(),
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError(
@@ -390,6 +495,7 @@ def agent_run(
             text=True,
             timeout=(timeout or _agent_timeout()),
             cwd=cwd,
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError("`%s` not found on PATH — install Claude Code" % _bin())
