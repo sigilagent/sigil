@@ -399,6 +399,7 @@
     <div class="nav-links" id="navlinks">
       <a href="#see">See it</a>
       <a href="#idea">The compiler</a>
+      <a href="#claude">Claude Code</a>
       <a href="#graph">The runtime</a>
       <a href="#features">Features</a>
       <a href="#install">Install</a>
@@ -432,6 +433,7 @@
 <pre><code><span class="k">sigil</span> compile ./SKILL.md <span class="p">-e</span> agent.jac
 ./agent.jac <span class="s">"extract the tables from report.pdf"</span></code></pre>
           </div>
+          <p class="hero-tag" style="margin:10px 0 0">No API key? <a href="#claude" style="color:var(--cyan)">Compile on the Claude Code CLI you already have</a> — and serve the skills back to it as tools.</p>
         </div>
         <div class="hero-install">
           <span class="hero-install-label">Install · macOS &amp; Linux</span>
@@ -547,6 +549,52 @@
     </div>
 
     <p class="lead" style="margin-top:30px">Why it matters: the compiled harness carries <strong style="color:var(--text)">structure a weak model cannot skip</strong>: step order, embodied tools, grounded verification. The model isn't asked to <em>be</em> disciplined; the harness <em>is</em> the discipline. That is how a skill written once runs faithfully on any model, and how capability transfers from the frontier model that compiled it to the small one that runs it.</p>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ============ CLAUDE CODE ============ -->
+<section id="claude">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Works with Claude Code</div>
+      <h2 class="section-title">Claude Code decides <em>when</em>. The compiled harness decides <em>how</em>.</h2>
+      <p>Sigil plugs into the agent harness you already use, in both directions — and needs no API key to do it. Compile on the <code>claude</code> CLI you already have, then serve every skill you compile back into it as a tool. Inside that tool call there is no prompt left to drift from: the skill's steps are nodes the run must visit.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">1 · compile on your subscription</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># every model tier runs on the claude CLI — no ANTHROPIC_API_KEY,</span>
+<span class="c"># no proxy, no second auth</span>
+<span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md
+
+<span class="c"># opt-in: let an agent author the typed IR itself, against the</span>
+<span class="c"># compile oracle — grounded spec loop and gate battery still run</span>
+<span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md <span class="p">--agent</span></code></pre>
+      </div>
+
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">2 · serve the skills back to it</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># one MCP tool per compiled skill, triggered by the skill's own</span>
+<span class="c"># `description:` frontmatter — the "use when…" line you wrote</span>
+claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-serve
+
+<span class="c"># Claude then calls skill_clean_csv, skill_writing_plans, …</span>
+<span class="c"># and the harness — not the model — guarantees the steps</span></code></pre>
+      </div>
+    </div>
+
+    <div class="loop-panel" style="margin-top:22px">
+      <div class="loop-note" style="border:0;padding:0;margin:0">
+        <div class="route hit"><b>NO KEY</b>byLLM dispatches through litellm, and litellm lets you own a provider prefix — so a headless <code>claude -p</code> is just another model. Typed returns and tool-using slots included.</div>
+        <div class="route partial"><b>SKILLS AS TOOLS</b>Every compiled skill becomes a tool in your session, described by its own trigger line and carrying its run record, so routing is a decision with evidence behind it.</div>
+        <div class="route miss"><b>SELF-REPAIRING</b>When a compile fails its gate, a tool-using session gets the workspace and the compile oracle as a command, and iterates until it passes. The oracle stays the authority.</div>
+      </div>
+    </div>
+
+    <p class="lead" style="margin-top:26px">The point isn't that Sigil talks to Claude Code — it's <strong style="color:var(--text)">what a tool call becomes</strong> once the skill behind it is compiled. A prompt-loaded skill is advice the model may follow. A compiled one is a program it runs inside. <a href="reference/claude-code.html">Read the reference →</a></p>
   </div>
 </section>
 
@@ -969,6 +1017,7 @@ jac install pyyaml
     </div>
     <div class="foot-links">
       <a href="#idea">The compiler</a>
+      <a href="#claude">Claude Code</a>
       <a href="#graph">The runtime</a>
       <a href="#features">Features</a>
       <a href="#paper">Paper</a>
