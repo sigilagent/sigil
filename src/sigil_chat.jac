@@ -249,8 +249,8 @@ glob _STATUS: any = None;    # the live spinner handle, set for the duration of 
 glob _STREAMED: bool = False; # did the reply stream any tokens this turn? (skip re-render if so)
 glob _GUTTER: str = chr(27) + "[38;5;141m│" + chr(27) + "[0m ";  # purple left-border on each reply line
 glob _GUTTER_MU: str = "[#a78bfa]│[/] ";   # the same gutter as rich markup
-glob _LINEBUF: dict[str, str] = {"s": ""};           # partial line held until its newline arrives
-glob _FENCE: dict[str, bool] = {"in": False};         # inside a ``` block? (styling is off in there)
+glob _LINEBUF: dict[str, str] = {"s": ""};   # partial line held until its newline arrives
+glob _FENCE: dict = {"in": False, "lang": "", "buf": []};   # open ``` block being collected
 
 def _style_inline(text: str) -> str {
     # Inline markdown -> rich markup, on text whose own brackets are already escaped
@@ -268,16 +268,10 @@ def _style_inline(text: str) -> str {
 }
 
 def _style_line(line: str) -> str {
-    # One reply line as rich markup. Fenced code is returned verbatim (dimmed): the
-    # whole point of a fence is that its contents are not prose.
+    # One PROSE line as rich markup. Fenced blocks never reach here — _emit_line
+    # collects them and hands the whole block to rich's Syntax, which is the only
+    # way to get real highlighting.
     body = line.replace("[", "\\[");
-    if line.strip().startswith("```") {
-        _FENCE["in"] = not _FENCE["in"];
-        lang = line.strip()[3:].strip();
-        return "[dim]" + ("╭─ " + lang if (_FENCE["in"] and lang) else ("╭─" if _FENCE["in"] else "╰─")) + "[/dim]";
-    }
-    if _FENCE["in"] { return "[dim]" + body + "[/dim]"; }
-
     stripped = body.lstrip();
     indent = body[:len(body) - len(stripped)];
     if stripped.startswith("#") {
@@ -292,9 +286,81 @@ def _style_line(line: str) -> str {
     return indent + _style_inline(stripped) if not indent else (indent + _style_inline(stripped));
 }
 
+def _body_width(console: any) -> int {
+    try { w = int(console.width); } except Exception as e { w = 80; }
+    return max(20, w - 2);   # the gutter itself costs "│ "
+}
+
+def _print_gutter(console: any, txt: any, hang: int = 0) {
+    # rich wraps to the console width, but the gutter was only ever on the string
+    # handed to it — so every CONTINUATION line came out flush-left and the block
+    # lost its left border mid-paragraph. Wrap at (width - 2) here and put the
+    # gutter on each produced line instead.
+    lines = txt.wrap(console, _body_width(console) - hang);
+    if not lines { console.print(Text.from_markup(_GUTTER_MU), highlight=False); return; }
+    first = True;
+    for seg in lines {
+        row = Text.from_markup(_GUTTER_MU);
+        # continuation of a bullet hangs under its text, not under the marker —
+        # otherwise a wrapped list item reads as a new paragraph
+        if not first and hang { row.append(" " * hang); }
+        row.append_text(seg);
+        console.print(row, highlight=False);
+        first = False;
+    }
+}
+
+def _print_code(console: any, code: str, lang: str) {
+    # A fenced block is handed to rich whole, so it gets real syntax highlighting
+    # rather than the dimmed verbatim text a line-at-a-time renderer can manage.
+    try {
+        import from rich.syntax { Syntax }
+        w = _body_width(console);
+        syn = Syntax(code, lang if lang else "text", theme="ansi_dark",
+                     background_color="default", word_wrap=True, code_width=w);
+        opts = console.options.update(width=w);
+        for segs in console.render_lines(syn, opts, pad=False) {
+            row = Text.from_markup(_GUTTER_MU);
+            for s in segs {
+                t = str(s.text).replace(chr(10), "");
+                if t { row.append(t, s.style); }
+            }
+            console.print(row, highlight=False);
+        }
+    } except Exception as e {
+        for ln in code.split(chr(10)) {
+            _print_gutter(console, Text.from_markup("[dim]" + ln.replace("[", "\\[") + "[/dim]"));
+        }
+    }
+}
+
 def _emit_line(console: any, line: str) {
-    try { console.print(_GUTTER_MU + _style_line(line), highlight=False); }
-    except Exception { console.print(_GUTTER_MU + line.replace("[", "\\["), highlight=False); }
+    if line.strip().startswith("```") {
+        if _FENCE["in"] {
+            _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
+            _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
+        } else {
+            _FENCE["in"] = True; _FENCE["lang"] = line.strip()[3:].strip(); _FENCE["buf"] = [];
+        }
+        return;
+    }
+    if _FENCE["in"] { _FENCE["buf"].append(line); return; }
+    hang = 2 if line.lstrip().startswith("- ") or line.lstrip().startswith("* ") else 0;
+    try { _print_gutter(console, Text.from_markup(_style_line(line)), hang); }
+    except Exception as e { _print_gutter(console, Text(line), hang); }
+}
+
+def _flush_reply(console: any) {
+    # End of turn: emit the last partial line, and close an unterminated fence so
+    # a truncated reply still shows the code it had already produced.
+    if _LINEBUF["s"] {
+        _emit_line(console, str(_LINEBUF["s"]));
+        _LINEBUF["s"] = "";
+    }
+    if _FENCE["in"] {
+        _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
+        _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
+    }
 }
 
 def _install_hooks(console: any, session: any) {
@@ -350,7 +416,7 @@ def _run_and_render(console: any, message: str) {
     # Per-turn render state. A reply that ended mid-fence would otherwise dim the
     # whole of the NEXT answer, and a leftover partial line would prefix it.
     _LINEBUF["s"] = "";
-    _FENCE["in"] = False;
+    _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
     r: dict = {};
     if sys.stdin.isatty() {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
@@ -365,10 +431,7 @@ def _run_and_render(console: any, message: str) {
     if _STREAMED {
         # A reply almost never ends with a newline, so the last line is still in the
         # buffer — flush it or the final sentence never reaches the screen.
-        if _LINEBUF["s"] {
-            _emit_line(console, _LINEBUF["s"]);
-            _LINEBUF["s"] = "";
-        }
+        _flush_reply(console);
         console.print();
     } else {
         # nothing streamed (empty reply, or an error before the first token) — render it
