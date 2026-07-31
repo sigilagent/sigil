@@ -10,14 +10,19 @@ effects (files, code, live data, scheduling, memory, delegation).
 
 ## The tools
 
-**Files & code** (jailed to the workspace — see [workspace-and-sandbox](workspace-and-sandbox.md))
+**Files & code** (relative paths resolve in the workspace; absolute paths reach the real host unless `sandbox` is on — see [workspace-and-tools](workspace-and-tools.md))
 - `ws_list(subdir)` — one directory level; `ws_tree(subdir, depth)` — recursive survey
   (noise dirs like `.git`/`node_modules` skipped), for getting the shape of a repo.
 - `ws_grep(pattern, path)` — regex search across files, returns `path:line: text`.
 - `ws_read(path, offset, limit)` — read a file; large files are paged (line-numbered,
   with a `lines X-Y of N` header), so read on rather than concluding from the first page.
 - `ws_write(path, content)` · `ws_edit(path, old, new)`.
-- `ws_exec(command)` — real shell, runs through the exec-approval gate + sandbox.
+- `ws_exec(command, wait_seconds)` — real shell (uncontained by default), through the exec-approval
+  gate. **Nothing is killed on a timer**: it reports the output so far and, if the command
+  is still going, a job id. `ws_watch(job_id)` keeps watching (new output only),
+  `ws_kill(job_id)` stops it, `ws_jobs()` lists them. So the agent reads what actually
+  happened and decides whether to wait — see
+  [workspace-and-tools](workspace-and-tools.md).
   `ws_tree` / `ws_grep` / `ws_read` are read-only and need **no** approval.
 
 When analyzing a codebase, the agent surveys with `ws_tree`, locates with `ws_grep`, and
@@ -33,7 +38,9 @@ repo-scale review.
 **Automation** — `schedule_task` · `list_scheduled` · `cancel_scheduled`.
 See [automation-and-cron](automation-and-cron.md).
 
-**Memory & skills** — `remember_fact` · `recall_memory` · `learn_skill` · `list_skills`.
+**Memory & skills** — `remember_fact` · `recall_memory` · `learn_skill` · `list_skills`,
+plus `sigil_compile(path)`, which compiles a SKILL.md in-process (never shell out to
+`sigil compile` — see [workspace-and-tools](workspace-and-tools.md)).
 See [memory-and-skills](memory-and-skills.md).
 
 **Sub-agents** — `spawn_parallel(tasks)` runs independent sub-tasks concurrently (via

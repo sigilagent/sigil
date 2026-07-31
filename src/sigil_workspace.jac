@@ -1,11 +1,24 @@
-"""Sandboxed workspace + the agent's general tool-belt.
+"""The agent's workspace and its general tool-belt.
 
-This is the security boundary for chat-mode. Every file tool is *jailed* to a
-single workspace directory (an escaping path is refused, not clamped); `ws_exec`
-runs only through the exec-approval gate (`approvals.check_exec`) and, per the
-Soul's `sandbox_mode`, either in a cwd-confined subprocess (`jail`) or a locked-down
-Docker container (`docker`, `--network none --cap-drop ALL`); web tools carry an
-SSRF guard that refuses loopback / private / link-local hosts.
+By default the tools work on the REAL filesystem, with the operator's own reach:
+file tools resolve relative paths against the workspace directory but accept any
+absolute path, and `ws_exec` runs unconfined in a normal subprocess. That default
+is deliberate — Sigil's job here is to drive the tools and agents already installed
+on this machine (`claude`, a build, a test suite), and containment would cut it off
+from exactly those.
+
+Containment is a switch, not a fact: `configure sandbox <off|jail|docker>` (default
+`off`). `jail` puts the file tools back inside the workspace and starts shell jobs
+there; `docker` additionally runs each command in a locked-down container. What
+holds in every mode is the exec-approval policy (`approvals.check_exec`) in front of
+every shell command and an SSRF guard that refuses loopback / private / link-local
+hosts on the web tools.
+
+Nothing is killed on a timer. `ws_exec` starts a background job and returns the
+output so far after a soft wait; the model then decides whether to keep watching
+(`ws_watch`), leave it running, or stop it (`ws_kill`). And `sigil compile` is not
+a shell command at all — it is `sigil_compile`, run in this process against this
+agent's graph.
 
 These functions are the byLLM ReAct tools the chat agent (and its sub-agents) call.
 Each carries a `sem` so the model knows when to reach for it. A live *trace sink*
@@ -16,11 +29,12 @@ an *approver* callback lets the REPL resolve a pending exec approval inline.
 import os;
 import re;
 import json;
-import shutil;
+import time;
+import tempfile;
 import subprocess;
 import from urllib.request { Request, urlopen }
 import from urllib.parse { urlparse, quote_plus }
-import from .sigil { awaken, Soul }
+import from .sigil { awaken, Soul, compile_skill }
 import from .approvals { check_exec, allowlist_add }
 import from .sigil_secrets { resolve_refs, redact_secrets }
 
@@ -44,13 +58,14 @@ def _trace(tool: str, detail: str, ok: bool = True) -> None {
 }
 
 # ---------------------------------------------------------------------------
-# Workspace jail
+# Workspace — the default working directory, NOT a jail
 # ---------------------------------------------------------------------------
 glob _WS_ROOT: str = "";
 
 def ws_root() -> str {
-    # The single directory every file tool is confined to. Read from the Soul
-    # (config on the graph), default ~/.sigil/workspace, created on first use.
+    # Where relative paths resolve and where shell jobs start. Read from the Soul
+    # (config on the graph), default ~/.sigil/workspace, created on first use. An
+    # absolute path hands the tools anywhere on the host, on purpose.
     soul = awaken();
     want = str(soul.workspace) if soul.workspace else os.path.expanduser("~/.sigil/workspace");
     want = os.path.abspath(os.path.expanduser(want));
@@ -63,14 +78,26 @@ def ws_root() -> str {
     return _WS_ROOT;
 }
 
-def _jail(path: str) -> str {
-    # Resolve `path` inside the workspace; raise ValueError if it escapes the jail.
-    base = ws_root();
-    p = path if os.path.isabs(path) else os.path.join(base, path);
+def sandbox_mode() -> str {
+    # off (default) | jail | docker — see `configure sandbox`.
+    soul = awaken();
+    return str(soul.sandbox) if soul.sandbox else "off";
+}
+
+def _resolve(path: str) -> str {
+    # Absolute (or ~-rooted) paths as given; relative ones against the workspace.
+    # With the sandbox OFF (the default) that is the whole story — the agent reads
+    # and writes the same filesystem the operator does, so it can work on real
+    # projects alongside other agents. Turn the sandbox on and the workspace becomes
+    # a jail again: an escaping path is refused, not clamped.
+    p = os.path.expanduser(path);
+    if not os.path.isabs(p) { p = os.path.join(ws_root(), p); }
     full = str(os.path.realpath(p));
-    basereal = str(os.path.realpath(base));
-    if full != basereal and not full.startswith(basereal + os.sep) {
-        raise ValueError("path '" + path + "' escapes the workspace sandbox");
+    if sandbox_mode() != "off" {
+        basereal = str(os.path.realpath(ws_root()));
+        if (full != basereal) and (not full.startswith(basereal + os.sep)) {
+            raise ValueError("path '" + path + "' escapes the workspace sandbox");
+        }
     }
     return full;
 }
@@ -83,7 +110,7 @@ def _rel(full: str) -> str {
 # File tools
 # ---------------------------------------------------------------------------
 def ws_list(subdir: str = ".") -> str {
-    try { target = _jail(subdir); } except Exception as e { _trace("list", str(e), False); return "error: " + str(e); }
+    try { target = _resolve(subdir); } except Exception as e { _trace("list", str(e), False); return "error: " + str(e); }
     if not os.path.exists(target) { _trace("list", subdir + " (missing)", False); return "no such path: " + subdir; }
     if os.path.isfile(target) { _trace("list", _rel(target)); return _rel(target) + "  (" + str(os.path.getsize(target)) + " bytes)"; }
     rows: list = [];
@@ -102,7 +129,7 @@ def ws_read(path: str, offset: int = 0, limit: int = 0) -> str {
     # style) and a header states the slice's position in the file, so a large file can be
     # paged through (grep -> read around a line) and a partial read is never mistaken for
     # the whole file.
-    try { full = _jail(path); } except Exception as e { _trace("read", str(e), False); return "error: " + str(e); }
+    try { full = _resolve(path); } except Exception as e { _trace("read", str(e), False); return "error: " + str(e); }
     if not os.path.isfile(full) { _trace("read", path + " (missing)", False); return "no such file: " + path; }
     try {
         with open(full, "r") as f { data = f.read(); }
@@ -134,7 +161,7 @@ def ws_read(path: str, offset: int = 0, limit: int = 0) -> str {
 }
 
 def ws_write(path: str, content: str) -> str {
-    try { full = _jail(path); } except Exception as e { _trace("write", str(e), False); return "error: " + str(e); }
+    try { full = _resolve(path); } except Exception as e { _trace("write", str(e), False); return "error: " + str(e); }
     try {
         os.makedirs(os.path.dirname(full), exist_ok=True);
         with open(full, "w") as f { f.write(resolve_refs(content)); }   # secret:<name> resolves at write-time only
@@ -144,7 +171,7 @@ def ws_write(path: str, content: str) -> str {
 }
 
 def ws_edit(path: str, old: str, new: str) -> str {
-    try { full = _jail(path); } except Exception as e { _trace("edit", str(e), False); return "error: " + str(e); }
+    try { full = _resolve(path); } except Exception as e { _trace("edit", str(e), False); return "error: " + str(e); }
     if not os.path.isfile(full) { _trace("edit", path + " (missing)", False); return "no such file: " + path; }
     with open(full, "r") as f { data = f.read(); }
     n = data.count(old);
@@ -167,7 +194,7 @@ glob _SKIP_DIRS: list = [".git", "node_modules", "__pycache__", ".jac", ".venv",
 def ws_tree(subdir: str = ".", depth: int = 3) -> str {
     # Recursive directory survey (structure only). Skips noise dirs, bounds depth and
     # entry count — for getting the shape of a repo before reading files.
-    try { base = _jail(subdir); } except Exception as e { _trace("tree", str(e), False); return "error: " + str(e); }
+    try { base = _resolve(subdir); } except Exception as e { _trace("tree", str(e), False); return "error: " + str(e); }
     if not os.path.isdir(base) { _trace("tree", subdir + " (not a dir)", False); return "not a directory: " + subdir; }
     d = depth if depth > 0 else 3;
     cap = 500;
@@ -205,7 +232,7 @@ def _is_texty(path: str) -> bool {
 def ws_grep(pattern: str, path: str = ".") -> str {
     # Search file contents for a regex (read-only). `path` may be a file or a directory
     # (searched recursively, noise dirs pruned). Returns relpath:line: text, capped.
-    try { base = _jail(path); } except Exception as e { _trace("grep", str(e), False); return "error: " + str(e); }
+    try { base = _resolve(path); } except Exception as e { _trace("grep", str(e), False); return "error: " + str(e); }
     if not os.path.exists(base) { _trace("grep", path + " (missing)", False); return "no such path: " + path; }
     try { rx = re.compile(pattern); } except Exception as e { _trace("grep", "bad regex", False); return "bad regex: " + str(e)[:120]; }
     targets: list = [];
@@ -245,41 +272,113 @@ def ws_grep(pattern: str, path: str = ".") -> str {
 }
 
 # ---------------------------------------------------------------------------
-# Shell exec — approval-gated + sandboxed by Soul.sandbox_mode
+# Shell exec — approval-gated, unconfined, and NEVER killed on a timer.
+#
+# A deadline is the wrong instrument here: a build, a test suite or another agent
+# CLI routinely outlives any number you would pick, and killing it throws the work
+# away exactly when it was about to pay off. So every command runs as a background
+# job spooling to a file, and `ws_exec` only *waits* — up to a soft window — before
+# handing back the output so far. If the job is still alive the model gets a job id
+# and decides what a person would: keep watching (`ws_watch`), go do something else
+# and come back, or stop it (`ws_kill`). The process itself is never interrupted.
 # ---------------------------------------------------------------------------
+obj ShellJob {
+    has id: str;
+    has proc: any;          # subprocess.Popen — still running until IT decides otherwise
+    has spool: str;         # file the command's merged stdout/stderr streams into
+    has cmd: str;
+    has started: float;
+    has read: int = 0;      # how much of the spool has already been reported
+}
+
+glob _JOBS: dict[str, ShellJob] = {};
+glob _JOB_N: int = 0;
+
 def _docker_available() -> bool {
+    import shutil;
     return shutil.which("docker") is not None;
 }
 
-def _run_jail(command: str, timeout: int) -> dict {
-    # cwd-confined subprocess on the host (secrets resolved into argv, then redacted from output)
-    try {
-        p = subprocess.run(resolve_refs(command), shell=True, cwd=ws_root(), capture_output=True,
-                           text=True, timeout=timeout);
-        out = (str(p.stdout) + (("\n[stderr] " + str(p.stderr)) if p.stderr else ""));
-        return {"code": p.returncode, "out": out};
-    } except subprocess.TimeoutExpired as e { return {"code": 124, "out": "timed out after " + str(timeout) + "s"}; }
-    except Exception as e { return {"code": 1, "out": str(e)}; }
-}
-
-def _run_docker(command: str, timeout: int) -> dict {
-    if not _docker_available() { return {"code": 127, "out": "docker not available; set sandbox_mode=jail or install docker"}; }
+def _docker_argv(command: str) -> list {
+    # sandbox=docker: the command runs in a locked-down container with only the
+    # workspace mounted. Still no timeout — a container is a boundary, not a clock.
     img = os.getenv("SIGIL_SANDBOX_IMAGE", "python:3.13-slim");
-    argv = ["docker", "run", "--rm", "--network", "none", "--cap-drop", "ALL",
+    return ["docker", "run", "--rm", "--network", "none", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "1g",
             "-v", ws_root() + ":/work", "-w", "/work", img, "sh", "-c", resolve_refs(command)];
-    try {
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout);
-        out = (str(p.stdout) + (("\n[stderr] " + str(p.stderr)) if p.stderr else ""));
-        return {"code": p.returncode, "out": out};
-    } except subprocess.TimeoutExpired as e { return {"code": 124, "out": "timed out after " + str(timeout) + "s"}; }
-    except Exception as e { return {"code": 1, "out": str(e)}; }
 }
 
-def ws_exec(command: str) -> str {
-    soul = awaken();
-    mode = str(soul.sandbox_mode) if soul.sandbox_mode else "jail";
-    if mode == "off" { _trace("exec", command + " (disabled)", False); return "exec is disabled (sandbox_mode=off)"; }
+def _job_start(command: str) -> ShellJob {
+    # Spool to a file rather than a pipe: a pipe fills at ~64KB and then blocks the
+    # very long-running process we are trying to keep alive, with nobody draining it.
+    _JOB_N += 1;
+    jid = "j" + str(_JOB_N);
+    spool = os.path.join(tempfile.gettempdir(), "sigil-exec-" + str(os.getpid()) + "-" + jid + ".log");
+    fh = open(spool, "w");
+    if sandbox_mode() == "docker" {
+        p = subprocess.Popen(_docker_argv(command), cwd=ws_root(),
+                             stdout=fh, stderr=subprocess.STDOUT, text=True);
+    } else {
+        p = subprocess.Popen(resolve_refs(command), shell=True, cwd=ws_root(),
+                             stdout=fh, stderr=subprocess.STDOUT, text=True);
+    }
+    job = ShellJob(id=jid, proc=p, spool=spool, cmd=command, started=time.time());
+    _JOBS[jid] = job;
+    return job;
+}
+
+def _job_wait(job: ShellJob, seconds: float) -> None {
+    p = job.proc;
+    deadline = time.time() + (seconds if seconds > 0.0 else 0.0);
+    while (p.poll() is None) and (time.time() < deadline) { time.sleep(0.2); }
+}
+
+def _job_new_output(job: ShellJob) -> str {
+    # Everything written since the last look, so watching a job reads like a tail
+    # instead of re-reading the whole log every turn.
+    data = "";
+    try {
+        with open(job.spool, "r") as f { data = f.read(); }
+    } except Exception as e { return ""; }
+    seen = job.read;
+    job.read = len(data);
+    return data[seen:];
+}
+
+def _job_report(job: ShellJob, chunk: str) -> str {
+    p = job.proc;
+    rc = p.poll();
+    age = time.time() - job.started;
+    jid = job.id;
+    body = redact_secrets(chunk);
+    if len(body) > 12000 { body = "… [earlier output trimmed]" + chr(10) + body[-12000:]; }
+    if not body.strip() { body = "(no output yet)"; }
+    if rc is None {
+        return ("[job " + jid + "] STILL RUNNING after " + ("%.0f" % age) + "s — output so far:" + chr(10)
+                + body + chr(10) + chr(10)
+                + "The command was NOT killed. Decide from the output above: keep watching with "
+                + "ws_watch(\"" + jid + "\") (pass a bigger wait_seconds for slow work), leave it "
+                + "running and do something else, or stop it with ws_kill(\"" + jid + "\").");
+    }
+    return "[job " + jid + "] exit=" + str(rc) + " after " + ("%.0f" % age) + "s" + chr(10) + body;
+}
+
+sem ws_exec = """Run a shell command. By default it runs unconfined on the real host, so it
+can drive whatever is installed here — builds, test suites, git, other agent CLIs. NOTHING
+is killed on a timer: the command runs as a background job and this returns the output so
+far once `wait_seconds` elapses. If the result says STILL RUNNING, read that output and
+decide — ws_watch to keep watching, or ws_kill to stop it.""";
+sem ws_exec.command = "The shell command to run.";
+sem ws_exec.wait_seconds = "How long to wait before reporting back (default 30). Use a larger value for work you expect to be slow.";
+def ws_exec(command: str, wait_seconds: int = 30) -> str {
+    # `sigil compile` is this agent's own compiler, not a shell command — a nested
+    # CLI would fight this process for the session file and outlive any wait.
+    routed = _route_sigil(command);
+    if routed is not None { return str(routed); }
+    if (sandbox_mode() == "docker") and (not _docker_available()) {
+        _trace("exec", command + " (no docker)", False);
+        return "sandbox=docker is set but docker isn't available — install it, or `configure sandbox off`.";
+    }
     # exec-approval gate — the same policy the whole agent shares
     gate = check_exec(command);
     dec = str(gate["decision"]);
@@ -294,10 +393,123 @@ def ws_exec(command: str) -> str {
         _trace("exec", command + " (denied)", False);
         return "DENIED by exec policy: " + str(gate["reason"]);
     }
-    _trace("exec", command + "  [" + mode + "]");
-    res = _run_docker(command, 120) if mode == "docker" else _run_jail(command, 120);
-    body = redact_secrets(str(res["out"]))[:8000];
-    return "exit=" + str(res["code"]) + "\n" + (body if body else "(no output)");
+    mode = sandbox_mode();
+    _trace("exec", command + ("" if mode == "off" else ("  [" + mode + "]")));
+    try { job = _job_start(command); }
+    except Exception as e { _trace("exec", str(e)[:120], False); return "could not start the command: " + str(e)[:300]; }
+    _job_wait(job, float(wait_seconds if wait_seconds > 0 else 30));
+    return _job_report(job, _job_new_output(job));
+}
+
+sem ws_watch = """Keep watching a shell job from ws_exec that was still running. Returns
+what it has printed SINCE THE LAST LOOK plus whether it has finished. The job keeps
+running whether or not you watch it.""";
+sem ws_watch.job_id = "The job id ws_exec reported, e.g. 'j1'.";
+sem ws_watch.wait_seconds = "How long to wait for more output before reporting back (default 30).";
+def ws_watch(job_id: str, wait_seconds: int = 30) -> str {
+    jid = str(job_id).strip();
+    job = _JOBS.get(jid);
+    if job is None { return "no such job '" + jid + "' — ws_jobs() lists this session's jobs"; }
+    _trace("watch", jid);
+    _job_wait(job, float(wait_seconds if wait_seconds > 0 else 30));
+    return _job_report(job, _job_new_output(job));
+}
+
+sem ws_kill = "Stop a running shell job started by ws_exec.";
+sem ws_kill.job_id = "The job id to stop, e.g. 'j1'.";
+def ws_kill(job_id: str) -> str {
+    jid = str(job_id).strip();
+    job = _JOBS.get(jid);
+    if job is None { return "no such job '" + jid + "' — ws_jobs() lists this session's jobs"; }
+    p = job.proc;
+    rc = p.poll();
+    if rc is not None { return "job " + jid + " had already finished (exit=" + str(rc) + ")"; }
+    try { p.kill(); p.wait(); } except Exception as e {}
+    _trace("kill", jid, False);
+    return "stopped job " + jid + ": " + job.cmd[:120];
+}
+
+sem ws_jobs = "List the shell jobs started this session — which are still running, how long each has been going, and its command.";
+def ws_jobs() -> str {
+    if not _JOBS { return "(no shell jobs this session)"; }
+    rows: list = [];
+    for jid in sorted(_JOBS.keys()) {
+        job = _JOBS[jid];
+        rc = job.proc.poll();
+        state = "running" if rc is None else ("exit=" + str(rc));
+        age = ("%.0f" % (time.time() - job.started)) + "s";
+        rows.append(jid + "  " + state.ljust(10) + age.rjust(6) + "  " + job.cmd[:100]);
+    }
+    return chr(10).join(rows);
+}
+
+# ---------------------------------------------------------------------------
+# Sigil's own compiler — a tool, not a shell command
+#
+# `sigil compile SKILL.md` is a many-minute gated lift. Run through the shell it is
+# a SECOND sigil process contending with this one for the same session file, and its
+# progress stays invisible until it ends. In-process it shares this agent's graph,
+# reports each stage on the live trace, and has no time limit at all.
+# ---------------------------------------------------------------------------
+def _compile_stage(ev: dict) -> None {
+    try {
+        if str(ev.get("state")) == "start" { _trace("compile", str(ev.get("stage", "")) + " …"); }
+    } except Exception as e {}
+}
+
+sem sigil_compile = """Compile a SKILL.md into a runnable skill on this agent's graph —
+Sigil's own compiler. ALWAYS use this instead of running `sigil compile` through the
+shell: it runs in this process, on this graph, with no time limit. A compile takes
+several minutes and reports each stage as it goes.""";
+sem sigil_compile.path = "Path to the SKILL.md file to compile.";
+sem sigil_compile.eject_path = "Optional path to also write a standalone runnable .jac program to.";
+sem sigil_compile.eject = "Set true to also eject a standalone runnable program under its default name.";
+def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
+    try { full = _resolve(path); } except Exception as e { _trace("compile", str(e), False); return "error: " + str(e); }
+    if not os.path.isfile(full) { _trace("compile", path + " (missing)", False); return "no such file: " + path; }
+    try {
+        with open(full, "r") as f { src = f.read(); }
+    } except Exception as e { _trace("compile", str(e), False); return "error reading " + path + ": " + str(e); }
+    _trace("compile", _rel(full));
+    want_eject = bool(eject) or bool(eject_path);
+    try { r = compile_skill(src, want_eject, eject_path, _compile_stage, False); }
+    except Exception as e { _trace("compile", str(e)[:120], False); return "compile error: " + str(e)[:400]; }
+    if not r["ok"] {
+        lines: list[str] = ["compile FAILED for '" + str(r["signature"]) + "':"];
+        for iss in list(r["issues"] or []) { lines.append("  - " + str(iss)); }
+        if r["compile_errors"] { lines.append("  compile: " + str(r["compile_errors"])[:400]); }
+        _trace("compile", "failed: " + str(r["signature"]), False);
+        return chr(10).join(lines);
+    }
+    out = "compiled skill: " + str(r["signature"]) + "  ->  " + str(r["module"]);
+    for rp in list(r["repairs"] or []) { out += chr(10) + "  (repair) " + str(rp); }
+    if r["eject"] { out += chr(10) + "  ejected runnable: " + str(r["eject"]); }
+    return out;
+}
+
+def _route_sigil(command: str) -> any {
+    # Recognise `sigil compile <SKILL.md> [-e [out.jac]]`, however `sigil` is spelled
+    # on the path, and answer it in-process. Everything else is a real shell command.
+    toks = [str(t) for t in command.strip().split()];
+    if len(toks) < 2 { return None; }
+    head = toks[0];
+    if not ((head == "sigil") or head.endswith("/sigil")) { return None; }
+    if toks[1] != "compile" { return None; }
+    path = "";
+    eject = False;
+    eject_path = "";
+    i = 2;
+    while i < len(toks) {
+        t = toks[i];
+        if (t == "-e") or (t == "--eject") {
+            eject = True;
+            nxt = toks[i + 1] if (i + 1) < len(toks) else "";
+            if nxt and (not nxt.startswith("-")) { eject_path = nxt; i += 1; }
+        } elif (not t.startswith("-")) and (not path) { path = t; }
+        i += 1;
+    }
+    if not path { return "usage: sigil_compile(\"<SKILL.md>\") — the in-process compiler; don't shell out to `sigil compile`"; }
+    return sigil_compile(path, eject_path, eject);
 }
 
 # ---------------------------------------------------------------------------
@@ -400,10 +612,12 @@ def web_search(query: str) -> str {
 }
 
 def workspace_info() -> dict {
-    soul = awaken();
     base = ws_root();
     n = 0;
     try { n = len(list(os.listdir(base))); } except Exception as e {}
-    return {"root": base, "sandbox_mode": (str(soul.sandbox_mode) if soul.sandbox_mode else "jail"),
-            "docker": _docker_available(), "items": n};
+    running = 0;
+    for j in _JOBS.values() { if j.proc.poll() is None { running += 1; } }
+    mode = sandbox_mode();
+    return {"root": base, "items": n, "jobs": len(_JOBS), "running": running,
+            "sandbox": mode, "docker": (_docker_available() if mode == "docker" else False)};
 }

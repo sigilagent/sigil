@@ -2,9 +2,13 @@
 
 This is what makes Sigil *fully usable from chat alone*. A single byLLM agent holds
 a running conversation and can, in one turn, chain any of its tools: read/write/edit
-files and run shell in the sandboxed workspace, search & fetch the web, schedule its
-own cron jobs, remember & recall facts, compile a reusable skill, call MCP tools,
+files and run shell on the real host, search & fetch the web, schedule its own cron
+jobs, remember & recall facts, compile a SKILL.md or a reusable skill, call MCP tools,
 send messages on channels, and fan work out to parallel sub-agents.
+
+Shell work is never killed on a timer — `ws_exec` reports the output so far and the
+model chooses whether to keep watching, which is why the brief below spends a
+paragraph on that decision.
 
 Continuity comes from `conversation=CHAT_HISTORY` (byLLM appends each turn in place).
 The per-turn `context` argument re-injects persona, principles, workspace state and
@@ -24,8 +28,8 @@ import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, chan
 import from .sigil_docs { list_docs, read_doc }
 import from .sigil_mcp { dispatch }
 import from .sigil_workspace {
-    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search,
-    workspace_info, ws_root, _trace, drain_trace
+    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, ws_watch, ws_kill, ws_jobs,
+    sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
 
@@ -148,7 +152,7 @@ def doc_index() -> str { _trace("docs", "index"); return list_docs(); }
 sem read_docs = """Read one of Sigil's reference docs to answer a question about how SIGIL
 ITSELF works — its configuration keys, tools, the sandbox, cron, channels, memory, skills,
 or models. Prefer this over guessing when the user asks about the agent's own capabilities
-or settings. Topics: overview, configuration, chat-and-tools, workspace-and-sandbox,
+or settings. Topics: overview, configuration, chat-and-tools, workspace-and-tools,
 automation-and-cron, channels, memory-and-skills, models (fuzzy match is fine).""";
 sem read_docs.topic = "The reference topic to read (e.g. 'sandbox', 'configuration', 'models').";
 def read_docs(topic: str) -> str { _trace("docs", topic); return read_doc(topic); }
@@ -168,7 +172,10 @@ def send_message(channel: str, peer: str, text: str) -> str {
 # do the rest. Kept concise so a small model can follow it.
 # ---------------------------------------------------------------------------
 sem chat_agent = """You are Sigil, a capable, autonomous assistant that operates entirely
-from chat. You have a SANDBOXED workspace and a full tool-belt.
+from chat. By default you work on the REAL machine — the same filesystem and the same
+installed tools the operator has — with a full tool-belt. Your standing context reports a
+`sandbox` setting: `off` means exactly that; `jail`/`docker` means the file tools are
+confined to the workspace and paths outside it will be refused.
 
 FIRST decide whether the message even needs a tool. Greetings, questions about you,
 explanations, opinions, and anything you can answer in words → just REPLY as text, with
@@ -181,10 +188,20 @@ reversible steps.
 Guidance:
 - Files: ws_list (one level) / ws_tree (survey a whole directory) / ws_grep (find text
   across files) / ws_read (read a file; page big ones with offset/limit) / ws_write /
-  ws_edit. ws_tree and ws_grep are read-only and need no approval — use them freely.
-- Shell: ws_exec only for real program work (running/building/cloning), never to echo
-  text. It's jailed to the workspace and approval-gated, so don't send trivial commands
-  through it — if one is blocked, say so.
+  ws_edit. Relative paths resolve in the workspace; absolute paths work anywhere on the
+  host unless the sandbox is on. ws_tree and ws_grep are read-only and need no approval —
+  use them freely.
+- Shell: ws_exec only for real program work (running/building/cloning/driving another
+  CLI), never to echo text. It is approval-gated, so don't send trivial commands through
+  it — if one is blocked, say so. NOTHING IS EVER KILLED ON A TIMER: ws_exec waits
+  `wait_seconds` (default 30) and then reports the output so far. If it says STILL
+  RUNNING, the command is still going — read that output and decide like a person would:
+  ws_watch("<job>") to keep watching (pass a bigger wait_seconds for slow work), get on
+  with something else and check back, or ws_kill("<job>") if it's clearly stuck or wrong.
+  ws_jobs() lists what's still running. Never claim a long command failed just because it
+  hasn't finished.
+- Compiling a SKILL.md: use sigil_compile — never `sigil compile` through ws_exec. It runs
+  in this process on this graph, takes several minutes, and has no time limit.
 - Analyzing a codebase/repo: SURVEY FIRST with ws_tree, LOCATE with ws_grep, then READ
   SEVERAL representative files (page large ones — a partial read shows "lines X-Y of N",
   so keep reading rather than concluding from the first page). Never judge a codebase from
@@ -204,18 +221,20 @@ Guidance:
 - Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
 - External tools: mcp_call for connected MCP servers.
 - About YOURSELF: when the user asks how Sigil works, what a config key/tool does, or
-  about the sandbox/cron/channels/memory/models, call read_docs (or doc_index) and answer
-  from the reference — don't guess. For the user's CURRENT settings, use what you already
-  know from your standing context (persona, workspace, sandbox mode) rather than the docs.
+  about the workspace/sandbox/cron/channels/memory/models, call read_docs (or doc_index)
+  and answer from the reference — don't guess. For the user's CURRENT settings, use what
+  you already know from your standing context (persona, workspace, sandbox) rather than
+  the docs.
 
 Reply in concise GitHub-flavored markdown. Report what you actually did, including
 paths and command results. If a tool fails, say what failed and what you'll try next.""";
 sem chat_agent.message = "The user's latest message.";
 def chat_agent(message: str) -> str by chat_llm(
     tools=[
-        ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search,
+        ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
+        ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search,
         schedule_task, list_scheduled, cancel_scheduled,
-        remember_fact, recall_memory, learn_skill, list_skills,
+        remember_fact, recall_memory, sigil_compile, learn_skill, list_skills,
         mcp_call, send_message, connect_channel, setup_channel,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
         doc_index, read_docs, spawn_subagent, spawn_parallel
@@ -239,7 +258,8 @@ def _refresh_info(message: str) -> None {
         "persona": str(s["persona"]) if s["persona"] else "a pragmatic, autonomous operator",
         "principles": [str(e) for e in list(s["ethos"])],
         "workspace": str(wi["root"]),
-        "sandbox_mode": str(wi["sandbox_mode"]),
+        "sandbox": str(wi["sandbox"]),
+        "running_shell_jobs": int(wi["running"]),
         "compiled_skills": int(s["skills"])
     };
     mems = recollect(message, 4);

@@ -89,7 +89,7 @@ def _banner(console: any) {
         + "[dim]the whole agent, from one conversation[/]\n\n"
         + "[dim]model    [/] " + cm + "\n"
         + "[dim]workspace[/] " + str(wi["root"]) + "\n"
-        + "[dim]sandbox  [/] " + str(wi["sandbox_mode"]) + "\n"
+        + "[dim]sandbox  [/] " + str(wi["sandbox"]) + "\n"
         + "[dim]skills   [/] " + str(s["skills"])
     );
     t = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2));
@@ -107,8 +107,8 @@ def _help(console: any) {
         ["/soul", "identity, models, skills & memory"],
         ["/config", "edit settings interactively"],
         ["/tools", "the tool-belt the agent can use"],
-        ["/workspace", "show the sandboxed workspace"],
-        ["/sandbox <jail|docker|off>", "set exec sandbox mode"],
+        ["/workspace", "workspace dir + running shell jobs"],
+        ["/sandbox <off|jail|docker>", "containment for the tools (default off)"],
         ["/cron", "list scheduled jobs"],
         ["/channels", "channels: supported + configured"],
         ["/connect <kind>", "how to connect discord|telegram|whatsapp|slack"],
@@ -129,18 +129,18 @@ def _help(console: any) {
 }
 
 def _tool_style(tool: str) -> str {
-    warm = ["exec", "write", "edit", "schedule", "unschedule", "message", "learn"];
+    warm = ["exec", "write", "edit", "schedule", "unschedule", "message", "learn", "kill", "compile"];
     return "yellow" if tool in warm else "cyan";
 }
 
 def _show_tools(console: any) {
     groups = [
-        ["files", "ws_list · ws_read · ws_write · ws_edit"],
-        ["shell", "ws_exec  (sandboxed + approval-gated)"],
+        ["files", "ws_list · ws_read · ws_write · ws_edit · ws_tree · ws_grep"],
+        ["shell", "ws_exec · ws_watch · ws_kill · ws_jobs  (approval-gated, never timed out)"],
         ["web", "web_search · web_fetch  (SSRF-guarded)"],
         ["cron", "schedule_task · list_scheduled · cancel_scheduled"],
         ["memory", "remember_fact · recall_memory"],
-        ["skills", "learn_skill · list_skills"],
+        ["skills", "sigil_compile · learn_skill · list_skills"],
         ["sub-agents", "spawn_subagent · spawn_parallel  (flow/wait, concurrent)"],
         ["external", "mcp_call · send_message"]
     ];
@@ -154,8 +154,11 @@ def _show_workspace(console: any) {
     wi = workspace_info();
     console.print();
     console.print("[bold]workspace[/bold] " + str(wi["root"]));
-    console.print("  [dim]sandbox_mode[/dim] " + str(wi["sandbox_mode"]) + "   [dim]docker[/dim] " + ("available" if wi["docker"] else "n/a") + "   [dim]items[/dim] " + str(wi["items"]));
-    console.print("  [dim]file tools are jailed here; shell runs approval-gated" + (" in docker" if wi["sandbox_mode"] == "docker" else " cwd-confined") + "[/dim]");
+    console.print("  [dim]sandbox[/dim] " + str(wi["sandbox"]) + "   [dim]items[/dim] " + str(wi["items"]) + "   [dim]shell jobs[/dim] " + str(wi["jobs"]) + " (" + str(wi["running"]) + " running)");
+    console.print("  [dim]" + ("relative paths land here; absolute paths and shell run on the real host"
+                               if wi["sandbox"] == "off"
+                               else ("file tools are jailed here; shell runs" + (" in docker" if wi["sandbox"] == "docker" else " from here")))
+                  + ", approval-gated. Nothing is killed on a timer.[/dim]");
     console.print();
 }
 
@@ -213,7 +216,7 @@ def _show_soul(console: any) {
     console.print("[bold magenta]soul[/bold magenta] " + str(s["name"]));
     console.print("  [dim]persona [/dim] ", Text(str(s["persona"]) if s["persona"] else "(unset)"));
     console.print("  [dim]models  [/dim] chat=" + str(s["chat_model"]) + "  frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
-    console.print("  [dim]sandbox [/dim] " + str(s["sandbox_mode"]) + "   [dim]workspace[/dim] " + str(s["workspace"]) + "   [dim]skills[/dim] " + str(s["skills"]));
+    console.print("  [dim]sandbox [/dim] " + str(s["sandbox"]) + "   [dim]workspace[/dim] " + str(s["workspace"]) + "   [dim]skills[/dim] " + str(s["skills"]));
     eth = list(s["ethos"]);
     if eth {
         console.print("  [dim]ethos[/dim]");
@@ -464,8 +467,8 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/clear" { console.clear(); }
     elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }
     elif verb == "/sandbox" {
-        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox_mode", rest)) + "[/dim]"); }
-        else { console.print("[dim]  usage: /sandbox <jail|docker|off>[/dim]"); }
+        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); }
+        else { console.print("[dim]  usage: /sandbox <off|jail|docker>   (currently " + str(workspace_info()["sandbox"]) + ")[/dim]"); }
     }
     elif verb in ["/remember", "/teach"] {
         if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); }
@@ -563,8 +566,8 @@ def config_menu() {
         ["frontier_model", "expensive model — compiles new skills"],
         ["small_model", "cheap model — executes compiled skills"],
         ["router_model", "model that routes a task to a skill"],
-        ["workspace", "sandboxed directory the file tools are jailed to"],
-        ["sandbox_mode", "exec containment: jail | docker | off"],
+        ["workspace", "default directory the tools work in"],
+        ["sandbox", "tool containment: off | jail | docker"],
         ["auto_eval", "self-check each run, on/off"],
         ["eval_threshold", "auto-relearn below this score (0-100)"]
     ];
@@ -575,7 +578,7 @@ def config_menu() {
             "chat_model": str(s["chat_model"]),
             "frontier_model": str(s["frontier_model"]), "small_model": str(s["small_model"]),
             "router_model": str(s["router_model"]),
-            "workspace": str(s["workspace"]), "sandbox_mode": str(s["sandbox_mode"]),
+            "workspace": str(s["workspace"]), "sandbox": str(s["sandbox"]),
             "auto_eval": ("on" if s["auto_eval"] else "off"),
             "eval_threshold": str(s["eval_threshold"])
         };

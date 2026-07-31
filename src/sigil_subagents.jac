@@ -5,17 +5,22 @@ The chat agent delegates independent sub-tasks to sub-agents that run
 expression (launched on the thread pool), joined with `wait`. Because LLM/tool
 calls are I/O-bound, N sub-agents finish in ~1× wall-clock, not N×.
 
-A sub-agent is itself a small ReAct loop over the sandboxed workspace tools
+A sub-agent is itself a small ReAct loop over the workspace tools
 (read/write/edit/list/exec/web) — but deliberately WITHOUT the spawn or cron
 tools, so sub-agents cannot recurse or schedule. They do real work (files, shell,
 web) and return a short text result the parent synthesizes. They never mutate the
 persistent agent graph, so running many at once is safe.
+
+They get ws_watch/ws_kill alongside ws_exec for the same reason the parent does:
+a sub-agent that shells out to something slow has to be able to keep watching it
+rather than report a failure that never happened.
 """
 
 import from jaclang.byllm.lib { Model }
 import from .sigil { bind_chat_model }
 import from .sigil_workspace {
-    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search, _trace
+    ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
+    ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search, _trace
 }
 
 glob sub_llm: any = Model(model_name="gpt-4o-mini");
@@ -33,10 +38,13 @@ def _ensure_sub_llm() -> None {
 sem subagent_run = """You are a focused sub-agent. Complete the single TASK using
 the workspace tools, then return a SHORT (1-3 sentence) result stating exactly what
 you did and where any output landed. Ground claims in what you actually read (ws_tree
-to survey, ws_grep to locate, ws_read to read); do the work — don't ask questions.""";
+to survey, ws_grep to locate, ws_read to read); do the work — don't ask questions.
+A shell command is never killed on a timer: if ws_exec reports STILL RUNNING, keep
+watching with ws_watch(job) until it finishes rather than calling it a failure.""";
 sem subagent_run.task = "The one self-contained sub-task to complete.";
 def subagent_run(task: str) -> str by sub_llm(
-    tools=[ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, web_fetch, web_search],
+    tools=[ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
+           ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search],
     max_react_iterations=8
 );
 

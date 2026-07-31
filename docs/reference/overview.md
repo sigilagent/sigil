@@ -44,7 +44,7 @@ graph LR
     TaskGraph -->|MutatedFrom| TaskGraph
 ```
 
-The `Soul` node holds all configuration — persona, model tiers, workspace, sandbox mode,
+The `Soul` node holds all configuration — persona, model tiers, workspace, sandbox,
 channels, policies. `awaken()` rebinds the agent's cognition from the graph on every run,
 so a `configure` change takes effect on the next turn with no restart.
 
