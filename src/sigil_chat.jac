@@ -366,11 +366,40 @@ def _flush_reply(console: any) {
     }
 }
 
+# Width of the "  ✓ toolname   " gutter every trace line starts with. Continuation
+# lines are padded to it so a long detail stays in the detail column instead of
+# wrapping back to the screen edge and reading like the agent's own prose.
+glob _TRACE_GUTTER: int = 16;
+
+def _trace_rows(detail: str, width: int) -> list {
+    import textwrap;
+    w = width if width > 24 else 60;
+    out: list = [];
+    for para in str(detail).split(chr(10)) {
+        if not para.strip() { continue; }
+        for ln in (textwrap.wrap(para, width=w) or [para]) { out.append(str(ln)); }
+    }
+    return out if out else [""];
+}
+
 def _install_hooks(console: any, session: any) {
     def sink(tool: str, detail: str, ok: bool) {
+        import from rich.markup { escape }
         mark = "✓" if ok else "✗";
         col = _tool_style(tool) if ok else "red";
-        console.print("  [dim]" + mark + "[/dim] [" + col + "]" + tool.ljust(11) + "[/" + col + "] [dim]" + str(detail) + "[/dim]");
+        avail = 60;
+        try { avail = int(console.width) - _TRACE_GUTTER; } except Exception as e {}
+        pad = " " * _TRACE_GUTTER;
+        first = True;
+        for row in _trace_rows(detail, avail) {
+            # escaped: a detail is arbitrary text (paths, patterns, job ids like
+            # "[j1]") and rich would read a bracket as markup and blow up.
+            body = "[dim]" + str(escape(str(row))) + "[/dim]";
+            if first {
+                console.print("  [dim]" + mark + "[/dim] [" + col + "]" + tool.ljust(11) + "[/" + col + "] " + body);
+                first = False;
+            } else { console.print(pad + body); }
+        }
         if _STATUS is not None {
             try { _STATUS.update("[magenta]✦[/magenta] [dim]working — [/dim][" + col + "]" + tool + "[/" + col + "][dim]…[/dim]"); }
             except Exception as e {}

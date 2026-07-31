@@ -638,6 +638,45 @@ def register_skill(source: str, kind: str) -> dict {
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
 
+# --- Compile progress, rendered once ---------------------------------------
+# `compile_skill` reports each lift stage through a `progress` callback. Both
+# front-ends (the CLI's live build view and chat's tool trace) want the same two
+# strings out of an event, so they live here rather than being written twice and
+# drifting apart.
+glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
+                            "flows": "annotator flows", "assemble": "assemble",
+                            "gates": "gates", "repair": "repair",
+                            "author": "claude authoring"};
+
+def compile_stage_label(stage: str) -> str {
+    return str(_STAGE_LABELS.get(stage, stage));
+}
+
+def compile_stage_line(ev: dict) -> str {
+    # One-line summary of a finished stage: what it produced, not that it ran.
+    s = str(ev["stage"]);
+    if s == "spec" {
+        m = "ok" if (ev["sound"] and ev["complete"] and not ev["drift"]) else "issues";
+        return str(ev["rules"]) + " rules · " + str(ev["rounds"]) + " rounds · " + m;
+    } elif s == "spine" {
+        return str(ev["nodes"]) + " nodes · " + str(ev["edges"]) + " edges · " + str(ev["rounds"]) + " rounds" + ((" · " + str(ev["issues"]) + " issues") if ev["issues"] else "");
+    } elif s == "flows" {
+        return str(ev["carries"]) + " carries · " + str(ev["tools"]) + " tools · " + str(ev["knowledge"]) + " knowledge · " + str(ev["hil"]) + " HIL";
+    } elif s == "author" {
+        return str(ev["lines"]) + " IR lines";
+    } elif s == "assemble" {
+        return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
+    } elif s == "gates" {
+        return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
+    }
+    return "";
+}
+
+def compile_stage_secs(ev: dict) -> str {
+    secs = float(ev.get("secs", 0.0));
+    return (str(int(secs // 60)) + "m " + str(int(secs % 60)) + "s") if secs >= 60.0 else (("%.1f" % secs) + "s");
+}
+
 def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False) -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the gated AI lift, always:
