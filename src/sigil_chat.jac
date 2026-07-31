@@ -18,6 +18,7 @@ falling back to builtin input() when piped (so it stays scriptable).
 
 import sys;
 import os;
+import re;
 import from .sigil_logo { BANNER_LOGO }
 import from .sigil { describe_soul, configure, library, recollect, teach }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
@@ -247,6 +248,120 @@ def _show_library(console: any) {
 glob _STATUS: any = None;    # the live spinner handle, set for the duration of a turn
 glob _STREAMED: bool = False; # did the reply stream any tokens this turn? (skip re-render if so)
 glob _GUTTER: str = chr(27) + "[38;5;141m│" + chr(27) + "[0m ";  # purple left-border on each reply line
+glob _GUTTER_MU: str = "[#a78bfa]│[/] ";   # the same gutter as rich markup
+glob _LINEBUF: dict[str, str] = {"s": ""};   # partial line held until its newline arrives
+glob _FENCE: dict = {"in": False, "lang": "", "buf": []};   # open ``` block being collected
+
+def _style_inline(text: str) -> str {
+    # Inline markdown -> rich markup, on text whose own brackets are already escaped
+    # so a model writing "[dim]" cannot inject styling of its own.
+    out = re.sub(r"`([^`]+)`", "[cyan]\\1[/cyan]", text);
+    # non-greedy, and space-anchored like emphasis: `[^*]+` could not cross an
+    # asterisk, so "**2 * 3 = 6** and a lone **" paired the WRONG two runs and
+    # bolded the text between them.
+    out = re.sub(r"\*\*(?!\s)(.+?)(?<!\s)\*\*", "[bold]\\1[/bold]", out);
+    # emphasis, but not arithmetic: markdown requires the opening * to be followed
+    # by non-space and the closing * preceded by non-space, so `2 * 3 = 6` and a
+    # lone ** are left exactly as the model wrote them.
+    out = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", "[italic]\\1[/italic]", out);
+    return out;
+}
+
+def _style_line(line: str) -> str {
+    # One PROSE line as rich markup. Fenced blocks never reach here — _emit_line
+    # collects them and hands the whole block to rich's Syntax, which is the only
+    # way to get real highlighting.
+    body = line.replace("[", "\\[");
+    stripped = body.lstrip();
+    indent = body[:len(body) - len(stripped)];
+    if stripped.startswith("#") {
+        head = stripped.lstrip("#").strip();
+        return indent + "[bold #a78bfa]" + _style_inline(head) + "[/]";
+    }
+    for bullet in ["- ", "* "] {
+        if stripped.startswith(bullet) {
+            return indent + "[#a78bfa]•[/] " + _style_inline(stripped[2:]);
+        }
+    }
+    return indent + _style_inline(stripped) if not indent else (indent + _style_inline(stripped));
+}
+
+def _body_width(console: any) -> int {
+    try { w = int(console.width); } except Exception as e { w = 80; }
+    return max(20, w - 2);   # the gutter itself costs "│ "
+}
+
+def _print_gutter(console: any, txt: any, hang: int = 0) {
+    # rich wraps to the console width, but the gutter was only ever on the string
+    # handed to it — so every CONTINUATION line came out flush-left and the block
+    # lost its left border mid-paragraph. Wrap at (width - 2) here and put the
+    # gutter on each produced line instead.
+    lines = txt.wrap(console, _body_width(console) - hang);
+    if not lines { console.print(Text.from_markup(_GUTTER_MU), highlight=False); return; }
+    first = True;
+    for seg in lines {
+        row = Text.from_markup(_GUTTER_MU);
+        # continuation of a bullet hangs under its text, not under the marker —
+        # otherwise a wrapped list item reads as a new paragraph
+        if not first and hang { row.append(" " * hang); }
+        row.append_text(seg);
+        console.print(row, highlight=False);
+        first = False;
+    }
+}
+
+def _print_code(console: any, code: str, lang: str) {
+    # A fenced block is handed to rich whole, so it gets real syntax highlighting
+    # rather than the dimmed verbatim text a line-at-a-time renderer can manage.
+    try {
+        import from rich.syntax { Syntax }
+        w = _body_width(console);
+        syn = Syntax(code, lang if lang else "text", theme="ansi_dark",
+                     background_color="default", word_wrap=True, code_width=w);
+        opts = console.options.update(width=w);
+        for segs in console.render_lines(syn, opts, pad=False) {
+            row = Text.from_markup(_GUTTER_MU);
+            for s in segs {
+                t = str(s.text).replace(chr(10), "");
+                if t { row.append(t, s.style); }
+            }
+            console.print(row, highlight=False);
+        }
+    } except Exception as e {
+        for ln in code.split(chr(10)) {
+            _print_gutter(console, Text.from_markup("[dim]" + ln.replace("[", "\\[") + "[/dim]"));
+        }
+    }
+}
+
+def _emit_line(console: any, line: str) {
+    if line.strip().startswith("```") {
+        if _FENCE["in"] {
+            _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
+            _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
+        } else {
+            _FENCE["in"] = True; _FENCE["lang"] = line.strip()[3:].strip(); _FENCE["buf"] = [];
+        }
+        return;
+    }
+    if _FENCE["in"] { _FENCE["buf"].append(line); return; }
+    hang = 2 if line.lstrip().startswith("- ") or line.lstrip().startswith("* ") else 0;
+    try { _print_gutter(console, Text.from_markup(_style_line(line)), hang); }
+    except Exception as e { _print_gutter(console, Text(line), hang); }
+}
+
+def _flush_reply(console: any) {
+    # End of turn: emit the last partial line, and close an unterminated fence so
+    # a truncated reply still shows the code it had already produced.
+    if _LINEBUF["s"] {
+        _emit_line(console, str(_LINEBUF["s"]));
+        _LINEBUF["s"] = "";
+    }
+    if _FENCE["in"] {
+        _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
+        _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
+    }
+}
 
 def _install_hooks(console: any, session: any) {
     def sink(tool: str, detail: str, ok: bool) {
@@ -267,9 +382,18 @@ def _install_hooks(console: any, session: any) {
             if _STATUS is not None { try { _STATUS.stop(); } except Exception as e {} }
             console.print();
             console.print("[#a78bfa]◆[/] [dim]sigil[/]");
-            sys.stdout.write(_GUTTER);
         }
-        sys.stdout.write(str(piece).replace(chr(10), chr(10) + _GUTTER));
+        # Buffer to the line break and style whole lines. Streaming raw put literal
+        # `**bold**`, backticks and `- ` bullets on screen — the model writes markdown
+        # and nothing was rendering it, because only the non-streaming fallback below
+        # ever reached rich's Markdown. A line is the largest unit that can be styled
+        # without waiting for the whole reply, so the reply still arrives live.
+        _LINEBUF["s"] += str(piece);
+        while chr(10) in _LINEBUF["s"] {
+            (line, rest) = _LINEBUF["s"].split(chr(10), 1);
+            _LINEBUF["s"] = rest;
+            _emit_line(console, line);
+        }
         sys.stdout.flush();
     }
     def approver(command: str) -> bool {
@@ -289,6 +413,10 @@ def _install_hooks(console: any, session: any) {
 
 def _run_and_render(console: any, message: str) {
     _STREAMED = False;
+    # Per-turn render state. A reply that ended mid-fence would otherwise dim the
+    # whole of the NEXT answer, and a leftover partial line would prefix it.
+    _LINEBUF["s"] = "";
+    _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
     r: dict = {};
     if sys.stdin.isatty() {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
@@ -301,10 +429,9 @@ def _run_and_render(console: any, message: str) {
         r = chat_turn(message);
     }
     if _STREAMED {
-        # tokens already rendered live in the gutter block — close it and add a
-        # blank line so the next prompt is clearly separated.
-        sys.stdout.write("\n");
-        sys.stdout.flush();
+        # A reply almost never ends with a newline, so the last line is still in the
+        # buffer — flush it or the final sentence never reaches the screen.
+        _flush_reply(console);
         console.print();
     } else {
         # nothing streamed (empty reply, or an error before the first token) — render it
