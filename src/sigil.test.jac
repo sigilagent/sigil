@@ -20,3 +20,22 @@ test "memory_context renders bullet facts, empty for none" {
     ctx = memory_context([m]);
     assert "user likes CSV" in ctx;
 }
+
+test "describe_soul reports the EFFECTIVE tiers the chat banner shows" {
+    # The banner reads chat_model to tell you who you are talking to. Reporting
+    # the graph value there meant `sigil --claude chat` announced "gpt-4o-mini"
+    # while every word came from Claude.
+    use_claude_code(False);
+    plain = describe_soul();
+    use_claude_code(True);
+    claude = describe_soul();
+    use_claude_code(False);
+
+    assert str(claude["chat_model"]).startswith("claude-cc/");
+    assert str(claude["frontier_model"]).startswith("claude-cc/");
+    assert str(claude["small_model"]).startswith("claude-cc/");
+    assert str(claude["router_model"]).startswith("claude-cc/");
+    # and the override is claude-mode only — it must not rewrite the graph
+    assert not str(plain["chat_model"]).startswith("claude-cc/");
+    assert describe_soul()["chat_model"] == plain["chat_model"];
+}
