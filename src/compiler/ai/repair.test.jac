@@ -56,3 +56,23 @@ test "exhaustion returns the last verdict honestly, never a silent success" {
     assert len(out.attempts) == 2;
     assert "still failing" in out.attempts[1];
 }
+
+test "the claude escalation is off unless explicitly armed" {
+    import os;
+    prev = os.environ.get("SIGIL_CLAUDE_REPAIR", "");
+    os.environ["SIGIL_CLAUDE_REPAIR"] = "";
+    assert not claude_repair_enabled();
+    os.environ["SIGIL_CLAUDE_REPAIR"] = "1";
+    assert claude_repair_enabled();
+    os.environ["SIGIL_CLAUDE_REPAIR"] = prev;
+}
+
+test "the repair brief names the oracle command and forbids semantic drift" {
+    b = _repair_brief("csv_clean", "jac check: 2 error(s)\nerror[E1001]: nope");
+    assert "gate agent.ir csv_clean" in b;   # the agent can re-run the oracle itself
+    assert "error[E1001]" in b;              # ...and is told what actually failed
+    assert "contract.md" in b;
+    # the IR is a compiled SKILL: a repair that changes its meaning is worse than
+    # a repair that fails, so the brief has to say so
+    assert "Fix ONLY what the diagnostic requires" in b;
+}

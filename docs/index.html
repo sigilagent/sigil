@@ -708,6 +708,11 @@
         <h3>MCP tools, bound at compile time</h3>
         <p>Connect any tool server and the compiler binds its tools by name into the skills it builds; live runs dispatch to whichever server exposes the tool.</p>
       </div>
+      <div class="feat"><span class="badge done">new</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg></div>
+        <h3>Plugs into Claude Code, both ways</h3>
+        <p>Compile on the Claude Code CLI you already have — no API key. Then serve every compiled skill back to it as a tool: Claude decides <em>when</em>, the harness decides <em>how</em>.</p>
+      </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-9 8.4 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 1121 11.5z"/></svg></div>
         <h3>A full runtime included</h3>
@@ -758,6 +763,30 @@
 
 <span class="c"># MCP servers: the compiler binds their tools into new skills</span>
 <span class="k">sigil</span> add-mcp github stdio gh-mcp</code></pre>
+      </div>
+    </div>
+
+    <div class="two-col" style="margin-top:18px">
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">no API key: compile on Claude Code</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># every model tier runs on the claude CLI you already have</span>
+<span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md
+
+<span class="c"># opt-in: an agent authors the AG-IR against the compile oracle,</span>
+<span class="c"># keeping the grounded spec loop and the whole gate battery</span>
+<span class="k">sigil</span> <span class="p">--claude</span> compile ./SKILL.md <span class="p">--agent</span>
+
+<span class="c"># the oracle is a command — for a hand-written IR, or CI</span>
+<span class="k">sigil</span> gate agent.ir</code></pre>
+      </div>
+
+      <div class="code" data-code>
+        <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">…then serve the skills back to it</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="c"># one MCP tool per compiled skill, triggered by its own description</span>
+claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-serve
+
+<span class="c"># Claude Code decides WHEN. The compiled harness decides HOW —</span>
+<span class="c"># inside the tool call there is no prompt left to drift from.</span></code></pre>
       </div>
     </div>
   </div>

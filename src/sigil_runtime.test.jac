@@ -20,3 +20,28 @@ test "repo_root points at the agent package dir and the contract loads" {
     assert repo_root().endswith("src");
     assert len(default_contract()) > 100;
 }
+
+test "skill_description reads the SKILL.md frontmatter trigger line" {
+    md = "---\nname: clean-csv\ndescription: Use when a messy CSV needs clean headers.\n---\n\n# Clean a CSV\n";
+    assert skill_description(md) == "Use when a messy CSV needs clean headers.";
+    # quoted, and with a colon in the value (split on the FIRST colon only)
+    assert skill_description("---\ndescription: \"Use when: a thing\"\n---\n") == "Use when: a thing";
+}
+
+test "skill_description returns empty when there is nothing to read" {
+    assert skill_description("# Just a heading\n\nno frontmatter here") == "";
+    assert skill_description("---\nname: x\n---\n") == "";
+    assert skill_description("") == "";
+    # a `description:` AFTER the frontmatter block is body text, not the trigger
+    assert skill_description("---\nname: x\n---\ndescription: not this one\n") == "";
+}
+
+test "the compiled-module driver installs the claude-cc provider when needed" {
+    # The module runs in a SUBPROCESS, so an in-process provider registration does
+    # not reach it: the driver has to install it itself or claude mode silently
+    # covers the compiler and not execution.
+    drv = _DRIVER.format(mod="x_v1", marker="M");
+    assert "import sigil_claude_cc;" in drv;
+    assert "sigil_claude_cc.is_claude_cc(model_name)" in drv;
+    assert "config=cfg" in drv;
+}

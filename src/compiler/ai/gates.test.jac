@@ -170,3 +170,27 @@ test "G6: a model-owned route consuming human feedback is flagged; code-owned pa
     bad_route.owner = Owner.CODE;
     assert gate_hil_gates(wf, vb) == [];
 }
+
+test "_diagnostic keeps the ERROR blocks, not just the tail of the output" {
+    # A long module can push every error far above the end of `jac check` output,
+    # so tailing it hands the repair loop a diagnostic with no error in it — the
+    # repair then "fixes" a warning and the gate fails again identically.
+    out = ("✖ Error: error[E1001]: Cannot assign <Unknown> to list[str]\n"
+           "  --> m.jac:908:9\n"
+           + ("⚠ warning[W3030]: noise\n  --> m.jac:1:1\n" * 60));
+    d = _diagnostic(out);
+    assert "error[E1001]" in d;
+    assert "Cannot assign" in d;
+}
+
+test "_diagnostic falls back to the tail when there is no error block" {
+    out = "some\noutput\nFAILED with no diagnostic codes at all\n";
+    assert "FAILED" in _diagnostic(out);
+}
+
+test "_diagnostic stays within its budget and says what it dropped" {
+    one = "✖ Error: error[E1001]: " + ("x" * 300) + "\n";
+    d = _diagnostic(one * 20, budget=900);
+    assert len(d) < 1400;
+    assert "more error(s)" in d;
+}

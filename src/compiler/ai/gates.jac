@@ -242,6 +242,29 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
 # G4 — the compile oracle
 # ---------------------------------------------------------------------------
 
+def _diagnostic(out: str, budget: int = 2400) -> str {
+    # `jac check` prints every diagnostic, errors first-come-first-served among
+    # warnings, and a long module can push the real errors far above the end of
+    # the output. Tailing it therefore hands the repair loop a diagnostic that
+    # need not contain a single error — the repair then "fixes" a warning and
+    # the gate fails again identically. Keep the ERROR blocks instead, and only
+    # fall back to the tail when there are none (a FAILED with no error[E…]).
+    blocks: list[str] = re.split(r"\n(?=" + chr(0x2716) + r" Error: |" + chr(0x26A0) + r" warning\[)", out);
+    errs: list[str] = [b for b in blocks if re.search(r"error\[E\d+\]", b)];
+    if not errs { return out[-budget:]; }
+    kept: list[str] = [];
+    used = 0;
+    for b in errs {
+        if used + len(b) > budget { break; }
+        kept.append(b);
+        used += len(b);
+    }
+    if not kept { kept = [errs[0][:budget]]; }
+    dropped = len(errs) - len(kept);
+    tail = ("\n\n... and " + str(dropped) + " more error(s)") if dropped > 0 else "";
+    return "\n".join(kept).strip() + tail;
+}
+
 def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict {
     # G4: the AG-IR must lower mechanically and type-check with zero errors.
     osp = "";
@@ -268,8 +291,7 @@ def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict 
         out = str(r.stdout) + "\n" + str(r.stderr);
         n_err = len(re.findall(r"error\[E\d+\]", out));
         if (n_err > 0) or ("FAILED" in out and "PASSED" not in out) {
-            tail = out[-1600:];
-            return CompileVerdict(ok=False, module_src=osp, errors=f"jac check: {n_err} error(s)\n{tail}");
+            return CompileVerdict(ok=False, module_src=osp, errors=f"jac check: {n_err} error(s)\n{_diagnostic(out)}");
         }
         return CompileVerdict(ok=True, module_src=osp);
     } except Exception as e {
