@@ -132,6 +132,51 @@ def _agent_timeout() -> float:
         return 3600.0
 
 
+def _config_path() -> str:
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return os.path.join(d, ".claude.json") if d else os.path.expanduser("~/.claude.json")
+
+
+def auth_status() -> dict:
+    """Which account a `claude-cc` call would bill, before spending one.
+
+    Claude Code asks once about an ANTHROPIC_API_KEY it finds in the environment
+    and records the answer in ~/.claude.json. Returns
+    {"mode": "subscription"|"api-key"|"none"|"unknown", "account": str}.
+    """
+    try:
+        with open(_config_path()) as f:
+            cfg = json.load(f)
+    except Exception:
+        # No readable config is not proof of anything — say so rather than guess.
+        return {"mode": "unknown", "account": ""}
+    account = str(((cfg.get("oauthAccount") or {}).get("emailAddress")) or "")
+    key = os.environ.get("ANTHROPIC_API_KEY") or ""
+    approved = (cfg.get("customApiKeyResponses") or {}).get("approved") or []
+    if key and (key[-20:] in approved) and _allow_api_key():
+        return {"mode": "api-key", "account": ""}
+    if account:
+        return {"mode": "subscription", "account": account}
+    return {"mode": "none", "account": ""}
+
+
+def _allow_api_key() -> bool:
+    return bool(os.environ.get("SIGIL_CLAUDE_ALLOW_API_KEY"))
+
+
+def _env() -> dict:
+    # `--claude` means "runs on your Claude subscription". Claude Code would
+    # otherwise prefer an ANTHROPIC_API_KEY the user once approved, silently
+    # turning that promise into console billing — so the child does not get the
+    # variable at all unless SIGIL_CLAUDE_ALLOW_API_KEY says the user wants it.
+    # The caller's own environment is never modified.
+    env = dict(os.environ)
+    if not _allow_api_key():
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    return env
+
+
 def _alias(model: str) -> str:
     """`claude-cc/opus` -> `opus`. litellm may already have stripped the prefix."""
     name = str(model or "")
@@ -319,6 +364,7 @@ def _call(model: str, messages: list):
             text=True,
             timeout=_timeout(),
             cwd=_cwd(),
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError(
@@ -338,6 +384,7 @@ async def _acall(model: str, messages: list):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=_cwd(),
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError(
@@ -448,6 +495,7 @@ def agent_run(
             text=True,
             timeout=(timeout or _agent_timeout()),
             cwd=cwd,
+            env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError("`%s` not found on PATH — install Claude Code" % _bin())

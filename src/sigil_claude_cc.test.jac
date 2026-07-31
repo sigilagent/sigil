@@ -230,3 +230,70 @@ test "_parse still handles output that is not json at all" {
 }
 
 
+
+def _write_cfg(dir: str, cfg: dict) -> None {
+    import json;
+    import os;
+    os.makedirs(dir, exist_ok=True);
+    with open(os.path.join(dir, ".claude.json"), "w") as f { f.write(json.dumps(cfg)); }
+}
+
+test "auth_status reads which account a call would actually bill" {
+    import os;
+    import tempfile;
+    d = tempfile.mkdtemp(prefix="sigil_auth_");
+    prev_dir = os.environ.get("CLAUDE_CONFIG_DIR", "");
+    prev_key = os.environ.get("ANTHROPIC_API_KEY", "");
+    prev_allow = os.environ.get("SIGIL_CLAUDE_ALLOW_API_KEY", "");
+    os.environ["CLAUDE_CONFIG_DIR"] = d;
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-0000000000000000000000ABCDEFGHIJKLMNOPQRST";
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = "";
+
+    # signed in, key rejected -> the subscription pays, and we can name it
+    _write_cfg(d, {"oauthAccount": {"emailAddress": "me@example.com"},
+                   "customApiKeyResponses": {"approved": [], "rejected": ["ABCDEFGHIJKLMNOPQRST"]}});
+    st = auth_status();
+    assert st["mode"] == "subscription";
+    assert st["account"] == "me@example.com";
+
+    # an APPROVED key is only honoured when the user opted in — otherwise the
+    # child never sees the variable, so reporting "api-key" would be a lie
+    _write_cfg(d, {"oauthAccount": {"emailAddress": "me@example.com"},
+                   "customApiKeyResponses": {"approved": ["ABCDEFGHIJKLMNOPQRST"], "rejected": []}});
+    assert auth_status()["mode"] == "subscription";
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = "1";
+    assert auth_status()["mode"] == "api-key";
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = "";
+
+    # no login at all -> `--claude` has nothing to run on
+    _write_cfg(d, {"customApiKeyResponses": {"approved": [], "rejected": []}});
+    assert auth_status()["mode"] == "none";
+
+    # unreadable config is not proof of absence — never block on a guess
+    os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(d, "nope");
+    assert auth_status()["mode"] == "unknown";
+
+    os.environ["CLAUDE_CONFIG_DIR"] = prev_dir;
+    if prev_key { os.environ["ANTHROPIC_API_KEY"] = prev_key; } else { del os.environ["ANTHROPIC_API_KEY"]; }
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = prev_allow;
+}
+
+test "the child process gets the subscription, not an approved API key" {
+    import os;
+    prev_key = os.environ.get("ANTHROPIC_API_KEY", "");
+    prev_allow = os.environ.get("SIGIL_CLAUDE_ALLOW_API_KEY", "");
+    os.environ["ANTHROPIC_API_KEY"] = "sk-test";
+
+    # default: `--claude` means the subscription, so the variable is withheld
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = "";
+    assert "ANTHROPIC_API_KEY" not in _env();
+    assert "ANTHROPIC_AUTH_TOKEN" not in _env();
+    # ...and the caller's own environment is never rewritten
+    assert os.environ.get("ANTHROPIC_API_KEY") == "sk-test";
+
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = "1";
+    assert _env().get("ANTHROPIC_API_KEY") == "sk-test";
+
+    if prev_key { os.environ["ANTHROPIC_API_KEY"] = prev_key; } else { del os.environ["ANTHROPIC_API_KEY"]; }
+    os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = prev_allow;
+}
