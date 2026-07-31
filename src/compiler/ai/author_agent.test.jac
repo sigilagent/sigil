@@ -96,6 +96,20 @@ test "the parsed views drive the REAL gates, not a private copy of them" {
     assert "r9" not in sc.missing;    # DISCRETIONARY rules are not audited
 }
 
+test "every node type the compiler accepts round-trips — no silent GEN_RAW" {
+    # An unmapped type defaults to GEN_RAW, which would read a CODE node (gated by
+    # construction) back as a model slot. Cover the whole alphabet.
+    for (name, want) in [("GEN-RAW", NodeType.GEN_RAW), ("GEN-ENUM", NodeType.GEN_ENUM),
+                         ("GEN-FILL", NodeType.GEN_FILL), ("GEN-EDIT", NodeType.GEN_EDIT),
+                         ("ROUTE", NodeType.ROUTE), ("LOOP", NodeType.LOOP),
+                         ("SPAWN", NodeType.SPAWN), ("CALL", NodeType.CALL),
+                         ("SENSE", NodeType.SENSE), ("ACT", NodeType.ACT),
+                         ("CODE", NodeType.CODE), ("TERMINAL", NodeType.TERMINAL)] {
+        (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + name + "\n");
+        assert wf.nodes[0].ntype == want;
+    }
+}
+
 test "_views_from_ir survives junk instead of raising into the compile" {
     (wf, vb) = _views_from_ir("not: [valid: yaml");
     assert wf.nodes == [];
@@ -138,4 +152,16 @@ test "the authoring meta-skill ships with the contracts and is a real SKILL.md" 
     assert "traces_to" in text;
     assert "sigil gate agent.ir" in text;
     assert "verbatim" in text;
+}
+
+test "the meta-skill tells the agent how to realize a prohibition" {
+    import os;
+    import from pathlib { Path }
+    import from src.sigil_runtime { repo_root }
+    text = Path(os.path.join(repo_root(), "contracts", "writing-agir", "SKILL.md")).read_text();
+    # A prohibition is a property of the run, not a step — and the order of
+    # preference matters: code beats a sem, because a sem is only observable.
+    assert "Prohibitions are not steps" in text;
+    assert "In code." in text;
+    assert "folds `doc` into the" in text;   # ...the slot's sem (wraps in the source)
 }

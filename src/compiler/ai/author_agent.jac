@@ -45,10 +45,15 @@ import from .repair { repair_compile_loop, _sigil_bin }
 import from src.sigil_claude_cc { agent_run, AUTHOR }
 import from src.sigil_runtime { repo_root }
 
+# The full alphabet the mechanical half accepts. Partial coverage here would be
+# worse than useless: an unmapped type silently becomes GEN_RAW, i.e. a CODE node
+# the compiler gates by construction would be read back as a model slot.
 glob _NODE_TYPES: dict[str, NodeType] = {
-    "ROUTE": NodeType.ROUTE, "GEN-ENUM": NodeType.GEN_ENUM, "GEN-FILL": NodeType.GEN_FILL,
-    "GEN-RAW": NodeType.GEN_RAW, "SENSE": NodeType.SENSE, "ACT": NodeType.ACT,
-    "TERMINAL": NodeType.TERMINAL
+    "GEN-RAW": NodeType.GEN_RAW, "GEN-ENUM": NodeType.GEN_ENUM,
+    "GEN-FILL": NodeType.GEN_FILL, "GEN-EDIT": NodeType.GEN_EDIT,
+    "ROUTE": NodeType.ROUTE, "LOOP": NodeType.LOOP, "SPAWN": NodeType.SPAWN,
+    "CALL": NodeType.CALL, "SENSE": NodeType.SENSE, "ACT": NodeType.ACT,
+    "CODE": NodeType.CODE, "TERMINAL": NodeType.TERMINAL
 };
 
 

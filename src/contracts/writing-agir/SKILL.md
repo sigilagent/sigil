@@ -43,6 +43,23 @@ Prefer `owner: code` where the rule is mechanical — a code node is **guarantee
 construction**. A model slot is only *observable*. Reserve model slots for genuine
 judgment.
 
+## Prohibitions are not steps
+
+A rule the skill states as a prohibition ("never modify the input", "always
+lowercase before counting") is not a step to add — it is a property the run must
+have. Realize it, in this order of preference:
+
+1. **In code.** "Always lowercase before counting" belongs inside the counting
+   tool's body, where it cannot be skipped. This is the strongest form.
+2. **By construction.** "Never modify the input" is satisfied by a read-only
+   read; say so in the node's `doc` so the choice is legible.
+3. **In the node's `doc`.** For a prohibition binding a model slot, put it in the
+   `doc` of every model node it constrains — the compiler folds `doc` into the
+   slot's sem, which is where a prohibition binds at run time.
+
+Trace the rule from whichever node realizes it. A prohibition that appears
+nowhere in the IR has been dropped, even if the IR compiles.
+
 ## Procedure
 
 1. **Read `SKILL.md` and `rules.md` in full.** `rules.md` is the frozen rule set,
