@@ -30,8 +30,9 @@ reads several files before drawing conclusions — and fans out with `spawn_para
 repo-scale review.
 
 **Web**
-- `web_search(query)` — open-web search via a provider (needs `BRAVE_API_KEY` or
-  `FIRECRAWL_API_KEY`; see [models](models.md)/setup).
+- `web_search(query)` — open-web search. Uses `BRAVE_API_KEY` / `FIRECRAWL_API_KEY` if
+  set, and otherwise Claude Code's own WebSearch when running in claude mode — so
+  `sigil --claude` needs no search key at all. See [models](models.md#web-search-providers).
 - `web_fetch(url)` — read a specific URL, SSRF-guarded. Works on keyless JSON APIs
   (e.g. GitHub's `api.github.com`), so "new PRs/issues in a repo" needs no search key.
 

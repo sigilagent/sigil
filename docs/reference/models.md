@@ -59,7 +59,16 @@ fails over primary → fallbacks.
 
 ## Web search providers
 
-Open-web search (`web_search`) is a separate, keyed service — not an LLM tier. Set
-`BRAVE_API_KEY` (free tier at brave.com/search/api) or `FIRECRAWL_API_KEY`. Without a key,
-`web_search` returns setup guidance; `web_fetch` still works on any public URL, including
-keyless JSON APIs like GitHub's.
+Open-web search (`web_search`) is not an LLM tier. Sigil tries three routes, in order:
+
+1. **Brave** — `BRAVE_API_KEY` (free tier at brave.com/search/api)
+2. **Firecrawl** — `FIRECRAWL_API_KEY`
+3. **Claude Code's own WebSearch** — no key, but only in claude mode (`sigil --claude …`)
+
+A direct search API is faster and cheaper than a model turn, which is why the keyed
+providers come first. The third route exists so that claude mode needs no second signup:
+the machine already has a search-capable agent you are paying for. See
+[claude-code](claude-code.md#web-search-without-a-key).
+
+With none of the three, `web_search` returns setup guidance; `web_fetch` still works on
+any public URL, including keyless JSON APIs like GitHub's.

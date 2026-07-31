@@ -129,13 +129,53 @@ jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
 | `SIGIL_CLAUDE_FRONTIER` | `claude-cc/opus` | model for the `frontier` / `chat` tiers |
 | `SIGIL_CLAUDE_SMALL` | `claude-cc/haiku` | model for the `small` / `router` tiers |
 | `SIGIL_CLAUDE_BIN` | `claude` | path to the Claude Code binary |
-| `SIGIL_CLAUDE_CC_TIMEOUT` | `600` | seconds before one slot call is killed |
-| `SIGIL_CLAUDE_AGENT_TIMEOUT` | `3600` | seconds before an agent session (authoring, repair) is killed |
+| `SIGIL_CLAUDE_CC_TIMEOUT` | unset | seconds before one slot call is killed; **unset means no limit** |
+| `SIGIL_CLAUDE_AGENT_TIMEOUT` | unset | seconds before an agent session (authoring, repair) is killed; unset means no limit |
 | `SIGIL_CLAUDE_ALLOW_API_KEY` | unset | pass `ANTHROPIC_API_KEY` through, billing it instead of the subscription |
 | `SIGIL_CLAUDE_CC_CWD` | temp dir | working directory for the subprocess |
+| `SIGIL_CLAUDE_SEARCH_MODEL` | `haiku` | model that answers a `web_search` (see below) |
+| `SIGIL_CLAUDE_SEARCH_TIMEOUT` | `180` | seconds before one web search is killed |
 
 The subprocess deliberately runs outside your project, with MCP servers and
 skills disabled, so a repo `CLAUDE.md` can't leak into a compile.
+
+## Nothing is killed on a timer
+
+A slot call has no time limit by default, and neither does an agent session.
+
+`SIGIL_CLAUDE_CC_TIMEOUT` used to default to 600s, and it demonstrably killed real
+work: one spec-loop call on a document-sized `SKILL.md` ran past ten minutes, was killed
+with everything it had produced thrown away, then retried into the same wall twice more —
+half an hour of subscription spend for an error message. Unlike a shell job there is no
+partial output to salvage from a slot call, so a deadline buys nothing at all; it only
+decides whether the work is lost. `--max-turns` is the real bound on an agent session.
+
+Set either variable for an **unattended** deployment — cron, a server — where a genuinely
+hung CLI would block forever with nobody at the keyboard to interrupt it. Interactively,
+Ctrl-C is the timeout.
+
+The one exception is `web_search` (below), which keeps a 180s ceiling: a search that has
+not answered in three minutes is stuck, and there is nothing to salvage there either way.
+
+## Web search without a key
+
+`web_search` normally needs a Brave or Firecrawl key, because keyless engines serve bot
+challenges rather than results. In claude mode it doesn't: the machine already has a
+search-capable agent you are paying for, so the same seam that answers a byLLM slot
+answers a search.
+
+The order is Brave → Firecrawl → Claude. A direct search API is faster and cheaper than a
+model turn, so a key still wins when you have one; the Claude route is what makes
+`sigil --claude` work with no search signup at all.
+
+This is the one place a `claude -p` run is handed a tool on purpose. The slot agent above
+is deliberately toolless; the search agent has exactly `WebSearch`, a JSON-only reply
+contract, and nothing else it could reach for. It runs on `haiku` by default
+(`SIGIL_CLAUDE_SEARCH_MODEL`) — a search is retrieval, not judgment.
+
+It is gated on claude mode specifically. Spending your subscription on a search you never
+asked to spend it on would be a surprise; in claude mode you have already said every model
+call goes through that CLI, and a search is one more of those.
 
 ## What it costs, honestly
 
