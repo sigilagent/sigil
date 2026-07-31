@@ -9,6 +9,10 @@
 #   sigil register-skill ./skill.agir agir
 #   sigil update                       # update to the latest release
 #
+# No API key? Use the Claude Code CLI you already have, both directions:
+#   sigil --claude compile ./SKILL.md  # every model tier on your claude CLI
+#   claude mcp add sigil -- sigil mcp-serve   # your skills, as Claude Code tools
+#
 # Prefer a server + web dashboard? Start the gateway, then point at it:
 #   sigil serve                        # Observatory web UI + HTTP API
 #   export SIGIL_URL=http://localhost:8199   # route commands to that gateway

@@ -59,9 +59,25 @@ info "Fetching Sigil ($REF) → $SIGIL_HOME"
 mkdir -p "$(dirname "$SIGIL_HOME")"
 if have git; then
   if [ -d "$SIGIL_HOME/.git" ]; then
+    # Upgrade in place. Two traps, both of which used to fail SILENTLY and leave
+    # the previous version installed under a "✓ Sigil installed" banner:
+    #   * `checkout FETCH_HEAD` refuses whenever a tracked file has drifted, and
+    #     a long-lived install drifts (a half-applied earlier upgrade is enough);
+    #   * the fallback reset to `origin/$REF` names a ref that a tag fetch never
+    #     creates — `fetch --depth 1 origin <tag>` writes FETCH_HEAD and nothing
+    #     else, so `origin/v0.3.0` does not resolve.
+    # Reset to the commit we actually fetched, and let a failure be loud. This
+    # rewrites TRACKED files only: the graph in .jac/data, compiled skills and
+    # every other untracked/ignored file are left exactly where they are.
     git -C "$SIGIL_HOME" fetch --depth 1 origin "$REF" \
-      && git -C "$SIGIL_HOME" checkout -q FETCH_HEAD 2>/dev/null \
-      || git -C "$SIGIL_HOME" reset --hard "origin/$REF" 2>/dev/null || true
+      || die "could not fetch '$REF' into $SIGIL_HOME."
+    git -C "$SIGIL_HOME" reset --hard -q FETCH_HEAD \
+      || die "could not update $SIGIL_HOME to '$REF' (local changes to tracked files?)."
+    # An install that reports success while running last month's code is the one
+    # outcome worth an explicit check.
+    at="$(git -C "$SIGIL_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
+    want="$(git -C "$SIGIL_HOME" rev-parse FETCH_HEAD 2>/dev/null || echo unknown)"
+    [ "$at" = "$want" ] || die "update did not take: $SIGIL_HOME is at $at, expected $want."
   else
     rm -rf "$SIGIL_HOME"
     git clone --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$SIGIL_HOME" 2>/dev/null \

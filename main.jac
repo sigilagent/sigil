@@ -611,7 +611,7 @@ with entry:__main__ {
         print("                            skills, config & memory all live on one graph.");
         print("");
         print("compile & run skills");
-        print("  compile <SKILL.md> [-e|--eject [out.jac]]   gated compile onto the graph; -e ejects a standalone runnable .jac");
+        print("  compile <SKILL.md> [-e|--eject [out.jac]] [--agent]   gated compile onto the graph; -e ejects a standalone runnable .jac");
         print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md lifted / hand-authored AG-IR / precompiled OSP)");
         print("  solve \"<task>\" [skill]              route a task: run a compiled skill (HIT), compile a new one (MISS), or adapt one (PARTIAL)");
         print("  library                             list compiled skills, with run stats");
@@ -619,6 +619,13 @@ with entry:__main__ {
         print("  relearn <sig> [hint]                recompile a skill fresh with the frontier model");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
         print("  replay <agent.jac> <obs.jsonl> \"<task>\"   re-run a recorded run's cognition through a module (no model cost)");
+        print("  gate <file.agir> [name]             run G4, the compile oracle, on one AG-IR (exits nonzero if it fails)");
+        print("");
+        print("claude code (no API key — uses your claude CLI)");
+        print("  --claude                            global flag: run EVERY model tier on your Claude Code CLI");
+        print("  --claude compile <SKILL.md> --agent   let a Claude Code session author the AG-IR against the oracle");
+        print("  mcp-serve                           serve compiled skills to Claude Code as tools:");
+        print("                                        claude mcp add sigil -- sigil mcp-serve");
         print("");
         print("use it");
         print("  chat                                conversational tool-using REPL — the whole agent from one conversation");
