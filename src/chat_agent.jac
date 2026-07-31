@@ -84,7 +84,16 @@ model authors a typed procedure, runs it, and persists it so future requests of 
 same kind are handled cheaply. Use this only when the user wants a durable, repeatable
 procedure — for a one-off, just do the work with the other tools.""";
 sem learn_skill.task = "A representative task describing the class of work to compile into a skill.";
-def learn_skill(task: str) -> str {
+def learn_skill(task: str = "") -> str {
+    # Defaulted on purpose. A required arg the model omits raises TypeError inside
+    # byLLM's tool runtime, which logs a raw traceback line over the live spinner —
+    # the user sees a Python signature error instead of an answer. Missing input is
+    # a normal model mistake, so it gets a normal answer it can act on.
+    if not str(task).strip() {
+        _trace("learn", "(no task given)", False);
+        return "learn_skill needs a `task`: one representative task describing the "
+               + "class of work to compile. Nothing was compiled.";
+    }
     _trace("learn", task);
     r = run_task(task, "");
     return "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
