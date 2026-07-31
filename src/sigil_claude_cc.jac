@@ -218,13 +218,15 @@ _TERMINAL_ERRORS = [
 
 
 def _billing_advice() -> str:
-    # Deliberately does NOT blame ANTHROPIC_API_KEY. Sigil invokes the CLI in its
-    # normal (non---bare) mode, where it authenticates with the Claude Code login
-    # and ignores that variable — verified by running `claude -p` with a junk key
-    # and still getting a reply. The balance at issue is the one behind the login.
+    # Which account this drains is the user's own earlier decision, not something
+    # Sigil sets: Claude Code asks once about an ANTHROPIC_API_KEY it finds in the
+    # environment and records the answer in ~/.claude.json. Approved -> the CLI
+    # bills that key; rejected or unanswered -> the subscription login, and the
+    # variable is inert. Point at the answer rather than guess which one it is.
     return (
-        " Check the account behind `claude` (run `claude` once to see its status); "
-        "or point the tier at another provider with `sigil models set <tier> <model>`."
+        " Which account that is depends on Claude Code's own API-key decision — "
+        "check `jq '.customApiKeyResponses' ~/.claude.json`. Or move the tier "
+        "elsewhere with `sigil models set <tier> <model>`."
     )
 
 

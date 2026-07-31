@@ -84,16 +84,29 @@ tools instead of emitting the tool-call text byLLM parses — the run then dies 
 
 ### Which account pays
 
-The Claude Code **login**, not an API key. Sigil invokes the CLI in its normal
-mode, where it authenticates with that login and ignores `ANTHROPIC_API_KEY` —
-verified by running `claude -p` with a deliberately invalid key and still getting
-a reply. So an `ANTHROPIC_API_KEY` left in your shell profile changes nothing
-here, in either direction: it is not used, and unsetting it will not fix a
-billing error.
+Usually your Claude Code **login** — but not always, and the difference is worth
+knowing before a bill arrives.
 
-If a call comes back with a billing or login failure, it is the account behind
-`claude` itself. Run `claude` once to see its status, or move the tier to another
-provider with `sigil models set <tier> <model>`.
+Claude Code **asks** before using an `ANTHROPIC_API_KEY` it finds in your
+environment, and remembers the answer in `~/.claude.json`:
+
+```bash
+jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
+```
+
+- key in `rejected` (or never answered) → the CLI uses your **subscription
+  login**, and the environment variable is inert. Setting, changing or unsetting
+  it does nothing, in either direction.
+- key in `approved` → the CLI uses **that API key**, and every `claude-cc` call
+  Sigil makes bills API credits rather than your subscription.
+
+Sigil does not override this. It invokes the CLI in its normal mode and inherits
+whatever you decided, deliberately: silently rewriting someone's credentials is
+not a compiler's job.
+
+So if a call fails on billing or login, check which of the two is actually
+paying before topping up the wrong one. Run `claude` once to see its status, or
+move the tier elsewhere with `sigil models set <tier> <model>`.
 
 ## Environment
 
