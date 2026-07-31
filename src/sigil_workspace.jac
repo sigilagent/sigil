@@ -34,7 +34,10 @@ import tempfile;
 import subprocess;
 import from urllib.request { Request, urlopen }
 import from urllib.parse { urlparse, quote_plus }
-import from .sigil { awaken, Soul, compile_skill }
+import from .sigil {
+    awaken, Soul, compile_skill,
+    compile_stage_label, compile_stage_line, compile_stage_secs
+}
 import from .approvals { check_exec, allowlist_add }
 import from .sigil_secrets { resolve_refs, redact_secrets }
 
@@ -452,16 +455,37 @@ def ws_jobs() -> str {
 # reports each stage on the live trace, and has no time limit at all.
 # ---------------------------------------------------------------------------
 def _compile_stage(ev: dict) -> None {
+    # The same staged build view `sigil compile` prints on the CLI, streamed onto
+    # the chat trace: a line when a stage opens, and the stage again with its counts
+    # and timing when it lands. The CLI rewrites one line in place; a trace is
+    # scrollback, so both show — which is what makes a ten-minute compile legible
+    # instead of one silent spinner followed by a verdict.
     try {
-        if str(ev.get("state")) == "start" { _trace("compile", str(ev.get("stage", "")) + " …"); }
+        state = str(ev.get("state"));
+        stage = str(ev.get("stage", ""));
+        label = compile_stage_label(stage);
+        if state == "start" {
+            if stage == "repair" {
+                _trace("compile", "repair round " + str(ev.get("round", 1)) + ": "
+                       + str(ev.get("issues", "?")) + " issues -> " + str(ev.get("target", "views")));
+            } else { _trace("compile", label + " …"); }
+        } elif state == "done" {
+            summary = compile_stage_line(ev);
+            _trace("compile", label + ("  " + summary if summary else "") + "  " + compile_stage_secs(ev));
+        }
     } except Exception as e {}
 }
 
-sem sigil_compile = """Compile a SKILL.md into a runnable skill on this agent's graph —
-Sigil's own compiler. ALWAYS use this instead of running `sigil compile` through the
-shell: it runs in this process, on this graph, with no time limit. A compile takes
-several minutes and reports each stage as it goes.""";
-sem sigil_compile.path = "Path to the SKILL.md file to compile.";
+sem sigil_compile = """Compile an EXISTING SKILL.md document into a runnable skill on this
+agent's graph — Sigil's own compiler, the same thing `sigil compile` runs. Use this
+whenever the user points at a skill that has already been written down (a SKILL.md in the
+workspace, or one you fetched from a repo and saved): it lifts THAT document, faithfully.
+If the document lives on the web, fetch it and ws_write it first, then compile the local
+path. ALWAYS use this instead of running `sigil compile` through the shell — it runs in
+this process, on this graph, with no time limit, and reports each stage as it goes (it
+takes several minutes). Do NOT use learn_skill for this; learn_skill would invent a new
+procedure from a description instead of compiling the document.""";
+sem sigil_compile.path = "Path to the SKILL.md file to compile. Must already exist on disk — fetch and save it first if it came from the web.";
 sem sigil_compile.eject_path = "Optional path to also write a standalone runnable .jac program to.";
 sem sigil_compile.eject = "Set true to also eject a standalone runnable program under its default name.";
 def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {

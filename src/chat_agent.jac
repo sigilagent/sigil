@@ -83,11 +83,15 @@ def recall_memory(query: str) -> str {
     return "\n".join(["(" + str(m["kind"]) + ") " + str(m["content"]) for m in ms]);
 }
 
-sem learn_skill = """Compile a REUSABLE skill for a class of task: the frontier
-model authors a typed procedure, runs it, and persists it so future requests of the
-same kind are handled cheaply. Use this only when the user wants a durable, repeatable
-procedure — for a one-off, just do the work with the other tools.""";
-sem learn_skill.task = "A representative task describing the class of work to compile into a skill.";
+sem learn_skill = """Author a NEW reusable skill from a DESCRIPTION, when no skill
+document exists: the frontier model writes a typed procedure for the class of task, runs
+it, and persists it so future requests of the same kind are handled cheaply. Use this only
+when the user wants a durable, repeatable procedure and there is nothing written down yet
+— for a one-off, just do the work with the other tools. If a SKILL.md already exists (in
+the workspace, or in a repo you can fetch), use sigil_compile on that file instead: it
+compiles what was actually written rather than inventing a fresh procedure from a
+paraphrase.""";
+sem learn_skill.task = "A representative task describing the class of work to author a skill for.";
 def learn_skill(task: str = "") -> str {
     # Defaulted on purpose. A required arg the model omits raises TypeError inside
     # byLLM's tool runtime, which logs a raw traceback line over the live spinner —
@@ -200,8 +204,14 @@ Guidance:
   with something else and check back, or ws_kill("<job>") if it's clearly stuck or wrong.
   ws_jobs() lists what's still running. Never claim a long command failed just because it
   hasn't finished.
-- Compiling a SKILL.md: use sigil_compile — never `sigil compile` through ws_exec. It runs
-  in this process on this graph, takes several minutes, and has no time limit.
+- Skills — two different tools, don't confuse them. If the skill is ALREADY WRITTEN DOWN
+  (a SKILL.md), compile that document with sigil_compile: never `sigil compile` through
+  ws_exec, and never learn_skill. When it lives in a repo, fetch it first — for GitHub use
+  the raw URL, e.g. web_fetch("https://raw.githubusercontent.com/<org>/<repo>/main/<path>/
+  SKILL.md") — ws_write it into the workspace, then sigil_compile that path. It runs in
+  this process on this graph, takes several minutes with no time limit, and streams each
+  stage. Only when NOTHING is written down do you use learn_skill, which authors a fresh
+  procedure from a description.
 - Analyzing a codebase/repo: SURVEY FIRST with ws_tree, LOCATE with ws_grep, then READ
   SEVERAL representative files (page large ones — a partial read shows "lines X-Y of N",
   so keep reading rather than concluding from the first page). Never judge a codebase from

@@ -117,3 +117,27 @@ test "a wrapped bullet hangs under its text, not under the marker" {
         assert r.startswith("│   ");         # …continuations indent past it
     }
 }
+
+test "a long tool detail wraps into the detail column, not back to the margin" {
+    # the bug: `learn`'s one-sentence task ran off the line and continued at column 0,
+    # so the trace read like the agent's own prose instead of a tool call.
+    detail = ("Generate and edit PowerPoint (.pptx) presentations from a content outline, "
+              + "following Anthropic's 'pptx' skill: create a deck with titled slides, "
+              + "bullet points, and speaker notes using python-pptx, apply a consistent "
+              + "theme, and write the resulting .pptx file into the workspace.");
+    rows = _trace_rows(detail, 64);
+    assert len(rows) > 1, str(len(rows));
+    for r in rows { assert len(str(r)) <= 64, str(len(str(r))) + ": " + str(r); }
+    # nothing is dropped on the way through the wrapper
+    assert "Generate and edit" in str(rows[0]);
+    assert "workspace" in str(rows[len(rows) - 1]);
+    # continuation rows are padded to the gutter, so they sit under the detail column
+    assert _TRACE_GUTTER == 16, str(_TRACE_GUTTER);
+}
+
+test "a short detail stays one row, and an empty one still renders" {
+    assert _trace_rows("wrote notes/a.txt (12 chars)", 64) == ["wrote notes/a.txt (12 chars)"];
+    assert _trace_rows("", 64) == [""];
+    # an absurd width falls back rather than looping or emitting empty rows
+    assert len(_trace_rows("some detail here", 3)) >= 1;
+}
