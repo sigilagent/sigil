@@ -11,7 +11,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/sigilagent/sigil?color=8b5cf6" alt="license"></a>
     <a href="https://sigilagent.com"><img src="https://img.shields.io/badge/site-sigilagent.com-22d3ee" alt="website"></a>
     <a href="https://sigilagent.com/reference/"><img src="https://img.shields.io/badge/docs-reference-22d3ee" alt="docs"></a>
-    <a href="https://doi.org/10.5281/zenodo.21499104"><img src="https://img.shields.io/badge/paper-10.5281%2Fzenodo.21499104-f5c451" alt="paper"></a>
+    <a href="https://arxiv.org/abs/2607.27309"><img src="https://img.shields.io/badge/paper-arXiv%3A2607.27309-f5c451" alt="paper"></a>
   </p>
   <p>
     <a href="https://www.jaseci.org/"><img src="docs/assets/jaseci-logo.png" height="26" alt="Jaseci" align="middle"> &nbsp;<b>built with Jac</b></a>
@@ -329,7 +329,7 @@ models (a frontier provider key + a small model, which can be local).
 ## Paper
 
 The design and the evaluation behind Sigil are written up in
-**[SIGIL: Compiling Agent Skills into Typed Harnesses](https://doi.org/10.5281/zenodo.21499104)**
+**[SIGIL: Compiling Agent Skills into Typed Harnesses](https://arxiv.org/abs/2607.27309)**
 — compiled skills execute 86% of mandated steps versus 56% for the same skill
 read as a prompt, at 0.58× the tokens.
 
@@ -339,15 +339,17 @@ If you use Sigil or the AG-IR in your work, please cite:
 
 ```bibtex
 @misc{dantanarayana2026sigil,
-  title     = {SIGIL: Compiling Agent Skills into Typed Harnesses},
-  author    = {Dantanarayana, Jayanaka and Kashmira, Savini and Tang, Lingjia and Mars, Jason},
-  year      = {2026},
-  publisher = {Zenodo},
-  doi       = {10.5281/zenodo.21499104},
-  url       = {https://doi.org/10.5281/zenodo.21499104}
+  title         = {SIGIL: Compiling Agent Skills into Typed Harnesses},
+  author        = {Dantanarayana, Jayanaka and Kashmira, Savini and Tang, Lingjia and Mars, Jason},
+  year          = {2026},
+  eprint        = {2607.27309},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SE},
+  doi           = {10.48550/arXiv.2607.27309},
+  url           = {https://arxiv.org/abs/2607.27309}
 }
 ```
 
 > Dantanarayana, J., Kashmira, S., Tang, L., & Mars, J. (2026). *SIGIL:
-> Compiling agent skills into typed harnesses.* Zenodo.
-> https://doi.org/10.5281/zenodo.21499104
+> Compiling agent skills into typed harnesses.* arXiv:2607.27309.
+> https://doi.org/10.48550/arXiv.2607.27309
