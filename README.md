@@ -252,9 +252,11 @@ into the compiled procedure, which stays class-general).
 
 Around that core, the usual agent surface — all driving the same graph:
 
-- **Chat** — a conversational, tool-using ReAct agent (`sigil chat`): jailed
-  workspace with an exec-approval gate, SSRF-guarded web tools, its own cron,
-  parallel sub-agents, and `learn_skill` to compile a skill mid-conversation.
+- **Chat** — a conversational, tool-using ReAct agent (`sigil chat`): full-host
+  file and shell tools behind an exec-approval gate (with an optional
+  `jail`/`docker` sandbox), shell jobs that are never killed on a timer,
+  SSRF-guarded web tools, its own cron, parallel sub-agents, and `learn_skill` /
+  `sigil_compile` to compile a skill mid-conversation.
 - **Skill ingress, three forms** — `register-skill ./SKILL.md` (the compiler),
   `./procedure.agir agir` (hand-authored IR, no model call), `./foo_v1.jac osp`
   (a precompiled module).
@@ -306,7 +308,7 @@ src/
   contracts/             the AG-IR standard (primitives · authoring contract)
   sigil.jac              graph model + routing + the compile/execute cognition
   chat_agent.jac         the conversational ReAct agent
-  sigil_workspace.jac    sandbox: jailed file tools, gated exec, SSRF-guarded web
+  sigil_workspace.jac    tool-belt: file tools, gated never-timed-out exec, SSRF-guarded web
   agent.jac / channels.jac / cron.jac / hooks.jac / …   the runtime surface
 web/                     the Observatory browser client
 .jac/data/               (runtime) the persistent graph

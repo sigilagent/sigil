@@ -149,8 +149,8 @@ node Soul {
     has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
     has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
     has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
-    has workspace: str = "";           # sandboxed workspace dir the file tools are jailed to (default ~/.sigil/workspace)
-    has sandbox_mode: str = "jail";    # how ws_exec is contained: jail (cwd-confined subprocess) | docker | off
+    has workspace: str = "";           # where the tools work by default — relative paths and shell jobs resolve here (default ~/.sigil/workspace)
+    has sandbox: str = "off";          # containment for the file/shell tools: off (full host access, default) | jail | docker
 }
 
 node Spec {
@@ -840,7 +840,7 @@ def describe_soul() -> dict {
         "router_model": _effective_tier("router", soul.router_model if soul.router_model else soul.small_model),
         "chat_model": _effective_tier("chat", soul.chat_model if soul.chat_model else soul.frontier_model),
         "workspace": (soul.workspace if soul.workspace else "~/.sigil/workspace"),
-        "sandbox_mode": (soul.sandbox_mode if soul.sandbox_mode else "jail"),
+        "sandbox": (soul.sandbox if soul.sandbox else "off"),
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
         "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
@@ -874,9 +874,12 @@ def configure(key: str, value: str) -> str {
     elif key == "embed_model" { soul.embed_model = value; }
     elif key == "chat_model" { soul.chat_model = value; }
     elif key == "workspace" { soul.workspace = value; }
-    elif key == "sandbox_mode" {
-        if value not in ["jail", "docker", "off"] { return "sandbox_mode must be one of: jail | docker | off"; }
-        soul.sandbox_mode = value;
+    elif key == "sandbox" {
+        # Default is `off`: Sigil's job is to drive the tools and agents already on
+        # this machine, which containment would cut it off from. `jail`/`docker` are
+        # there for when you'd rather have the boundary than the reach.
+        if value not in ["off", "jail", "docker"] { return "sandbox must be one of: off | jail | docker"; }
+        soul.sandbox = value;
     }
     else { return "unknown key: " + key; }
     return key + " = " + value;

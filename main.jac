@@ -652,7 +652,7 @@ with entry:__main__ {
         print("  setup                               first-run wizard (models & persona)");
         print("  soul                                show identity, config, skills & memory (all graph state)");
         print("  config [<key> <value>]              interactive settings editor (or set one key)");
-        print("  configure <key> <value>             set config on the graph (persona|*_model|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
+        print("  configure <key> <value>             set config on the graph (persona|*_model|workspace|sandbox|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
         print("  models list|set|alias|fallback      manage model tiers, aliases & fallback pools");
         print("");
         print("memory");

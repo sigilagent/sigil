@@ -3,7 +3,7 @@
 
 test "list_docs enumerates the reference topics" {
     out = list_docs();
-    for slug in ["configuration", "workspace-and-sandbox", "models", "channels"] {
+    for slug in ["configuration", "workspace-and-tools", "models", "channels"] {
         assert slug in out, slug + " missing from list_docs";
     }
 }
@@ -23,7 +23,7 @@ test "read_doc: exact slug" {
 }
 
 test "read_doc: fuzzy match (substring + word overlap)" {
-    assert "# Workspace and sandbox" in read_doc("sandbox");
+    assert "# Workspace and tools" in read_doc("workspace");
     assert "# Configuration" in read_doc("config");
     assert "# Models" in read_doc("what models can i use");
 }
