@@ -37,6 +37,30 @@ SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
 <td align="center"><sub><b>Running</b> a compiled skill is a terminal app — node-by-node, with its output.</sub></td>
 </tr></table>
 
+## Works with Claude Code — both directions
+
+Sigil plugs into the agent harness you already use, and needs **no API key** to do
+it. Compile on the `claude` CLI you already have; then serve every skill you
+compile back into it as a tool.
+
+```bash
+sigil --claude compile ./SKILL.md          # compile on your Claude subscription
+claude mcp add sigil -- sigil mcp-serve    # each compiled skill → a Claude Code tool
+```
+
+**Claude Code decides *when*. The compiled harness decides *how*.** A skill loaded
+into context is advice the model may follow; behind one of these tool calls there
+is no prompt left to drift from — the skill's steps are nodes the run must visit.
+
+| Capability | What it means |
+|---|---|
+| **No key** | byLLM dispatches through litellm, and litellm lets you own a provider prefix — so a headless `claude -p` is just another model. Typed returns and tool-using slots included. |
+| **Skills as tools** | One MCP tool per compiled skill, triggered by the skill's own `description:` frontmatter and carrying its run record, so routing is a decision with evidence behind it. |
+| **Self-repairing** | When a compile fails its gate, a tool-using session gets the workspace and the compile oracle as a command (`sigil gate`), and iterates until it passes. The oracle stays the authority. |
+| **Agent-authored** | Opt-in `--agent`: a Claude Code session authors the typed IR itself against the oracle. Keeps the grounded spec loop and the gate battery; drops the staged authoring. *Agent-authored, gate-verified* — the default pipeline stays the default. |
+
+Full reference: [`docs/reference/claude-code.md`](docs/reference/claude-code.md).
+
 ## Why compile a skill?
 
 In every agent harness today, a skill is a **prompt**. The model *reads* the
@@ -266,29 +290,9 @@ Cognition is configured on the graph (or seeded from env on first boot):
 execution model, default `ollama_chat/qwen3:32b`, can be fully local),
 `SIGIL_ROUTER`. An ejected runnable picks its model from `SIGIL_MODEL`.
 
-### Both ways with Claude Code
-
-No provider key at all — run every tier on the Claude Code CLI you already have,
-and publish the skills you compile back into it as tools:
-
-```bash
-sigil --claude compile ./SKILL.md            # compile on your Claude subscription
-claude mcp add sigil -- sigil mcp-serve      # each compiled skill = a Claude Code tool
-```
-
-There is also an opt-in third mode, `sigil --claude compile ./SKILL.md --agent`,
-where a Claude Code session authors the AG-IR directly against the compile oracle
-instead of the staged LIFT pipeline. It keeps the grounded spec loop and the whole
-gate battery and drops the staged authoring — *agent-authored, gate-verified*, not
-verified the way LIFT verifies. The default pipeline stays the default.
-
-`--claude` routes byLLM through a headless `claude -p` (no API key, no proxy);
-`mcp-serve` publishes one MCP tool per compiled skill, described by the skill's
-own `description:` frontmatter. Claude Code decides *when*; the compiled harness
-decides *how* — inside the tool call there's no prompt left to drift from. With
-`--claude` on, a compile that fails its gate also escalates to a tool-using
-Claude Code session that runs the compile oracle (`sigil gate`) until it passes.
-Details: [`docs/reference/claude-code.md`](docs/reference/claude-code.md).
+Or skip the keys entirely and run on your Claude Code CLI — see
+[Works with Claude Code](#works-with-claude-code--both-directions) above, and
+[`docs/reference/claude-code.md`](docs/reference/claude-code.md) for the details.
 
 ## Layout
 
