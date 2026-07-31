@@ -477,6 +477,24 @@ def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origi
     return tg;
 }
 
+def _transpile_error(e: any) -> str {
+    # What the repair pass is handed. A bare `TypeError: list indices must be
+    # integers or slices, not dict` names no section and no shape, so repair
+    # re-authored the same mistake every round and the run died three identical
+    # deaths. Carry the exception type and the transpiler frame that raised it, so
+    # both the model and a human reading the CLI have somewhere to start.
+    import traceback;
+    where = "";
+    try {
+        tb = traceback.extract_tb(e.__traceback__);
+        if tb {
+            last = tb[-1];
+            where = "  [at " + str(last.filename).split("/")[-1] + ":" + str(last.lineno) + " in " + str(last.name) + "]";
+        }
+    } except Exception as e2 {}
+    return (type(e).__name__ + ": " + str(e))[:400] + where;
+}
+
 def _lower(agir: str, sig: str) -> dict {
     # Compile the AG-IR; on a compile/parse failure, let the frontier REPAIR it and
     # retry (self-healing compilation). Returns {ok, osp, agir}.
@@ -487,7 +505,7 @@ def _lower(agir: str, sig: str) -> dict {
             osp = transpile_ir(cur, sig);
             if "def run(" in osp { return {"ok": True, "osp": osp, "agir": cur}; }
             err = "compiled module has no run() entrypoint";
-        } except Exception as e { err = str(e)[:400]; }
+        } except Exception as e { err = _transpile_error(e); }
         cur = fix_agir(cur, err, CONTRACT);
     }
     return {"ok": False, "osp": "", "agir": cur, "error": err};

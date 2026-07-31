@@ -85,9 +85,48 @@ def _aslist(x: any) -> list {
     return [str(x)];
 }
 
+# Every mapping section of an AG-IR — `types`, `tools`, `knowledge`, the walker's
+# `carries`, a type's `fields` — reaches the emitters through here, as [name, spec].
+#
+# The contract asks for a mapping (`upcase: {sig: ...}`), but YAML makes a sequence
+# of dicts just as natural and an authoring model reaches for `- name: upcase` often
+# enough that it was the single most common way a compile died: `dd[k]` indexed a
+# list with a dict, and the TypeError named no section, so the repair loop re-authored
+# the same shape three times and gave up. All three spellings lower the same way now:
+#
+#     tools: {upcase: {sig: ...}}          # the contract
+#     tools: [{name: upcase, sig: ...}]    # sequence, name inline
+#     tools: [{upcase: {sig: ...}}]        # sequence of single-entry mappings
+glob _NAME_KEYS: list = ["name", "id", "key"];
+
 def _items(d: any) -> any {
     r = [];
     dd = d if d else {};
+    if isinstance(dd, list) {
+        i = 0;
+        for e in dd {
+            i += 1;
+            if not isinstance(e, dict) { r.append([str(e), {}]); continue; }
+            ks = list(e);
+            # `- upcase: {...}` — one entry whose value is the spec itself
+            if (len(ks) == 1) and isinstance(e[ks[0]], dict) { r.append([str(ks[0]), e[ks[0]]]); continue; }
+            named = "";
+            for nk in _NAME_KEYS { if (not named) and e.get(nk) { named = str(nk); } }
+            if not named {
+                # Fail with the shape problem, not a TypeError 40 frames down: this
+                # message is what the repair pass gets handed, so it has to say what
+                # to change.
+                raise ValueError(
+                    "AG-IR shape: a mapping section was written as a list, and entry #" + str(i)
+                    + " has no name — its keys are " + str(sorted([str(k) for k in ks]))[:120]
+                    + ". Write the section as a mapping (`<name>: {...}`), or give every"
+                    + " entry a `name:` key."
+                );
+            }
+            r.append([str(e.get(named)), {k: e[k] for k in e if k != named}]);
+        }
+        return r;
+    }
     for k in dd { r.append([k, dd[k]]); }
     return r;
 }
