@@ -14,9 +14,13 @@ authors:
   - family-names: Mars
     given-names: Jason
     affiliation: "University of Michigan, Ann Arbor"
-date-released: 2026-07-22
-doi: 10.5281/zenodo.21499104
-url: "https://doi.org/10.5281/zenodo.21499104"
+date-released: 2026-07-29
+doi: 10.48550/arXiv.2607.27309
+url: "https://arxiv.org/abs/2607.27309"
+identifiers:
+  - type: other
+    value: "arXiv:2607.27309"
+    description: "arXiv preprint"
 repository-code: "https://github.com/sigilagent/sigil"
 license: CC-BY-4.0
 type: conference-paper
