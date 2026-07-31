@@ -85,31 +85,56 @@ test "_parse: an is_error result raises too" {
     assert ok;
 }
 
+# litellm is an OPTIONAL byLLM dependency — byllm/_optdeps/litellm.jac falls back
+# to a stub when it is absent, and CI runs on a runtime that does not ship it. The
+# two tests that need the real package assert the DEGRADED contract instead when
+# it is missing, so neither environment is left asserting nothing.
+def _has_litellm() -> bool {
+    try {
+        import litellm;
+        return True;
+    } except Exception {
+        return False;
+    }
+}
+
 test "_response: usage folds Claude Code's cache split into prompt_tokens" {
-    r = _response("claude-cc/haiku", {
-        "result": "hi",
-        "stop_reason": "end_turn",
-        "total_cost_usd": 0.5,
-        "usage": {"input_tokens": 3, "cache_read_input_tokens": 100,
-                  "cache_creation_input_tokens": 7, "output_tokens": 11}
-    });
-    assert r.choices[0].message.content == "hi";
-    assert r.choices[0].finish_reason == "stop";
-    assert r.usage.prompt_tokens == 110;
-    assert r.usage.completion_tokens == 11;
-    assert r.model == "claude-cc/haiku";
-    # sigil_observe reads cost off _hidden_params; litellm has no map for us
-    assert r._hidden_params["response_cost"] == 0.5;
+    if not _has_litellm() {
+        # no litellm, no ModelResponse to build — the handler is never reached
+        # either, because litellm is what dispatches to it
+        assert not install();
+    } else {
+        r = _response("claude-cc/haiku", {
+            "result": "hi",
+            "stop_reason": "end_turn",
+            "total_cost_usd": 0.5,
+            "usage": {"input_tokens": 3, "cache_read_input_tokens": 100,
+                      "cache_creation_input_tokens": 7, "output_tokens": 11}
+        });
+        assert r.choices[0].message.content == "hi";
+        assert r.choices[0].finish_reason == "stop";
+        assert r.usage.prompt_tokens == 110;
+        assert r.usage.completion_tokens == 11;
+        assert r.model == "claude-cc/haiku";
+        # sigil_observe reads cost off _hidden_params; litellm has no map for us
+        assert r._hidden_params["response_cost"] == 0.5;
+    }
 }
 
 test "install: claims the claude-cc prefix with litellm, idempotently" {
-    import litellm;
-    assert install();
-    assert install();
-    ours = [x for x in litellm.custom_provider_map if x["provider"] == "claude-cc"];
-    assert len(ours) == 1;
-    assert "claude-cc" in litellm.provider_list;
-    assert "claude-cc" in litellm._custom_providers;
+    if not _has_litellm() {
+        # the real contract on a litellm-less runtime: report failure, never raise
+        assert not install();
+        assert not install();
+    } else {
+        import litellm;
+        assert install();
+        assert install();
+        ours = [x for x in litellm.custom_provider_map if x["provider"] == "claude-cc"];
+        assert len(ours) == 1;
+        assert "claude-cc" in litellm.provider_list;
+        assert "claude-cc" in litellm._custom_providers;
+    }
 }
 
 test "an agent session gets its own timeout, not the one-completion slot budget" {
