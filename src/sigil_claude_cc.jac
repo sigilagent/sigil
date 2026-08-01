@@ -267,6 +267,77 @@ def _argv(model: str) -> list:
     return argv
 
 
+# ---------------------------------------------------------------------------
+# Watching the model think.
+#
+# A compile is dozens of these calls and used to show nothing at all while they
+# ran: a spinner, then minutes of silence, then a verdict. But the words being
+# written ARE the artifact being built, so there is no reason to hide them.
+#
+# `claude -p --output-format stream-json --include-partial-messages` emits one
+# NDJSON line per delta and then the SAME final `result` object the non-streaming
+# form returns — so `_parse` and `_response` are untouched by this and their
+# contract is exactly what it was. The only new thing is that deltas go past a
+# sink on the way. No sink (the default) drains and discards them.
+_SINK = None            # callback(kind, text) — kind is "text" | "thinking"
+
+
+def set_stream_sink(fn) -> None:
+    """Route every delta to `fn(kind, text)`. None turns it back off."""
+    global _SINK
+    _SINK = fn
+
+
+def _emit(kind: str, text: str) -> None:
+    if _SINK is None or not text:
+        return
+    try:
+        _SINK(kind, text)
+    except Exception:
+        # A broken renderer must never take down the compile it is describing.
+        pass
+
+
+def _stream_flags() -> list:
+    # --verbose is REQUIRED by the CLI alongside stream-json under -p;
+    # --include-partial-messages is what turns whole messages into deltas.
+    return ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+
+
+def _feed(event: dict):
+    """Handle one NDJSON line. Returns the final `result` object when it arrives."""
+    kind = str(event.get("type") or "")
+    if kind == "result":
+        return event
+    if kind != "stream_event":
+        return None
+    inner = event.get("event") or {}
+    if str(inner.get("type") or "") != "content_block_delta":
+        return None
+    delta = inner.get("delta") or {}
+    dtype = str(delta.get("type") or "")
+    if dtype == "text_delta":
+        _emit("text", str(delta.get("text") or ""))
+    elif dtype == "thinking_delta":
+        _emit("thinking", str(delta.get("thinking") or ""))
+    return None
+
+
+def _prompt_file(prompt: str):
+    """The prompt on a temp file, handed to the child as its stdin.
+
+    Not a pipe: a rendered AG-IR prompt runs well past the 64KB pipe buffer, and
+    a parent busy reading stdout cannot also be feeding stdin, so the two would
+    deadlock on exactly the big compiles this is meant to show. A file has no
+    buffer to fill.
+    """
+    fh = tempfile.NamedTemporaryFile("w+", suffix=".prompt", delete=False)
+    fh.write(prompt)
+    fh.flush()
+    fh.seek(0)
+    return fh
+
+
 # Failures the CLI will keep producing until a human does something. byLLM retries
 # an APIConnectionError three times, so a billing or login problem used to print
 # three full JSON dumps and three tracebacks for one actionable sentence. Matching
@@ -377,50 +448,114 @@ def _response(model: str, data: dict):
     return resp
 
 
+def _drain(proc, deadline):
+    """Read NDJSON lines until the process ends, emitting deltas as they arrive."""
+    result = None
+    for line in proc.stdout:
+        text = line.strip()
+        if text:
+            try:
+                event = json.loads(text)
+            except Exception:
+                continue          # a non-JSON line is noise, not a reason to fail
+            got = _feed(event)
+            if got is not None:
+                result = got
+        if deadline is not None and time.monotonic() > deadline:
+            proc.kill()
+            raise _timed_out("", deadline, "SIGIL_CLAUDE_CC_TIMEOUT")
+    return result
+
+
 def _call(model: str, messages: list):
     prompt = _render(messages)
     secs = _timeout()
+    deadline = (time.monotonic() + secs) if secs else None
+    fh = _prompt_file(prompt)
+    proc = None
     try:
-        proc = subprocess.run(
-            _argv(model),
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=secs,
-            cwd=_cwd(),
-            env=_env(),
-        )
-    except FileNotFoundError:
-        raise ClaudeCCError(
-            "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
-        )
-    except subprocess.TimeoutExpired:
-        raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
-    return _response(model, _parse(proc.stdout, proc.stderr, proc.returncode))
+        try:
+            proc = subprocess.Popen(
+                _argv(model) + _stream_flags(),
+                stdin=fh,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=_cwd(),
+                env=_env(),
+            )
+        except FileNotFoundError:
+            raise ClaudeCCError(
+                "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
+            )
+        result = _drain(proc, deadline)
+        proc.wait()
+        err = proc.stderr.read() or ""
+    finally:
+        fh.close()
+        try:
+            os.unlink(fh.name)
+        except Exception:
+            pass
+    # `_parse` still sees exactly what it always saw: the result object as JSON
+    # text, the stderr, and the exit code.
+    out = json.dumps(result) if result is not None else ""
+    return _response(model, _parse(out, err, proc.returncode))
+
+
+async def _adrain(proc):
+    result = None
+    while True:
+        raw = await proc.stdout.readline()
+        if not raw:
+            break
+        text = raw.decode(errors="replace").strip()
+        if not text:
+            continue
+        try:
+            event = json.loads(text)
+        except Exception:
+            continue
+        got = _feed(event)
+        if got is not None:
+            result = got
+    return result
 
 
 async def _acall(model: str, messages: list):
     prompt = _render(messages)
+    fh = _prompt_file(prompt)
+    proc = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *_argv(model),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=_cwd(),
-            env=_env(),
-        )
-    except FileNotFoundError:
-        raise ClaudeCCError(
-            "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
-        )
-    secs = _timeout()
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=secs)
-    except asyncio.TimeoutError:
-        proc.kill()
-        raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
-    return _response(model, _parse(out.decode(errors="replace"), err.decode(errors="replace"), proc.returncode))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *(_argv(model) + _stream_flags()),
+                stdin=fh,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=_cwd(),
+                env=_env(),
+            )
+        except FileNotFoundError:
+            raise ClaudeCCError(
+                "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
+            )
+        secs = _timeout()
+        try:
+            result = await asyncio.wait_for(_adrain(proc), timeout=secs)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
+        err = (await proc.stderr.read()).decode(errors="replace")
+        await proc.wait()
+    finally:
+        fh.close()
+        try:
+            os.unlink(fh.name)
+        except Exception:
+            pass
+    out = json.dumps(result) if result is not None else ""
+    return _response(model, _parse(out, err, proc.returncode))
 
 
 def _chunk(resp) -> dict:

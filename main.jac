@@ -26,7 +26,7 @@ import from src.sigil {
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info, use_claude_code,
     tool_group_set, tool_allowed, tools_policy_info,
-    compile_stage_label, compile_stage_line, compile_stage_secs
+    compile_stage_label, compile_stage_line, compile_stage_secs, verbose_mode
 }
 import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
@@ -45,6 +45,7 @@ import from src.sigil_runtime { _jac_bin }
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
+glob _QUIET: bool = False;         # set by the global `--quiet` flag: never stream model output
 
 def cli_args(raw: list) -> list {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
@@ -64,18 +65,121 @@ def cli_args(raw: list) -> list {
     # command's positional args shift, and record it for the dispatch below.
     out: list = [];
     for a in args {
-        if a == "--claude" { _CLAUDE_MODE = True; } else { out.append(a); }
+        if a == "--claude" { _CLAUDE_MODE = True; }
+        elif (a == "--quiet") or (a == "-q") { _QUIET = True; }
+        else { out.append(a); }
     }
     return out;
 }
 
 glob _CV: dict = {"open": ""};   # current in-flight stage line
 
+# ---------------------------------------------------------------------------
+# The verbose build view — watching the model write the artifact.
+#
+# A compile is dozens of model calls that used to show nothing while they ran: a
+# stage label, a spinner, minutes of silence, a verdict. But the words being
+# written ARE the thing being built. With a provider that can stream (claude
+# mode), every delta lands here and is printed under the stage that asked for it,
+# dimmed and indented so the structure stays readable.
+#
+# Verbose mode drops the in-place line rewriting the quiet view uses: rewriting
+# the current line only works when nothing else is writing to it, and here
+# something is. Stages print as a scrolling transcript instead.
+# ---------------------------------------------------------------------------
+glob _VB: dict = {"on": False, "col": 0, "open": False, "w": 100, "kind": ""};
+
+def _term_cols() -> int {
+    # A pty with no winsize set reports 0 rather than raising, and 0 silently
+    # became the minimum wrap width — a column of shredded words. Fall back
+    # through COLUMNS before giving up on a default.
+    n = 0;
+    try { n = int(os.get_terminal_size().columns); } except Exception { n = 0; }
+    if n <= 0 {
+        try { n = int(os.environ.get("COLUMNS", "0")); } except Exception { n = 0; }
+    }
+    return n if n > 0 else 100;
+}
+
+def _stream_sink(kind: str, text: str) -> None {
+    # One delta from the model. `kind` is "text" (the answer) or "thinking".
+    if not text { return; }
+    ind = "      ";
+    sty = (chr(27) + "[2m") if kind == "text" else (chr(27) + "[2;3;38;5;98m");
+    if not _VB["open"] {
+        # width once per block, not once per token: this runs at token rate
+        w0 = _term_cols() - len(ind) - 1;
+        _VB["w"] = w0 if w0 >= 24 else 24;
+        sys.stdout.write(chr(10) + ind);
+        _VB["open"] = True;
+        _VB["col"] = 0;
+        _VB["kind"] = "";
+    }
+    if (str(_VB["kind"]) != kind) and (int(_VB["col"]) > 0) {
+        # thinking and answer are styled differently, but they also deserve a
+        # break: the reasoning running straight into the JSON it produced reads
+        # like one garbled paragraph.
+        sys.stdout.write(chr(10) + ind);
+        _VB["col"] = 0;
+    }
+    _VB["kind"] = kind;
+    w = int(_VB["w"]);
+    buf = "";
+    for ch in str(text) {
+        if ch == chr(10) { buf += chr(10) + ind; _VB["col"] = 0; }
+        else {
+            if int(_VB["col"]) >= w { buf += chr(10) + ind; _VB["col"] = 0; }
+            buf += ch;
+            _VB["col"] = int(_VB["col"]) + 1;
+        }
+    }
+    sys.stdout.write(sty + buf + chr(27) + "[0m");
+    sys.stdout.flush();
+}
+
+def _vb_close() -> None {
+    # End the streamed block before a stage line is printed over it.
+    if _VB["open"] {
+        sys.stdout.write(chr(10));
+        _VB["open"] = False;
+        _VB["col"] = 0;
+    }
+}
+
+def _install_stream_view() -> bool {
+    # Only claude-cc can stream today — it is the provider Sigil owns. Other
+    # providers still get the stage view; making them stream means declaring the
+    # compiler's byLLM slots `stream=True`, which changes every slot's return type.
+    if _QUIET or (not verbose_mode()) { return False; }
+    try {
+        import from src.sigil_claude_cc { set_stream_sink }
+        set_stream_sink(_stream_sink);
+        _VB["on"] = True;
+        return True;
+    } except Exception as e { return False; }
+}
+
 def _compile_ev(ev: dict) -> None {
     # live build view: start opens the stage line, done rewrites it with counts
     # + timing. Only ever touches the CURRENT line (portable ANSI). The stage
     # label and summary come from sigil.jac so chat's trace says the same thing.
     label = compile_stage_label(str(ev["stage"]));
+    if _VB["on"] {
+        # verbose: a scrolling transcript, because the streamed output below each
+        # stage makes rewriting the current line impossible.
+        _vb_close();
+        if str(ev.get("state")) == "start" {
+            if str(ev["stage"]) == "repair" {
+                sys.stdout.write("  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views")) + chr(10));
+            } else {
+                sys.stdout.write("  " + chr(27) + "[38;5;135m" + chr(0x25D0) + chr(27) + "[0m " + label + chr(10));
+            }
+        } elif str(ev.get("state")) == "done" {
+            sys.stdout.write("  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + compile_stage_line(ev) + "  " + chr(27) + "[2m" + compile_stage_secs(ev) + chr(27) + "[0m" + chr(10));
+        }
+        sys.stdout.flush();
+        return;
+    }
     if str(ev.get("state")) == "start" {
         if str(ev["stage"]) == "repair" {
             sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views")) + chr(10));
@@ -207,7 +311,7 @@ with entry:__main__ {
         print("  persona : " + str(s["persona"]));
         print("  models  : frontier=" + str(s["frontier_model"])
               + "  small=" + str(s["small_model"]) + "  router=" + str(s["router_model"]));
-        print("  tools   : workspace=" + str(s["workspace"]) + "  sandbox=" + str(s["sandbox"]));
+        print("  tools   : workspace=" + str(s["workspace"]) + "  sandbox=" + str(s["sandbox"]) + "  verbose=" + ("on" if s["verbose"] else "off"));
         print("  channels: " + ", ".join([str(c) for c in s["channels"]]) + "   prompt-mode: " + str(s["prompt_mode"]));
         eths = list(s["ethos"]);
         mems = list(s["memories"]);
@@ -371,9 +475,10 @@ with entry:__main__ {
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             if _tty { print(chr(10) + "  Compiling " + path); }
+            if _tty { _install_stream_view(); }
             r = compile_skill(open(path).read(), eject, eject_path,
                               _compile_ev if _tty else None, agent_author);
-            if _tty { print(""); }
+            if _tty { _vb_close(); print(""); }
             if not r["ok"] {
                 print("compile FAILED for '" + str(r["signature"]) + "':");
                 for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
@@ -630,7 +735,7 @@ with entry:__main__ {
         print("  setup                               first-run wizard (models & persona)");
         print("  soul                                show identity, config, skills & memory (all graph state)");
         print("  config [<key> <value>]              interactive settings editor (or set one key)");
-        print("  configure <key> <value>             set config on the graph (persona|*_model|workspace|sandbox|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
+        print("  configure <key> <value>             set config on the graph (persona|*_model|workspace|sandbox|verbose|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
         print("  models list|set|alias|fallback      manage model tiers, aliases & fallback pools");
         print("");
         print("memory");

@@ -18,6 +18,7 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 | `router_model` | model name | Model that routes a task to a skill. Falls back to `small_model`. |
 | `workspace` | path | Default directory the tools work in — where relative paths resolve and shell jobs start. Default `~/.sigil/workspace`. See [workspace-and-tools](workspace-and-tools.md). |
 | `sandbox` | `off` \| `jail` \| `docker` | Containment for the file/shell tools. **Default `off`** — full host access, so Sigil can drive the tools and agents already installed here. `jail` confines the file tools to the workspace; `docker` also runs each command in a locked-down container. |
+| `verbose` | on/off | Show the model's output as it is generated. **Default on.** A compile is dozens of model calls and the words being written are the artifact; `--quiet` or `SIGIL_VERBOSE=0` turns it off for one run. See [skill-compilation](skill-compilation.md#watching-the-compile). |
 | `prompt_mode` | `full` \| `minimal` \| `none` | How much context (ethos + memory) wraps the compiler/run. |
 | `auto_eval` | on/off | Grounded-eval valve: judge each skill run and relearn if it fails. |
 | `eval_threshold` | 0–100 | A run scoring below this auto-triggers a relearn + retry. |
@@ -36,6 +37,7 @@ sigil configure chat_model gpt-4o-mini
 sigil configure small_model ollama_chat/qwen3:8b
 sigil configure workspace ~/projects/sigil-ws
 sigil configure sandbox jail          # opt back into containment
+sigil configure verbose off           # stop streaming model output
 sigil config                       # interactive editor for the common keys
 ```
 

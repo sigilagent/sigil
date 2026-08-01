@@ -35,7 +35,7 @@ import subprocess;
 import from urllib.request { Request, urlopen }
 import from urllib.parse { urlparse, quote_plus }
 import from .sigil {
-    awaken, Soul, compile_skill, claude_mode,
+    awaken, Soul, compile_skill, claude_mode, verbose_mode,
     compile_stage_label, compile_stage_line, compile_stage_secs
 }
 import from .approvals { check_exec, allowlist_add }
@@ -454,6 +454,45 @@ def ws_jobs() -> str {
 # progress stays invisible until it ends. In-process it shares this agent's graph,
 # reports each stage on the live trace, and has no time limit at all.
 # ---------------------------------------------------------------------------
+# The chat trace is one row per event, so a raw token stream would drown it. The
+# model's output is buffered to whole lines instead: you still watch the artifact
+# being written, at the granularity this surface can render.
+glob _GEN: dict = {"buf": ""};
+
+def _gen_sink(kind: str, text: str) -> None {
+    if str(kind) != "text" { return; }        # thinking stays out of the transcript
+    _GEN["buf"] = str(_GEN["buf"]) + str(text);
+    while chr(10) in str(_GEN["buf"]) {
+        parts = str(_GEN["buf"]).split(chr(10), 1);
+        line = str(parts[0]).strip();
+        _GEN["buf"] = parts[1];
+        if line { _trace("generating", line); }
+    }
+}
+
+def _gen_flush() -> None {
+    line = str(_GEN["buf"]).strip();
+    _GEN["buf"] = "";
+    if line { _trace("generating", line); }
+}
+
+def _stream_view_on() -> bool {
+    if not verbose_mode() { return False; }
+    try {
+        import from .sigil_claude_cc { set_stream_sink }
+        set_stream_sink(_gen_sink);
+        return True;
+    } except Exception as e { return False; }
+}
+
+def _stream_view_off() -> None {
+    try {
+        import from .sigil_claude_cc { set_stream_sink }
+        _gen_flush();
+        set_stream_sink(None);
+    } except Exception as e {}
+}
+
 def _compile_stage(ev: dict) -> None {
     # The same staged build view `sigil compile` prints on the CLI, streamed onto
     # the chat trace: a line when a stage opens, and the stage again with its counts
@@ -496,8 +535,10 @@ def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
     } except Exception as e { _trace("compile", str(e), False); return "error reading " + path + ": " + str(e); }
     _trace("compile", _rel(full));
     want_eject = bool(eject) or bool(eject_path);
+    streaming = _stream_view_on();
     try { r = compile_skill(src, want_eject, eject_path, _compile_stage, False); }
     except Exception as e { _trace("compile", str(e)[:120], False); return "compile error: " + str(e)[:400]; }
+    finally { if streaming { _stream_view_off(); } }
     if not r["ok"] {
         lines: list[str] = ["compile FAILED for '" + str(r["signature"]) + "':"];
         for iss in list(r["issues"] or []) { lines.append("  - " + str(iss)); }
