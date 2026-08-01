@@ -130,6 +130,7 @@ jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
 | `SIGIL_CLAUDE_SMALL` | `claude-cc/haiku` | model for the `small` / `router` tiers |
 | `SIGIL_CLAUDE_BIN` | `claude` | path to the Claude Code binary |
 | `SIGIL_CLAUDE_CC_TIMEOUT` | unset | seconds before one slot call is killed; **unset means no limit** |
+| `SIGIL_CLAUDE_IDLE_TIMEOUT` | `900` | seconds of **no output at all** before a call is treated as hung; `0` disables |
 | `SIGIL_CLAUDE_AGENT_TIMEOUT` | unset | seconds before an agent session (authoring, repair) is killed; unset means no limit |
 | `SIGIL_CLAUDE_ALLOW_API_KEY` | unset | pass `ANTHROPIC_API_KEY` through, billing it instead of the subscription |
 | `SIGIL_CLAUDE_CC_CWD` | temp dir | working directory for the subprocess |
@@ -167,9 +168,19 @@ half an hour of subscription spend for an error message. Unlike a shell job ther
 partial output to salvage from a slot call, so a deadline buys nothing at all; it only
 decides whether the work is lost. `--max-turns` is the real bound on an agent session.
 
-Set either variable for an **unattended** deployment — cron, a server — where a genuinely
-hung CLI would block forever with nobody at the keyboard to interrupt it. Interactively,
-Ctrl-C is the timeout.
+What guards an unattended run instead is an **idle** limit, which is a different thing
+from a duration limit and only possible because every call streams. A duration limit
+cannot tell work from a hang, so it kills whichever it meets first. An idle limit only
+ever fires on silence: while deltas keep arriving the call runs as long as it wants.
+`SIGIL_CLAUDE_IDLE_TIMEOUT` defaults to 900s of *nothing at all*, and `0` switches it off.
+
+It measures running time, not wall-clock: `time.monotonic()` is `mach_absolute_time()` on
+macOS and `CLOCK_MONOTONIC` on Linux, neither of which advances while the machine is
+asleep. A compile left overnight on a closed laptop is not silence — it is simply not
+running — so it will not be killed for it.
+
+`SIGIL_CLAUDE_CC_TIMEOUT` is still there for a hard wall-clock ceiling if you want one.
+Interactively, Ctrl-C is the timeout.
 
 The one exception is `web_search` (below), which keeps a 180s ceiling: a search that has
 not answered in three minutes is stuck, and there is nothing to salvage there either way.

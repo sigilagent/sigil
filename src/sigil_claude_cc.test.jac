@@ -430,3 +430,34 @@ test "no sink is the default: deltas are drained and discarded" {
     assert _feed({"type": "stream_event", "event": {"type": "content_block_delta",
                   "delta": {"type": "text_delta", "text": "quiet"}}}) is None;
 }
+
+test "idle timeout: generous default, env-tunable, and switchable off" {
+    import os;
+    os.environ.pop("SIGIL_CLAUDE_IDLE_TIMEOUT", None);
+    assert _idle_timeout() == 900.0;
+    os.environ["SIGIL_CLAUDE_IDLE_TIMEOUT"] = "30";
+    assert _idle_timeout() == 30.0;
+    os.environ["SIGIL_CLAUDE_IDLE_TIMEOUT"] = "0";      # off entirely
+    assert _idle_timeout() is None;
+    os.environ["SIGIL_CLAUDE_IDLE_TIMEOUT"] = "junk";   # never crash a run
+    assert _idle_timeout() == 900.0;
+    os.environ.pop("SIGIL_CLAUDE_IDLE_TIMEOUT", None);
+}
+
+test "idle timeout kills a child that produces nothing, and says which limit" {
+    import os;
+    import subprocess;
+    import time;
+    os.environ["SIGIL_CLAUDE_IDLE_TIMEOUT"] = "2";
+    p = subprocess.Popen(["sleep", "60"], stdout=subprocess.PIPE, stderr=subprocess.PIPE);
+    t0 = time.time();
+    msg = "";
+    try { _drain(p, None); }
+    except Exception as e { msg = str(e); }
+    took = time.time() - t0;
+    p.wait();
+    os.environ.pop("SIGIL_CLAUDE_IDLE_TIMEOUT", None);
+    assert "no output" in msg, msg;
+    assert "SIGIL_CLAUDE_IDLE_TIMEOUT" in msg, msg;   # names the knob, not the other one
+    assert took < 15.0, "should die on silence, not run to the child's end: " + str(took);
+}

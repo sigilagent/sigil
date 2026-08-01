@@ -144,6 +144,35 @@ def _timeout():
     return _env_seconds("SIGIL_CLAUDE_CC_TIMEOUT")
 
 
+def _idle_timeout():
+    """How long a call may produce NOTHING before it is treated as hung.
+
+    This is not the deadline that was removed, and the difference is the whole
+    point. A total-duration limit cannot tell work from a hang, so it kills
+    whichever it meets first — which is how the old 600s ceiling destroyed real
+    compiles. An IDLE limit only ever fires on silence: while deltas keep
+    arriving the call runs as long as it likes.
+
+    Only measurable at all because every call streams now. It closes the gap
+    dropping the total limit left open — an unattended run (cron, a server) with
+    a genuinely stuck CLI and nobody at the keyboard to Ctrl-C it.
+
+    Deliberately generous: a first token can take minutes on a large prompt under
+    load. `time.monotonic()` is mach_absolute_time() on macOS and CLOCK_MONOTONIC
+    on Linux, neither of which advances while the machine is asleep, so a closed
+    laptop is not silence — it is simply not running. Set
+    SIGIL_CLAUDE_IDLE_TIMEOUT=0 to switch it off entirely.
+    """
+    raw = (os.environ.get("SIGIL_CLAUDE_IDLE_TIMEOUT") or "").strip()
+    if raw:
+        try:
+            v = float(raw)
+        except ValueError:
+            return 900.0
+        return v if v > 0 else None
+    return 900.0
+
+
 def _agent_timeout():
     # An agent session is dozens of turns with tool calls in between — even more
     # obviously not something to put a stopwatch on. `--max-turns` is the real
@@ -449,18 +478,49 @@ def _response(model: str, data: dict):
 
 
 def _drain(proc, deadline):
-    """Read NDJSON lines until the process ends, emitting deltas as they arrive."""
+    """Read NDJSON lines until the process ends, emitting deltas as they arrive.
+
+    Raw reads over a select loop rather than iterating the pipe: line iteration
+    blocks with no way to notice that nothing is coming, which is precisely the
+    state the idle timeout exists to catch.
+    """
+    import select
+
+    idle = _idle_timeout()
     result = None
-    for line in proc.stdout:
-        text = line.strip()
-        if text:
+    buf = b""
+    fd = proc.stdout.fileno()
+    last = time.monotonic()
+    while True:
+        ready = select.select([fd], [], [], 1.0)[0]
+        if ready:
             try:
-                event = json.loads(text)
-            except Exception:
-                continue          # a non-JSON line is noise, not a reason to fail
-            got = _feed(event)
-            if got is not None:
-                result = got
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            last = time.monotonic()
+            buf += chunk
+            while b"\n" in buf:
+                (raw, buf) = buf.split(b"\n", 1)
+                text = raw.decode("utf-8", "replace").strip()
+                if not text:
+                    continue
+                try:
+                    event = json.loads(text)
+                except Exception:
+                    continue      # a non-JSON line is noise, not a reason to fail
+                got = _feed(event)
+                if got is not None:
+                    result = got
+        else:
+            if proc.poll() is not None and not select.select([fd], [], [], 0)[0]:
+                break
+            if idle is not None and (time.monotonic() - last) > idle:
+                proc.kill()
+                raise _timed_out("(no output for %.0fs)" % idle, idle,
+                                 "SIGIL_CLAUDE_IDLE_TIMEOUT")
         if deadline is not None and time.monotonic() > deadline:
             proc.kill()
             raise _timed_out("", deadline, "SIGIL_CLAUDE_CC_TIMEOUT")
@@ -480,7 +540,6 @@ def _call(model: str, messages: list):
                 stdin=fh,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 cwd=_cwd(),
                 env=_env(),
             )
@@ -490,7 +549,7 @@ def _call(model: str, messages: list):
             )
         result = _drain(proc, deadline)
         proc.wait()
-        err = proc.stderr.read() or ""
+        err = (proc.stderr.read() or b"").decode("utf-8", "replace")
     finally:
         fh.close()
         try:
@@ -504,9 +563,15 @@ def _call(model: str, messages: list):
 
 
 async def _adrain(proc):
+    idle = _idle_timeout()
     result = None
     while True:
-        raw = await proc.stdout.readline()
+        try:
+            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=idle)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise _timed_out("(no output for %.0fs)" % idle, idle,
+                             "SIGIL_CLAUDE_IDLE_TIMEOUT")
         if not raw:
             break
         text = raw.decode(errors="replace").strip()
