@@ -113,6 +113,11 @@ def pin_flows_llm(m: any) -> None {
 # ---------------------------------------------------------------------------
 
 def spine_digest(wf: WorkflowView, skill: str) -> str {
+    # LAZY, like every other cross-package import here: pulling mechanical in at
+    # module scope changes the topology under multi-file `jac test` and silently
+    # drops ~40% of the suite from collection (1182 items -> 694). Same trap the
+    # ai-package imports in sigil.jac are annotated for.
+    import from ..mechanical.toolib { builtin_catalogue }
     lines: list = ["SPINE NODES:"];
     for n in wf.nodes {
         rd = ",".join(n.reads);
@@ -124,6 +129,7 @@ def spine_digest(wf: WorkflowView, skill: str) -> str {
         g = (" if " + e.guard) if e.guard else "";
         lines.append("- " + e.src + " -> " + e.dst + g);
     }
+    lines.append(builtin_catalogue());
     lines.append("SKILL TEXT:");
     lines.append(skill);
     return "\n".join(lines);
@@ -164,11 +170,15 @@ whose content is VERBATIM from the skill. EMBODY, DON'T POINT: never emit a
 'see X.md' / library-name / summary in place of the actual content — an entry
 with neither body nor command nor content is a prose-pointer and will be
 rejected. A demand to consult a LIVE source stays a live tool (name it after
-the fetch, leave body empty, note the URL in the skill knowledge). EVERY
+the fetch, leave body empty, note the URL in the skill knowledge). PREFER A STANDARD TOOL: the
+context lists tools that always exist (read_file, grep, glob_files, list_dir,
+write_file, run_command, http_get). If a step is one of those, emit a tool with
+that EXACT name, `serves` naming its nodes, and NO body or command — the compiler
+supplies the implementation. Hand-write a body only for what the library does not
+already do. EVERY
 deliverable the skill mandates needs a tool that WRITES it to disk: when the
-skill supplies no snippet, author a minimal write tool yourself — sig
-"(content, path) -> path", body writing content to the path — serving the
-emitting ACT node. Writing given content to a named file is pure mechanism
+skill supplies no snippet, use `write_file` (or author a minimal write tool — sig
+"(content, path) -> path") serving the emitting ACT node. Writing given content to a named file is pure mechanism
 (owner=code), prescribed by the artifact-boundary rule, never an addition.""";
 sem knowledge_view.spec = "The frozen RuleSet.";
 sem knowledge_view.ctx = "The spine digest plus the skill text (the snippets live here — copy them verbatim).";

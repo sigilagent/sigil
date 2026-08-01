@@ -69,6 +69,45 @@ sigil replay agent.jac obs.jsonl "task"  # re-run a recorded run's cognition —
 sigil gate ./x.agir                      # run G4, the compile oracle, on its own
 ```
 
+## The standard tool library
+
+A code-owned node lowers through a tool, and a tool needs a body. Before, the author had
+to hand-write Python for every mundane step — read this file, grep that directory, run
+that script — and when it didn't, the node lowered to a marker comment and the assemble
+gate killed the compile. The work was never hard; it was just never offered.
+
+These always exist and can be bound by name:
+
+| Tool | Surface | |
+|---|---|---|
+| `read_file(path)` | SENSE | read a text file |
+| `list_dir(path)` | SENSE | one directory level |
+| `glob_files(pattern, path)` | SENSE | find files, recursively |
+| `grep(pattern, path)` | SENSE | regex over file contents |
+| `write_file(path, content)` | ACT | write text, creating parents |
+| `run_command(command)` | ACT | shell, exit code + output |
+| `http_get(url)` | SENSE | fetch a public URL |
+
+The names match the vocabulary a skill written for any agent runtime already uses —
+Anthropic's own skills declare `allowed-tools: Bash Read Grep Glob` — so a lift maps onto
+them without translation. Binding one takes no body:
+
+```yaml
+tools:
+  read_file:
+    surface: SENSE
+    serves: [n4_read_primer]
+```
+
+The library's canonical signature wins over whatever the author wrote, so the inlined
+body's parameter names always match the wrapper generated around them. An explicit
+`body:` or `command:` still takes precedence — the library is a floor, not a ceiling.
+
+**Inlined, not imported.** Each body is self-contained stdlib Python, spliced into the
+generated module at lower time. A compiled skill runs in a subprocess where Sigil is not
+importable, and `compile -e` ejects a program that must run with no repo at all — so a
+library that had to be imported at run time would be no library at all.
+
 ## Watching the compile
 
 `sigil compile` is verbose by default: each stage prints as it opens, and — in claude
