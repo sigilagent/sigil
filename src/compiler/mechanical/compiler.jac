@@ -20,6 +20,7 @@ CLI / test harness:
 
 import os;
 import re;
+import from .toolib { builtin, builtin_names, builtin_catalogue }
 import glob;
 import textwrap;
 import traceback;
@@ -746,6 +747,17 @@ def _emit_tools(ir: any) -> str {
         name = kv[0];
         t = kv[1];
         if not isinstance(t, dict) { continue; }
+        # RUNG -1, the standard library: a tool named after a builtin, carrying no
+        # body of its own, is the compiler's to embody. Its CANONICAL sig wins over
+        # whatever the author wrote, so the inlined body's parameter names always
+        # match the wrapper generated around them.
+        bi = builtin(name) if not str(t.get("body") or "").strip() else None;
+        if (bi is not None) and (not str(t.get("command") or "").strip()) {
+            t = dict(t);
+            t["sig"] = str(bi["sig"]);
+            t["body"] = str(bi["body"]);
+            if not str(t.get("surface") or "").strip() { t["surface"] = str(bi["surface"]); }
+        }
         sig = _parse_sig(t.get("sig"));
         params = sig[0];
         surf = str(t.get("surface", ""));

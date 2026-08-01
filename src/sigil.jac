@@ -17,6 +17,7 @@ import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .compiler.mechanical.compiler { transpile_ir }
+import from .compiler.mechanical.toolib { builtin_catalogue }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
     skill_description
@@ -534,7 +535,7 @@ def _compile_fresh(reg: Registry, sig: str, intent: str, task: str, version: int
     # Author a FRESH AG-IR with the frontier for a KNOWN signature/version — the reusable
     # core behind first compilation AND relearn (which discards a degraded procedure
     # and re-authors from scratch, rather than revising it like mutate does).
-    tools = digest(mcp_servers());
+    tools = digest(mcp_servers()) + chr(10) + builtin_catalogue();
     agir = author_agir(intent, task, ETHOS, tools, CONTRACT);
     low = _lower(agir, sig);
     if not low["ok"] {
@@ -664,7 +665,7 @@ def register_skill(source: str, kind: str) -> dict {
         tg = _persist(reg, sig, "lifted from SKILL.md (AI compiler)", lr.ir_text, path, "lifted-skill-ai", 1);
     } else {
         # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
-        agir = lift_skill(source, ETHOS, digest(mcp_servers()), CONTRACT);
+        agir = lift_skill(source, ETHOS, digest(mcp_servers()) + chr(10) + builtin_catalogue(), CONTRACT);
         sig = agir_name(agir);
         osp = transpile_ir(agir, sig);
         path = write_module(osp, sig, 1, WORKDIR);
