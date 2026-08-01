@@ -251,6 +251,13 @@ def use_claude_code(on: bool = True) {
     os.environ["SIGIL_CLAUDE_REPAIR"] = "1" if on else "";
 }
 
+def claude_mode() -> bool {
+    # Is every tier currently answered by the local Claude Code CLI? Read by the
+    # tool-belt, which routes web search onto the same subscription rather than
+    # demanding a search-provider key the user never needed for anything else.
+    return bool(CLAUDE_TIERS);
+}
+
 def _claude_tier_model(tier: str) -> str {
     # frontier/chat author and compile — the expensive, rare, judgment-heavy work.
     # small/router execute an already-compiled procedure and classify: cheap tier.

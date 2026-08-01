@@ -35,7 +35,7 @@ import subprocess;
 import from urllib.request { Request, urlopen }
 import from urllib.parse { urlparse, quote_plus }
 import from .sigil {
-    awaken, Soul, compile_skill,
+    awaken, Soul, compile_skill, claude_mode,
     compile_stage_label, compile_stage_line, compile_stage_secs
 }
 import from .approvals { check_exec, allowlist_add }
@@ -609,7 +609,26 @@ def _search_firecrawl(query: str, key: str) -> list {
     return [{"title": str(r.get("title", "")), "url": str(r.get("url", "")), "desc": str(r.get("description", ""))} for r in results];
 }
 
+def _claude_search_ready() -> bool {
+    # Only in claude mode. Running the user's subscription for a search they did not
+    # ask to spend it on would be a surprise; in claude mode they have already said
+    # every model call goes through that CLI, and a search is one more of those.
+    if not claude_mode() { return False; }
+    try {
+        import from .sigil_claude_cc { available }
+        return bool(available());
+    } except Exception as e { return False; }
+}
+
+def _search_claude(query: str) -> list {
+    import from .sigil_claude_cc { web_search as cc_search }
+    return list(cc_search(query, 6));
+}
+
 def web_search(query: str) -> str {
+    # Brave and Firecrawl first — a direct search API is faster and cheaper than a
+    # model turn. Claude Code's own WebSearch is the fallback that means claude-mode
+    # users need no search key at all.
     brave = os.getenv("BRAVE_API_KEY") or os.getenv("BRAVE_SEARCH_API_KEY");
     fire = os.getenv("FIRECRAWL_API_KEY");
     if brave {
@@ -626,12 +645,20 @@ def web_search(query: str) -> str {
             return _fmt_results(items) if items else "no results for: " + query;
         } except Exception as e { _trace("web_search", "firecrawl err", False); }
     }
-    _trace("web_search", query + " (no provider key)", False);
-    return ("web_search needs a search-provider API key — keyless engines now block automated queries.\n"
-            "Set one of:\n"
-            "  • Brave      export BRAVE_API_KEY=…       (free tier: https://brave.com/search/api/)\n"
-            "  • Firecrawl  export FIRECRAWL_API_KEY=…   (https://firecrawl.dev)\n"
-            "Without a key I can still fetch a specific URL with web_fetch — including keyless JSON APIs, "
+    if _claude_search_ready() {
+        try {
+            items = _search_claude(query);
+            _trace("web_search", query + " (claude, " + str(len(items)) + ")");
+            return _fmt_results(items) if items else "no results for: " + query;
+        } except Exception as e { _trace("web_search", "claude search: " + str(e)[:120], False); }
+    }
+    _trace("web_search", query + " (no provider)", False);
+    return ("web_search needs a search provider — keyless engines now block automated queries.\n"
+            "Either:\n"
+            "  • Run in claude mode  sigil --claude …      (uses your Claude Code CLI's own web search — no key)\n"
+            "  • Brave               export BRAVE_API_KEY=…       (free tier: https://brave.com/search/api/)\n"
+            "  • Firecrawl           export FIRECRAWL_API_KEY=…   (https://firecrawl.dev)\n"
+            "Without any of those I can still fetch a specific URL with web_fetch — including keyless JSON APIs, "
             "e.g. GitHub: web_fetch('https://api.github.com/repos/<org>/<repo>/pulls').");
 }
 

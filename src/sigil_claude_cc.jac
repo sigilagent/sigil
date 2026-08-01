@@ -115,21 +115,44 @@ def _cwd() -> str:
     return os.environ.get("SIGIL_CLAUDE_CC_CWD") or tempfile.gettempdir()
 
 
-def _timeout() -> float:
+def _env_seconds(name: str):
+    """Seconds from `name`, or None for no limit. Unset / 0 / junk all mean None."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return None
     try:
-        return float(os.environ.get("SIGIL_CLAUDE_CC_TIMEOUT", "600"))
+        v = float(raw)
     except ValueError:
-        return 600.0
+        return None
+    return v if v > 0 else None
 
 
-def _agent_timeout() -> float:
-    # A byLLM slot is one completion; an agent session is dozens of turns with
-    # tool calls in between, so it gets its own, much larger budget. Sharing the
-    # slot timeout silently kills long authoring runs mid-flight.
-    try:
-        return float(os.environ.get("SIGIL_CLAUDE_AGENT_TIMEOUT", "3600"))
-    except ValueError:
-        return 3600.0
+def _timeout():
+    """How long one slot call may take. None — no limit — is the default.
+
+    It used to default to 600s, and that demonstrably killed legitimate work: one
+    spec-loop call on a document-sized SKILL.md ran past ten minutes, was killed
+    with everything it had produced thrown away, and then retried into the same
+    wall twice more. Unlike a shell job there is no partial output to salvage
+    here, so a deadline buys nothing at all — it only decides whether the work is
+    lost. Same trade `ws_exec` stopped making.
+
+    Set SIGIL_CLAUDE_CC_TIMEOUT for an unattended deployment (cron, a server)
+    where a genuinely hung CLI would otherwise block forever with nobody at the
+    keyboard to interrupt it.
+    """
+    return _env_seconds("SIGIL_CLAUDE_CC_TIMEOUT")
+
+
+def _agent_timeout():
+    # An agent session is dozens of turns with tool calls in between — even more
+    # obviously not something to put a stopwatch on. `--max-turns` is the real
+    # bound on it; SIGIL_CLAUDE_AGENT_TIMEOUT adds a wall-clock one if you want it.
+    return _env_seconds("SIGIL_CLAUDE_AGENT_TIMEOUT")
+
+
+def _timed_out(kind: str, secs, var: str) -> "ClaudeCCError":
+    return ClaudeCCError("claude %s timed out after %.0fs (%s)" % (kind, secs or 0, var))
 
 
 def _config_path() -> str:
@@ -356,13 +379,14 @@ def _response(model: str, data: dict):
 
 def _call(model: str, messages: list):
     prompt = _render(messages)
+    secs = _timeout()
     try:
         proc = subprocess.run(
             _argv(model),
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=_timeout(),
+            timeout=secs,
             cwd=_cwd(),
             env=_env(),
         )
@@ -371,7 +395,7 @@ def _call(model: str, messages: list):
             "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
         )
     except subprocess.TimeoutExpired:
-        raise ClaudeCCError("claude timed out after %.0fs (SIGIL_CLAUDE_CC_TIMEOUT)" % _timeout())
+        raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
     return _response(model, _parse(proc.stdout, proc.stderr, proc.returncode))
 
 
@@ -390,11 +414,12 @@ async def _acall(model: str, messages: list):
         raise ClaudeCCError(
             "`%s` not found on PATH — install Claude Code or set SIGIL_CLAUDE_BIN" % _bin()
         )
+    secs = _timeout()
     try:
-        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=_timeout())
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=secs)
     except asyncio.TimeoutError:
         proc.kill()
-        raise ClaudeCCError("claude timed out after %.0fs (SIGIL_CLAUDE_CC_TIMEOUT)" % _timeout())
+        raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
     return _response(model, _parse(out.decode(errors="replace"), err.decode(errors="replace"), proc.returncode))
 
 
@@ -487,23 +512,21 @@ def agent_run(
     alias = _alias(model)
     if alias:
         argv += ["--model", alias]
+    secs = timeout if timeout else _agent_timeout()
     try:
         proc = subprocess.run(
             argv,
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=(timeout or _agent_timeout()),
+            timeout=secs,
             cwd=cwd,
             env=_env(),
         )
     except FileNotFoundError:
         raise ClaudeCCError("`%s` not found on PATH — install Claude Code" % _bin())
     except subprocess.TimeoutExpired:
-        raise ClaudeCCError(
-            "claude agent timed out after %.0fs (SIGIL_CLAUDE_AGENT_TIMEOUT)"
-            % (timeout or _agent_timeout())
-        )
+        raise _timed_out("agent", secs, "SIGIL_CLAUDE_AGENT_TIMEOUT")
     # An agent run that burns its turns is a normal outcome here, not an error:
     # the caller re-gates the artifact and decides. Only a hard failure raises.
     if proc.returncode != 0 and not proc.stdout.strip().startswith("{"):
@@ -512,6 +535,112 @@ def agent_run(
         return json.loads(proc.stdout)
     except Exception as e:
         raise ClaudeCCError("claude agent produced unparseable output (%s)" % e)
+
+
+# ---------------------------------------------------------------------------
+# Web search on the subscription.
+#
+# `web_search` otherwise needs a Brave or Firecrawl key, because keyless engines
+# serve bot challenges rather than results. But in claude mode the machine already
+# has a search-capable agent that the user is already paying for: Claude Code ships
+# a WebSearch tool. So the same seam that answers byLLM slots answers searches —
+# one subscription, still no second key.
+#
+# This is the one place a `claude -p` run is given a tool on purpose. The slot
+# agent above is deliberately toolless; this one has exactly WebSearch and a
+# JSON-only reply contract, and nothing else it could reach for.
+_SEARCH_AGENT = {
+    "sigil-search": {
+        "description": "Runs one web search and returns the results as JSON.",
+        "tools": ["WebSearch"],
+        "prompt": (
+            "You are a search backend, not an assistant. Run WebSearch on the "
+            "message as the query, then reply with ONLY a JSON array of at most "
+            "8 objects, each exactly {\"title\": string, \"url\": string, "
+            "\"desc\": string}. No prose, no explanation, no code fences. If the "
+            "search returns nothing usable, reply with []."
+        ),
+    }
+}
+
+
+def _search_timeout() -> float:
+    try:
+        return float(os.environ.get("SIGIL_CLAUDE_SEARCH_TIMEOUT", "180"))
+    except ValueError:
+        return 180.0
+
+
+def available() -> bool:
+    """True if a `claude` CLI is on PATH to run against."""
+    import shutil
+    return shutil.which(_bin()) is not None
+
+
+def _json_array(text: str) -> list:
+    # The contract asks for a bare array; models still fence it or add a sentence.
+    # Take the outermost [...] rather than trusting the whole reply to parse.
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[-1]
+        if s.rstrip().endswith("```"):
+            s = s.rstrip()[:-3]
+    lo, hi = s.find("["), s.rfind("]")
+    if lo < 0 or hi <= lo:
+        return []
+    try:
+        out = json.loads(s[lo:hi + 1])
+    except Exception:
+        return []
+    return out if isinstance(out, list) else []
+
+
+def web_search(query: str, limit: int = 6) -> list:
+    """Search the web through the local Claude Code CLI's WebSearch tool.
+
+    Returns [{"title", "url", "desc"}]; raises ClaudeCCError if the CLI fails.
+    """
+    argv = [
+        _bin(),
+        "-p",
+        "--output-format", "json",
+        "--agents", json.dumps(_SEARCH_AGENT, sort_keys=True),
+        "--agent", "sigil-search",
+        "--allowedTools", "WebSearch",
+        "--permission-mode", "acceptEdits",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        # more than one: the agent needs a turn to search and a turn to answer,
+        # and a broad query can take a couple of WebSearch calls to satisfy.
+        "--max-turns", "6",
+    ]
+    alias = os.environ.get("SIGIL_CLAUDE_SEARCH_MODEL", "haiku")
+    if alias:
+        argv += ["--model", alias]
+    try:
+        proc = subprocess.run(
+            argv, input=query, capture_output=True, text=True,
+            timeout=_search_timeout(), cwd=_cwd(), env=_env(),
+        )
+    except FileNotFoundError:
+        raise ClaudeCCError("`%s` not found on PATH — install Claude Code" % _bin())
+    except subprocess.TimeoutExpired:
+        raise _timed_out("web search", _search_timeout(), "SIGIL_CLAUDE_SEARCH_TIMEOUT")
+    data = _parse(proc.stdout, proc.stderr, proc.returncode)
+    out = []
+    for r in _json_array(str(data.get("result") or ""))[:max(1, int(limit))]:
+        if not isinstance(r, dict):
+            continue
+        url = str(r.get("url") or "").strip()
+        if not url:
+            continue
+        out.append({
+            "title": str(r.get("title") or "").strip(),
+            "url": url,
+            "desc": str(r.get("desc") or r.get("description") or "").strip(),
+        })
+    return out
 
 
 def install() -> bool:

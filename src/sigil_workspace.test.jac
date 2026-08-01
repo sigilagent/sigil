@@ -159,3 +159,15 @@ test "ws_grep: finds matches with path:line, or reports none" {
     # scoping to a single file works too
     assert "a.py:1:" in ws_grep("import", "a.py");
 }
+
+test "web_search: claude is only reached in claude mode, and the message says so" {
+    # No provider keys and not in claude mode -> the guidance names all three routes,
+    # claude mode first, because it is the one that needs no signup.
+    import os;
+    for k in ["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY", "FIRECRAWL_API_KEY"] { os.environ.pop(k, None); }
+    assert not _claude_search_ready(), "claude search must stay off outside claude mode";
+    out = web_search("anything at all");
+    assert "claude mode" in out, out;
+    assert "BRAVE_API_KEY" in out and "FIRECRAWL_API_KEY" in out, out;
+    assert "web_fetch" in out, out;          # still says what DOES work without a key
+}

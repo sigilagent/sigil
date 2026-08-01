@@ -137,17 +137,21 @@ test "install: claims the claude-cc prefix with litellm, idempotently" {
     }
 }
 
-test "an agent session gets its own timeout, not the one-completion slot budget" {
+test "an agent session takes its budget from its own variable" {
     import os;
-    # A slot is one completion; an authoring session is dozens of turns. Sharing
-    # the slot timeout silently killed long runs mid-flight.
-    assert _agent_timeout() > _timeout();
+    # This used to assert `_agent_timeout() > _timeout()` — a slot is one completion
+    # and an authoring session is dozens of turns, so sharing the slot budget killed
+    # long runs mid-flight. Neither has a default budget any more (see the timeout
+    # tests below), but they still read separate variables, and a bad value must
+    # never crash a run.
     prev = os.environ.get("SIGIL_CLAUDE_AGENT_TIMEOUT", "");
     os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = "120";
     assert _agent_timeout() == 120.0;
+    assert _timeout() is None, "the slot budget must not follow the agent variable";
     os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = "not-a-number";
-    assert _agent_timeout() == 3600.0;      # never crash on a bad env value
-    os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = prev;
+    assert _agent_timeout() is None;        # never crash on a bad env value
+    if prev { os.environ["SIGIL_CLAUDE_AGENT_TIMEOUT"] = prev; }
+    else { os.environ.pop("SIGIL_CLAUDE_AGENT_TIMEOUT", None); }
 }
 
 test "an agent session carries the caller's persona, not a borrowed one" {
@@ -291,4 +295,77 @@ test "the child process gets the subscription, not an approved API key" {
 
     if prev_key { os.environ["ANTHROPIC_API_KEY"] = prev_key; } else { del os.environ["ANTHROPIC_API_KEY"]; }
     os.environ["SIGIL_CLAUDE_ALLOW_API_KEY"] = prev_allow;
+}
+
+# --- web search on the subscription ----------------------------------------
+
+test "_search_agent: exactly WebSearch, and a JSON-only reply contract" {
+    # The slot agent is toolless on purpose; this one is the single place a
+    # `claude -p` run is handed a tool, so pin down which.
+    spec = _SEARCH_AGENT["sigil-search"];
+    assert spec["tools"] == ["WebSearch"], str(spec["tools"]);
+    assert "JSON array" in str(spec["prompt"]);
+    assert "No prose" in str(spec["prompt"]);
+}
+
+test "_json_array: bare, fenced, and prose-wrapped replies all parse" {
+    bare = '[{"title": "A", "url": "https://a.test", "desc": "d"}]';
+    assert len(list(_json_array(bare))) == 1;
+    assert list(_json_array(bare))[0]["url"] == "https://a.test";
+    # a model that fences it anyway
+    fenced = "```json" + chr(10) + bare + chr(10) + "```";
+    assert len(list(_json_array(fenced))) == 1, str(_json_array(fenced));
+    # ...or prefaces it with a sentence
+    assert len(list(_json_array("Here are the results:" + chr(10) + bare))) == 1;
+    # an empty result set is a valid answer, not a failure
+    assert _json_array("[]") == [];
+}
+
+test "_json_array: junk yields no results rather than raising" {
+    assert _json_array("I could not search.") == [];
+    assert _json_array("") == [];
+    assert _json_array("[not json at all}") == [];
+    assert _json_array('{"title": "an object, not an array"}') == [];
+}
+
+test "search argv: WebSearch allowed, more than one turn, no session persistence" {
+    # A search needs a turn to call the tool and a turn to answer — the slot
+    # agent's --max-turns 1 would kill it mid-search.
+    import json;
+    spec = json.dumps(_SEARCH_AGENT, sort_keys=True);
+    assert "WebSearch" in spec;
+    assert "sigil-search" in spec;
+}
+
+# --- timeouts ---------------------------------------------------------------
+
+test "_env_seconds: unset, zero and junk all mean no limit" {
+    import os;
+    os.environ.pop("SIGIL_TEST_SECS", None);
+    assert _env_seconds("SIGIL_TEST_SECS") is None;
+    os.environ["SIGIL_TEST_SECS"] = "";
+    assert _env_seconds("SIGIL_TEST_SECS") is None;
+    os.environ["SIGIL_TEST_SECS"] = "0";
+    assert _env_seconds("SIGIL_TEST_SECS") is None;
+    os.environ["SIGIL_TEST_SECS"] = "not-a-number";
+    assert _env_seconds("SIGIL_TEST_SECS") is None;
+    os.environ["SIGIL_TEST_SECS"] = "90";
+    assert _env_seconds("SIGIL_TEST_SECS") == 90.0;
+    os.environ.pop("SIGIL_TEST_SECS", None);
+}
+
+test "slot and agent calls have NO deadline unless one is asked for" {
+    # A 600s default killed a real spec-loop call on a document-sized SKILL.md and
+    # then retried into the same wall twice. There is no partial output to salvage
+    # from a slot call, so a deadline only decides whether the work is lost.
+    import os;
+    for v in ["SIGIL_CLAUDE_CC_TIMEOUT", "SIGIL_CLAUDE_AGENT_TIMEOUT"] { os.environ.pop(v, None); }
+    assert _timeout() is None;
+    assert _agent_timeout() is None;
+    # ...but an unattended deployment can still ask for one
+    os.environ["SIGIL_CLAUDE_CC_TIMEOUT"] = "45";
+    assert _timeout() == 45.0;
+    os.environ.pop("SIGIL_CLAUDE_CC_TIMEOUT", None);
+    # web search keeps its own ceiling: a stuck search has nothing to salvage either
+    assert _search_timeout() == 180.0;
 }
