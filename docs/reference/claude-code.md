@@ -139,6 +139,23 @@ jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
 The subprocess deliberately runs outside your project, with MCP servers and
 skills disabled, so a repo `CLAUDE.md` can't leak into a compile.
 
+## Watching the model write
+
+Every `claude -p` call runs with `--output-format stream-json
+--include-partial-messages`, so the reply arrives as deltas rather than in one lump.
+Sigil taps those on the way past and prints them: during a compile you watch the AG-IR
+being written, thinking included, under the stage that asked for it.
+
+The stream ends with the same `result` object the non-streaming form returns, so token
+accounting, cost and `sigil_observe` are unchanged by this — the only difference is that
+you can see it happen.
+
+Turn it off with `--quiet`, `SIGIL_VERBOSE=0`, or `sigil configure verbose off`.
+
+Streaming is claude-mode only. It is the provider Sigil owns; making an arbitrary litellm
+provider stream would mean declaring the compiler's byLLM slots `stream=True`, which
+changes every slot's return type. Other providers still get the staged build view.
+
 ## Nothing is killed on a timer
 
 A slot call has no time limit by default, and neither does an agent session.

@@ -151,6 +151,7 @@ node Soul {
     has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
     has workspace: str = "";           # where the tools work by default — relative paths and shell jobs resolve here (default ~/.sigil/workspace)
     has sandbox: str = "off";          # containment for the file/shell tools: off (full host access, default) | jail | docker
+    has verbose: bool = True;          # show the model's output as it is generated (compiles especially)
 }
 
 node Spec {
@@ -249,6 +250,17 @@ def use_claude_code(on: bool = True) {
     # compiler keeps no back-edge to the runtime that imports it).
     CLAUDE_TIERS = on;
     os.environ["SIGIL_CLAUDE_REPAIR"] = "1" if on else "";
+}
+
+def verbose_mode() -> bool {
+    # Show the model's output as it is generated. On by default: a compile is
+    # dozens of model calls and the words being written ARE the artifact, so the
+    # old behaviour — a spinner and then a verdict — hid the only thing worth
+    # watching. SIGIL_VERBOSE overrides the graph for one run; `--quiet` overrides
+    # both, for a pipe.
+    env = (os.getenv("SIGIL_VERBOSE") or "").strip().lower();
+    if env { return env in ["1", "true", "yes", "on"]; }
+    try { return bool(awaken().verbose); } except Exception as e { return True; }
 }
 
 def claude_mode() -> bool {
@@ -905,6 +917,7 @@ def describe_soul() -> dict {
         "chat_model": _effective_tier("chat", soul.chat_model if soul.chat_model else soul.frontier_model),
         "workspace": (soul.workspace if soul.workspace else "~/.sigil/workspace"),
         "sandbox": (soul.sandbox if soul.sandbox else "off"),
+        "verbose": soul.verbose,
         "channels": soul.channels, "prompt_mode": soul.prompt_mode,
         "auto_eval": soul.auto_eval, "eval_threshold": soul.eval_threshold,
         "memories": [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in mems],
@@ -938,6 +951,10 @@ def configure(key: str, value: str) -> str {
     elif key == "embed_model" { soul.embed_model = value; }
     elif key == "chat_model" { soul.chat_model = value; }
     elif key == "workspace" { soul.workspace = value; }
+    elif key == "verbose" {
+        soul.verbose = value.lower() in ["1", "true", "yes", "on"];
+        return "verbose = " + ("on" if soul.verbose else "off");
+    }
     elif key == "sandbox" {
         # Default is `off`: Sigil's job is to drive the tools and agents already on
         # this machine, which containment would cut it off from. `jail`/`docker` are

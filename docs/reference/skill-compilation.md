@@ -69,6 +69,31 @@ sigil replay agent.jac obs.jsonl "task"  # re-run a recorded run's cognition —
 sigil gate ./x.agir                      # run G4, the compile oracle, on its own
 ```
 
+## Watching the compile
+
+`sigil compile` is verbose by default: each stage prints as it opens, and — in claude
+mode, where the provider can stream — the model's output appears under it as it is
+generated, dimmed and indented, thinking included.
+
+```
+  ◐ spec loop
+
+      Let me carefully extract the rules from the skill text…
+      1. Quote must be VERBATIM from the skill
+      2. Read modality from deontic vocabulary only…
+
+  ✔ spec loop        14 rules · 3 rounds · ok  41.2s
+  ◐ workflow spine
+```
+
+A compile is dozens of model calls over many minutes. Before this it showed a stage
+label, a spinner, and then a verdict — hiding the only thing worth watching, since the
+words being written *are* the artifact being built.
+
+`--quiet` (or `SIGIL_VERBOSE=0`, or `sigil configure verbose off`) falls back to the
+compact view, which rewrites one line in place per stage. Verbose mode deliberately does
+not do that: rewriting the current line only works when nothing else is writing to it.
+
 An opt-in alternate front-end swaps the staged LIFT authoring for a Claude Code
 session that writes the AG-IR against the compile oracle, keeping the grounded
 spec loop and the gate battery: `sigil --claude compile ./SKILL.md --agent`. See

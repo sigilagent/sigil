@@ -369,3 +369,64 @@ test "slot and agent calls have NO deadline unless one is asked for" {
     # web search keeps its own ceiling: a stuck search has nothing to salvage either
     assert _search_timeout() == 180.0;
 }
+
+# --- streaming the model's output -------------------------------------------
+
+test "_stream_flags: partial messages, which is what turns a reply into deltas" {
+    f = _stream_flags();
+    assert "stream-json" in f;
+    assert "--include-partial-messages" in f;
+    assert "--verbose" in f, "the CLI requires --verbose alongside stream-json under -p";
+}
+
+test "_feed: text and thinking deltas reach the sink, tagged" {
+    got: list = [];
+    def _sink(kind: str, text: str) { got.append([kind, text]); }
+    set_stream_sink(_sink);
+    assert _feed({"type": "stream_event", "event": {"type": "content_block_delta",
+                  "delta": {"type": "text_delta", "text": "alpha "}}}) is None;
+    assert _feed({"type": "stream_event", "event": {"type": "content_block_delta",
+                  "delta": {"type": "thinking_delta", "thinking": "hmm"}}}) is None;
+    set_stream_sink(None);
+    assert got == [["text", "alpha "], ["thinking", "hmm"]], str(got);
+}
+
+test "_feed: the result event is returned, and it is what _parse consumes" {
+    # The streamed form ends with the SAME object the non-streaming form returns,
+    # which is why _parse and _response did not have to change.
+    res = _feed({"type": "result", "subtype": "success", "is_error": False,
+                 "result": "alpha beta", "total_cost_usd": 0.01,
+                 "usage": {"input_tokens": 3, "output_tokens": 2}});
+    assert res is not None;
+    assert str(res["result"]) == "alpha beta";
+    import json;
+    parsed = _parse(json.dumps(res), "", 0);
+    assert str(parsed["result"]) == "alpha beta";
+}
+
+test "_feed: non-delta traffic is ignored, not mistaken for output" {
+    got: list = [];
+    def _sink(kind: str, text: str) { got.append(kind); }
+    set_stream_sink(_sink);
+    assert _feed({"type": "system", "subtype": "init"}) is None;
+    assert _feed({"type": "rate_limit_event", "rate_limit_info": {}}) is None;
+    assert _feed({"type": "assistant", "message": {"content": [{"type": "text", "text": "whole"}]}}) is None;
+    assert _feed({"type": "stream_event", "event": {"type": "message_stop"}}) is None;
+    set_stream_sink(None);
+    assert got == [], str(got);       # none of that is generated output
+}
+
+test "a broken sink cannot take down the call it is describing" {
+    def _boom(kind: str, text: str) { raise ValueError("renderer exploded"); }
+    set_stream_sink(_boom);
+    # must not raise
+    _feed({"type": "stream_event", "event": {"type": "content_block_delta",
+           "delta": {"type": "text_delta", "text": "x"}}});
+    set_stream_sink(None);
+}
+
+test "no sink is the default: deltas are drained and discarded" {
+    set_stream_sink(None);
+    assert _feed({"type": "stream_event", "event": {"type": "content_block_delta",
+                  "delta": {"type": "text_delta", "text": "quiet"}}}) is None;
+}
