@@ -893,3 +893,66 @@ test "a fixed command keeps every token, not just the executable" {
     assert '_run_cmd(["git", "log", "--oneline", "-10"], [])' in src;
     assert '_run_cmd(["git"], [])' not in src;        # the bare-binary bug
 }
+
+# --- mapping sections written as sequences ----------------------------------
+# The contract asks for `tools: {upcase: {...}}`, but YAML makes a sequence of
+# dicts just as natural and the authoring model reaches for it. It used to die in
+# `_items` with `list indices must be integers or slices, not dict` — a TypeError
+# naming no section, so the repair pass re-authored the same shape three times.
+
+glob TOOLS_AS_SEQ_IR: str = DEF_BODY_IR.replace(
+    "tools:\n  upcase:\n",
+    "tools:\n  - name: upcase\n"
+);
+
+glob TOOLS_AS_NESTED_SEQ_IR: str = DEF_BODY_IR.replace(
+    "tools:\n  upcase:\n    sig:",
+    "tools:\n  - upcase:\n      sig:"
+).replace(
+    "    surface: SENSE\n    doc: \"Uppercase the text.\"\n    body: |\n      def upcase(text):\n          return (text or \"\").upper()",
+    "      surface: SENSE\n      doc: \"Uppercase the text.\"\n      body: |\n        def upcase(text):\n            return (text or \"\").upper()"
+);
+
+glob CARRIES_AS_SEQ_IR: str = DEF_BODY_IR.replace(
+    "  carries:\n    task:\n      type: str\n      role: input\n    loud:\n      type: str\n      produced_by: shout_it",
+    "  carries:\n    - name: task\n      type: str\n      role: input\n    - name: loud\n      type: str\n      produced_by: shout_it"
+);
+
+test "tools written as a sequence of named dicts lower like the mapping form" {
+    assert TOOLS_AS_SEQ_IR != DEF_BODY_IR, "fixture did not substitute";
+    seq = transpile_ir(TOOLS_AS_SEQ_IR, "shout_seq");
+    ref = transpile_ir(DEF_BODY_IR, "shout_seq");
+    assert seq == ref, "sequence form lowered differently than the mapping form";
+}
+
+test "tools written as a sequence of single-entry mappings also lower" {
+    assert TOOLS_AS_NESTED_SEQ_IR != DEF_BODY_IR, "fixture did not substitute";
+    src = transpile_ir(TOOLS_AS_NESTED_SEQ_IR, "shout_nested");
+    assert "def _upcase(text=None):" in src, src[:400];
+    assert "def upcase(text):" in src, src[:400];      # the body still rides along
+}
+
+test "walker carries written as a sequence lower like the mapping form" {
+    assert CARRIES_AS_SEQ_IR != DEF_BODY_IR, "fixture did not substitute";
+    seq = transpile_ir(CARRIES_AS_SEQ_IR, "shout_car");
+    ref = transpile_ir(DEF_BODY_IR, "shout_car");
+    assert seq == ref, "sequence carries lowered differently than the mapping form";
+}
+
+test "a nameless entry in a sequence section says what to fix, not 'list indices'" {
+    bad = DEF_BODY_IR.replace("tools:\n  upcase:\n", "tools:\n  - notaname: upcase\n");
+    assert bad != DEF_BODY_IR, "fixture did not substitute";
+    msg = "";
+    try { transpile_ir(bad, "shout_bad"); }
+    except Exception as e { msg = str(e); }
+    assert "list indices" not in msg, msg;
+    assert "no name" in msg, msg;
+    assert "notaname" in msg, msg;          # names the offending entry's keys
+}
+
+test "a bare string in a sequence section becomes a name with an empty spec" {
+    assert _items(["alpha", "beta"]) == [["alpha", {}], ["beta", {}]];
+    # the mapping form is untouched
+    assert _items({"a": 1, "b": 2}) == [["a", 1], ["b", 2]];
+    assert _items(None) == [];
+}
