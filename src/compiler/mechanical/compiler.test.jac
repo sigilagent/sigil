@@ -956,3 +956,95 @@ test "a bare string in a sequence section becomes a name with an empty spec" {
     assert _items({"a": 1, "b": 2}) == [["a", 1], ["b", 2]];
     assert _items(None) == [];
 }
+
+# --- the common tool library ------------------------------------------------
+# A code-owned node lowers through a tool, and a tool needs a body. Without a
+# standard library the author had to hand-write Python for `read this file`, and
+# when it didn't the node lowered to a marker comment and the gate killed the
+# compile. Binding by name now supplies the body.
+
+glob TOOLIB_IR: str = """---
+name: reader
+description: Read a file and report it.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  read_file:
+    surface: SENSE
+    serves: [load]
+walker:
+  name: ReaderAgent
+  carries:
+    task:
+      type: str
+      role: input
+    body:
+      type: str
+      produced_by: load
+nodes:
+  - id: load
+    type: SENSE
+    owner: code
+    op: read_file
+    reads: [task]
+    writes: [body]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: load, to: done, modality: mandatory}
+""";
+
+test "a tool named after a builtin gets the library's body, no author Python" {
+    src = transpile_ir(TOOLIB_IR, "reader");
+    assert "def _read_file(" in src, src[:400];
+    # the library's implementation rode in, not a marker comment or a stub
+    assert "no such file" in src, "the builtin body was not inlined";
+    assert "os.path.expanduser" in src;
+    assert ("_live_tool(" + chr(34) + "read_file" + chr(34)) not in src, "fell through to the live-tool rung instead";
+}
+
+test "the library's canonical sig wins, so body and wrapper always agree" {
+    # the author wrote no sig at all here; a mismatched one must not strand the
+    # body's parameter names either
+    q2 = chr(34);
+    bad = TOOLIB_IR.replace("  read_file:" + chr(10) + "    surface: SENSE",
+                            "  read_file:" + chr(10) + "    sig: " + q2 + "(wrong_name: str) -> str" + q2
+                            + chr(10) + "    surface: SENSE");
+    src = transpile_ir(bad, "reader2");
+    assert "def _read_file(path=None):" in src, src[:400];
+    assert "wrong_name" not in src, "the author's sig overrode the builtin's body params";
+}
+
+test "an author-written body still wins over the library" {
+    q = chr(34);
+    mine = TOOLIB_IR.replace("  read_file:" + chr(10) + "    surface: SENSE",
+                            "  read_file:" + chr(10) + "    surface: SENSE" + chr(10)
+                            + "    body: |" + chr(10) + "      return " + q + "MY OWN BODY" + q);
+    src = transpile_ir(mine, "reader3");
+    assert "MY OWN BODY" in src;
+    assert "no such file" not in src, "the library overrode an explicit body";
+}
+
+test "the catalogue names every builtin, with its surface" {
+    cat = builtin_catalogue();
+    for n in builtin_names() { assert n in cat, n + " missing from the catalogue"; }
+    assert "read_file" in cat and "run_command" in cat and "grep" in cat;
+    assert "EXACT name" in cat, "must tell the author how to bind one";
+    assert builtin("read_file") is not None;
+    assert builtin("not_a_builtin") is None;
+}
+
+test "every builtin body is self-contained: no sigil import at run time" {
+    # the whole point of inlining. `import sigil_mcp` in the live-tool path has
+    # always raised ModuleNotFoundError in the run subprocess; a library that had
+    # to be imported would reproduce exactly that bug.
+    for n in builtin_names() {
+        b = str(dict(builtin(n))["body"]);
+        assert "import sigil" not in b, n + " imports sigil at run time";
+        assert "from src" not in b, n + " imports the repo at run time";
+        assert "return" in b, n + " never returns anything";
+    }
+}
