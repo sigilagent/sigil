@@ -16,7 +16,9 @@ import tempfile;
 import traceback;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
-import from src.compiler.mechanical.compiler { transpile_ir }
+import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
+import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest }
+import from src.compiler.mechanical.concurrency { extract_concurrency }
 import from .lift_types { CompileVerdict, Modality, RuleKind }
 import from .spec_loop { RuleSet }
 import from .ir_views { NodeType, Owner, StructCov }
@@ -236,6 +238,47 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
         }
     }
     return issues;
+}
+
+# ---------------------------------------------------------------------------
+# G7-ENV — environment binding (SkillRT AOT pass 2, install-time probe)
+# ---------------------------------------------------------------------------
+
+def gate_env_binding(ir_text: str) -> list[str] {
+    # A tool body's import or command that cannot resolve in THIS runtime is a
+    # compile-time fact, not a runtime surprise: unprobed, it becomes a
+    # ModuleNotFoundError that takes the walker down AFTER tokens are spent
+    # (caught live: slack-gif-creator's unshipped `core/` — the OSP zero was a
+    # crash, not a capability gap). Bind it at install time or ship it.
+    issues: list = [];
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return []; }
+    pr = probe_manifest(extract_manifest(ir));
+    for m in list(pr["missing_py"]) {
+        issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(m[2])]) + "] import '" + str(m[0])
+            + "' — not importable in this runtime. Bind it (pip install " + str(m[1])
+            + ") or ship the module with the agent bundle.");
+    }
+    for b in list(pr["missing_bin"]) {
+        issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(b[1])]) + "] shell out to '" + str(b[0])
+            + "' — not on PATH. Install it or embody a python fallback.");
+    }
+    return issues;
+}
+
+# ---------------------------------------------------------------------------
+# G8-PAR — concurrency extraction (SkillRT AOT pass 3, mechanical on the
+# typed dataflow). False parallelism is a hard issue; missed parallelism is
+# an opportunity the caller records (advisory — never blocks a compile).
+# ---------------------------------------------------------------------------
+
+def gate_concurrency(ir_text: str) -> dict {
+    try {
+        ir = _load_ir(ir_text);
+        return extract_concurrency(ir);
+    } except Exception {
+        return {"stages": [], "opportunities": [], "issues": [], "dlp": []};
+    }
 }
 
 # ---------------------------------------------------------------------------

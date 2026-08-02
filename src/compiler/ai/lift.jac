@@ -5,20 +5,25 @@ views (SPAWN fan-out) -> assembled AG-IR -> gate battery -> compiled module.
 
 Gates in play: the spec loop's own grounding/coverage/modality audits, the
 spine validator, the assemble join (reflexive 5d + cross-refs), G1 standalone
-(embody-don't-point), G4 the compile oracle, and G5 STRUCT-COV (per-mandate
-realization on the COMPILED module). Repair is per error class and bounded:
+(embody-don't-point), G4 the compile oracle, G5 STRUCT-COV (per-mandate
+realization on the COMPILED module), and the SkillRT-inspired mechanical
+passes — G7-ENV (dependency manifest probed at install time; missing deps are
+hard issues unless SIGIL_G7_ADVISORY=1) and G8-PAR (concurrency extracted
+from the typed dataflow; false parallelism is hard, missed parallelism rides
+par_report as advisory). Repair is per error class and bounded:
 assemble/G1 issues route back to the owning flows (view repair, one pass); G4
 failures run the scoped repair_ir loop. `ok` is true only when every gate is
 clean — anything less rides the LiftResult, never swallowed.
 """
 
 import from .ir_views { LiftResult }
+import os;
 import time;
 import from .spec_loop { extract_spec, pin_lift_llm }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency }
 import from .repair { repair_compile_loop, pin_repair_llm }
 
 def pin_all_lift_llms(m: any) -> None {
@@ -114,10 +119,37 @@ def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
         for i2 in sc.issues { gate_issues.append(i2); }
     }
 
+    # G7-ENV + G8-PAR (the SkillRT-inspired mechanical passes) on the FINAL IR.
+    # G7 missing deps are install-time facts — hard issues unless the embedder
+    # opts down (SIGIL_G7_ADVISORY=1). G8 false parallelism is always hard;
+    # missed parallelism / DLP are advisory and ride par_report.
+    env_report: list = [];
+    par_report: list = [];
+    if g4.ok {
+        _t5 = time.time();
+        _emit({"stage": "bind", "state": "start"});
+        g7 = gate_env_binding(ir_text);
+        for i3 in g7 {
+            env_report.append(str(i3));
+            if not os.environ.get("SIGIL_G7_ADVISORY", "") { gate_issues.append(str(i3)); }
+        }
+        g8 = gate_concurrency(ir_text);
+        g8_issues = list(g8["issues"]);
+        g8_opps = list(g8["opportunities"]);
+        g8_dlp = list(g8["dlp"]);
+        for i4 in g8_issues { gate_issues.append(str(i4)); }
+        for o4 in g8_opps { par_report.append(str(o4)); }
+        for d4 in g8_dlp { par_report.append(str(d4)); }
+        _emit({"stage": "bind", "state": "done", "secs": time.time() - _t5,
+               "g7_issues": len(g7), "g8_issues": len(g8_issues),
+               "par_opps": len(g8_opps) + len(g8_dlp)});
+    }
+
     ok = g4.ok and (not spec_issues) and (not spine.issues) and (not asm.issues) and (not gate_issues);
     return LiftResult(
         ok=ok, ir_text=ir_text, module_src=g4.module_src, compile_errors=g4.errors,
         spec_issues=spec_issues, spine_issues=spine.issues, assemble_issues=asm.issues,
-        gate_issues=gate_issues, repairs=repairs
+        gate_issues=gate_issues, repairs=repairs,
+        env_report=env_report, par_report=par_report
     );
 }
