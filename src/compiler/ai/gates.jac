@@ -22,6 +22,7 @@ import yaml;
 import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
 import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest }
 import from src.compiler.mechanical.concurrency { extract_concurrency }
+import from src.compiler.mechanical.toolib { builtin }
 import from .lift_types { CompileVerdict, Modality, RuleKind }
 import from .spec_loop { RuleSet }
 import from .ir_views { NodeType, Owner, StructCov }
@@ -51,6 +52,10 @@ def gate_standalone(vb: ViewBundle) -> list[str] {
     issues: list = [];
     for td in vb.kn.tools {
         if (not td.body.strip()) and (not td.command.strip()) {
+            # a builtin-named tool with no body is not a pointer — the
+            # mechanical half splices the standard embodiment at lower time
+            # (toolib.jac); flagging it reported the ladder's own rung as a gap.
+            if builtin(td.name) { continue; }
             issues.append("G1: tool '" + td.name + "' is a prose-pointer (no body, no command) — embody it");
         }
     }

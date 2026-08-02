@@ -18,6 +18,7 @@ the caller (lift) decides. Honest output, never a silent success.
 
 import re;
 import yaml;
+import from src.compiler.mechanical.toolib { builtin }
 import from .lift_types { Modality, RuleKind }
 import from .spec_loop { RuleSet }
 import from .ir_views { NodeType, Owner, AssembleResult }
@@ -80,7 +81,8 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         for sv in td.serves {
             if sv not in node_ids { issues.append("tool '" + td.name + "' serves unknown node '" + sv + "'"); }
         }
-        if (not td.body.strip()) and (not td.command.strip()) {
+        if (not td.body.strip()) and (not td.command.strip()) and (not builtin(td.name)) {
+            # builtin-named tools get their body spliced at lower time (toolib.jac)
             issues.append("tool '" + td.name + "' has neither body nor command (prose-pointer)");
         }
     }
