@@ -45,6 +45,23 @@ glob SLOT_ARITY_CAP: int = 12;
 glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
     "out_path", "output_path", "outpath", "target", "target_path", "dest_path"];
 
+# Tool params that carry the CONTENT being written. A write tool's content param
+# must bind to the node's content carry BY ROLE — the blind positional fallback
+# bound reads[0] (the content) to `path` and left `content` None, so every
+# compiled deliverable was a 0-byte file named after its own content (caught
+# live: algorithmic-art wrote an empty file literally called "Organic Fusion").
+glob CONTENT_PARAMS: list = ["content", "text", "data", "body", "code",
+    "source", "markdown", "html", "payload"];
+
+def _pathish_carry(name: any) -> bool {
+    nl = str(name).lower();
+    if nl in ["task"] { return False; }
+    for sfx in ["_path", "_file", "_filename", "_dest", "_out", "_target"] {
+        if nl.endswith(sfx) { return True; }
+    }
+    return ("path" == nl) or ("filename" == nl);
+}
+
 # Embodiment-ladder rung-3 fallbacks recorded during a transpile: tools with no
 # runnable body that were lowered to the scoped GEN-RAW author-run envelope instead
 # of a silent `pass`. Reset per _transpile; reported by _main (loud, not silent).
@@ -480,15 +497,37 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
     out: list = [];
     i = 0;
     for p in _list(params) {
+        pl = str(p).lower();
         b = _bind_carry_arg(p, carries, types);
-        if (b == "None") and (i < len(rl)) and (rl[i] in ck) { b = "self." + _safe(str(rl[i])); }
+        # ROLE binding for write tools, BEFORE the positional fallback: a
+        # `content` param takes the node's first NON-pathish read carry; a
+        # `path` param takes a pathish read carry if one exists. The blind
+        # positional fallback used to hand reads[0] (the content) to `path`
+        # and leave `content` None — every write became a 0-byte file named
+        # after its own content (caught live: algorithmic-art / brand-guidelines).
+        if (b == "None") and (pl in CONTENT_PARAMS) {
+            for r in rl {
+                if (str(r) in ck) and (not _pathish_carry(r)) { b = "self." + _safe(str(r)); break; }
+            }
+        }
+        if (b == "None") and (pl in PATH_PARAMS) {
+            for r in rl {
+                if (str(r) in ck) and _pathish_carry(r) { b = "self." + _safe(str(r)); break; }
+            }
+        }
+        # positional fallback — but never hand a NON-pathish read (content) to a
+        # path param; that is exactly the misbinding the role pass exists to stop
+        if (b == "None") and (i < len(rl)) and (rl[i] in ck)
+           and (not ((pl in PATH_PARAMS) and (not _pathish_carry(rl[i])))) {
+            b = "self." + _safe(str(rl[i]));
+        }
         # An ACT tool that takes a DESTINATION has no carry to bind it to: the IR
         # names deliverables in prose, not in the dataflow. Binding None hands the
         # tool a null path, which raises inside the generated module. Resolve it
         # the way the no-tool ACT fallback below already does — the filename the
         # task asks for, else a deterministic name off the carry being written.
         # Only for ACT (write_target set); a SENSE path param is an INPUT to read.
-        if (b == "None") and write_target and ("task" in ck) and (str(p).lower() in PATH_PARAMS) {
+        if (b == "None") and write_target and ("task" in ck) and (pl in PATH_PARAMS) {
             b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
         }
         out.append(b);

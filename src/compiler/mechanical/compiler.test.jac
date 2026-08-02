@@ -121,6 +121,62 @@ test "an ACT tool's destination param resolves to a real path, never None" {
     assert "_write_note(self.note, None)" not in src;
 }
 
+# path-FIRST write tool + a single content read: the blind positional fallback
+# used to bind the CONTENT carry to `path` and leave `content` None — every
+# deliverable became a 0-byte file named after its own content (caught live:
+# algorithmic-art wrote an empty file literally called "Organic Fusion").
+glob ACT_PATHFIRST_IR: str = """---
+name: exporter
+description: Export authored philosophy to a file.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  write_file:
+    sig: "(path: str, content: str) -> str"
+    surface: ACT·artifact
+    serves: [export_it]
+    doc: "Write content to path."
+    body: |
+      def write_file(path, content):
+          with open(path, "w") as f:
+              f.write(content or "")
+          return path
+walker:
+  name: ExportAgent
+  carries:
+    task:
+      type: str
+      role: input
+    philosophy_md:
+      type: str
+      role: input
+    exported:
+      type: str
+      produced_by: export_it
+nodes:
+  - id: export_it
+    type: ACT
+    owner: code
+    reads: [philosophy_md]
+    writes: [exported]
+  - id: done
+    type: TERMINAL
+    reads: [exported]
+edges:
+  - {from: export_it, to: done}
+""";
+
+test "a path-first write tool binds content by ROLE, not position" {
+    src = transpile_ir(ACT_PATHFIRST_IR, "exporter");
+    # content param gets the content carry; path param falls to the task-derived name
+    assert "_write_file(_outname(self.task, \"exported.out\"), self.philosophy_md)" in src;
+    # the misbinding this fixes: content carry as path, content None
+    assert "_write_file(self.philosophy_md, None)" not in src;
+}
+
 # `task` is not always the only input the IR declares. A carry marked
 # `role: input` that no node produces can ONLY come from the invocation — bind
 # just `task` and that field keeps its "" default, so the first node reading it
