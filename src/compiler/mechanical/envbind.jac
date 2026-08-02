@@ -62,7 +62,13 @@ glob _SHELL_NOISE: list = [
     # JS/CSS/HTML tokens that surface when a shell-ish body embeds web content
     # (a first token like `const` is never a PATH binary anyone would bind)
     "const", "let", "var", "function", "export", "import", "module",
-    "require", "body", "html", "div", "span", "class", "await", "async"
+    "require", "body", "html", "div", "span", "class", "await", "async",
+    # python keywords/idioms: a python body that fails ast.parse (stray indent,
+    # partial def) gets shell-classified, and its keywords must not surface as
+    # "binaries" (caught live: canvas-design flagged 'def'/'from'/'with')
+    "def", "return", "from", "with", "except", "try", "raise", "pass",
+    "elif", "lambda", "yield", "global", "nonlocal", "del", "assert",
+    "print", "in", "is", "not", "and", "or", "None", "True", "False"
 ];
 
 def _dct(v: any) -> dict {
@@ -130,9 +136,10 @@ def _command_bins(text: str) -> list {
         base = tok.split("/")[-1];
         # a PATH binary is lowercase alnum with dashes/underscores/plus and an
         # optional trailing version digit; dots / uppercase / punctuation mean
-        # we drifted into file names, JS/CSS content, or prose
+        # we drifted into file names, JS/CSS content, or prose. Single letters
+        # are loop variables, never binaries.
         if not re.fullmatch(r"[a-z][a-z0-9_+-]*[0-9]?", base) { continue; }
-        if base in _SHELL_NOISE { continue; }
+        if (len(base) < 2) or (base in _SHELL_NOISE) { continue; }
         hd = re.search(r"<<-?\s*['\"]?(\w+)", s);
         if hd { heredoc = str(hd.group(1)); }
         if base not in out { out.append(base); }

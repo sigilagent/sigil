@@ -41,6 +41,7 @@ import from .spec_loop { extract_spec, RuleSet, Rule }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle, KnowledgeItem, KnowledgeView, ToolDef }
 import from .gates { compile_gate, gate_standalone, gate_struct_cov }
+import from .report { finding, auto_gate, status_of }
 import from .repair { repair_compile_loop, _sigil_bin }
 import from src.sigil_claude_cc { agent_run, AUTHOR }
 import from src.sigil_runtime { repo_root }
@@ -250,8 +251,10 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "author", "state": "done", "secs": time.time() - _t1,
            "lines": len(ir_text.splitlines())});
     if not ir_text {
-        return LiftResult(ok=False, spec_issues=spec_issues,
-                          gate_issues=["author: the agent produced no AG-IR"], repairs=notes);
+        return LiftResult(ok=False, status="failed", spec_issues=spec_issues,
+                          gate_issues=["author: the agent produced no AG-IR"],
+                          findings=[finding("compile", "author: the agent produced no AG-IR")],
+                          repairs=notes);
     }
 
     # Same oracle, same bounded repair loop the gated front-end uses — but with
@@ -280,9 +283,13 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t2,
            "g4": g4.ok, "repairs": len(ro.attempts)});
 
+    findings: list = [finding(auto_gate(str(g), "G1"), str(g)) for g in gate_issues]
+                   + [finding("spec", str(s)) for s in spec_issues];
+    status = status_of(g4.ok, findings, [], notes);
     ok = g4.ok and (not spec_issues) and (not gate_issues);
     return LiftResult(
         ok=ok, ir_text=ir_text, module_src=g4.module_src, compile_errors=g4.errors,
-        spec_issues=spec_issues, gate_issues=gate_issues, repairs=notes
+        spec_issues=spec_issues, gate_issues=gate_issues, repairs=notes,
+        status=status, findings=findings
     );
 }

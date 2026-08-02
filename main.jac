@@ -458,13 +458,14 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--agent]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--agent] [--strict]");
         } else {
-            eject = False; eject_path = ""; agent_author = False;
+            eject = False; eject_path = ""; agent_author = False; strict = False;
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
                 if flg == "--agent" { agent_author = True; }
+                elif flg == "--strict" { strict = True; }
                 elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
@@ -477,19 +478,27 @@ with entry:__main__ {
             if _tty { print(chr(10) + "  Compiling " + path); }
             if _tty { _install_stream_view(); }
             r = compile_skill(open(path).read(), eject, eject_path,
-                              _compile_ev if _tty else None, agent_author);
+                              _compile_ev if _tty else None, agent_author,
+                              os.path.dirname(os.path.abspath(path)), strict);
             if _tty { _vb_close(); print(""); }
             if not r["ok"] {
-                print("compile FAILED for '" + str(r["signature"]) + "':");
-                for iss in list(r["issues"] or []) { print("  - " + str(iss)); }
-                if r["compile_errors"] { print("  compile: " + str(r["compile_errors"])[:400]); }
-                for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+                # the fix-forward exit note: what failed, what the ladder
+                # tried, and the next concrete step — never a bare issue dump.
+                print("compile FAILED for '" + str(r["signature"]) + "'  [status: " + str(r.get("status", "failed")) + "]");
+                print(str(r.get("explain") or ""));
             } else {
-                print("compiled skill: " + str(r["signature"]) + "  [compiled-skill]  -> " + str(r["module"]));
+                print("compiled skill: " + str(r["signature"]) + "  [status: " + str(r.get("status", "")) + "]  -> " + str(r["module"]));
+                for fx in list(r.get("fixes") or []) { print("  (fix) " + str(fx)); }
                 for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
-                # SkillRT-inspired advisories: G7 env findings (advisory mode) +
-                # G8 parallelism opportunities — informational, never a failure
-                for ev in list(r.get("env") or []) { print("  (env) " + str(ev)); }
+                # residual findings — the agent runs; these are its known edges,
+                # each naming its own fix. errors first.
+                fnds = list(r.get("findings") or []);
+                for f in fnds {
+                    if str(f.get("severity")) == "error" { print("  [error] " + str(f.get("message"))); }
+                }
+                for f in fnds {
+                    if str(f.get("severity")) != "error" { print("  [" + str(f.get("severity")) + "] " + str(f.get("message"))); }
+                }
                 for pv in list(r.get("par") or []) { print("  (par) " + str(pv)); }
                 if r["eject"] {
                     print("ejected runnable: " + str(r["eject"]));

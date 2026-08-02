@@ -152,7 +152,7 @@ node Soul {
     has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
     has workspace: str = "";           # where the tools work by default — relative paths and shell jobs resolve here (default ~/.sigil/workspace)
     has sandbox: str = "off";          # containment for the file/shell tools: off (full host access, default) | jail | docker
-    has verbose: bool = True;          # show the model's output as it is generated (compiles especially)
+    has verbose: bool = False;         # stream the model's raw output as it is generated (opt-in debugging view)
 }
 
 node Spec {
@@ -254,14 +254,14 @@ def use_claude_code(on: bool = True) {
 }
 
 def verbose_mode() -> bool {
-    # Show the model's output as it is generated. On by default: a compile is
-    # dozens of model calls and the words being written ARE the artifact, so the
-    # old behaviour — a spinner and then a verdict — hid the only thing worth
-    # watching. SIGIL_VERBOSE overrides the graph for one run; `--quiet` overrides
-    # both, for a pipe.
+    # Show the model's output as it is generated. OFF by default: the stage
+    # lines (spec loop / spine / flows / gates, with their one-line summaries)
+    # are the compile's progress story; the raw token stream is a debugging
+    # view. Opt in per run with SIGIL_VERBOSE=1 or persistently with
+    # `configure verbose on`; `--quiet` overrides both, for a pipe.
     env = (os.getenv("SIGIL_VERBOSE") or "").strip().lower();
     if env { return env in ["1", "true", "yes", "on"]; }
-    try { return bool(awaken().verbose); } except Exception as e { return True; }
+    try { return bool(awaken().verbose); } except Exception as e { return False; }
 }
 
 def claude_mode() -> bool {
@@ -645,21 +645,23 @@ def register_skill(source: str, kind: str) -> dict {
         path = install_osp(source, sig, WORKDIR);
         tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
     } elif os.environ.get("SIGIL_AI_LIFT", "") not in ["", "0", "false"] {
-        # source is SKILL.md text — the AI compiler runs the full gated LIFT:
-        # spec convergence loop -> spine -> annotator flows -> assemble ->
-        # G1/G4/G5 gates + bounded repair. Opt-in via SIGIL_AI_LIFT=1; a gate
-        # failure raises (fail loud) rather than persisting an unfaithful skill.
+        # source is SKILL.md text — the AI compiler runs the full fix-forward
+        # LIFT: spec convergence loop -> spine -> annotator flows -> assemble ->
+        # autofix chain + gates + bounded repair. Opt-in via SIGIL_AI_LIFT=1.
+        # Only `failed` (no runnable module) raises — and it raises the explain
+        # note, not a bare error. A degraded lift persists WITH its findings:
+        # a runnable agent plus a report beats no agent. SIGIL_STRICT=1
+        # restores fail-on-any-finding.
         # LAZY import: a top-level import of the ai package changes the module
         # topology under multi-file `jac test` and trips the slot-__globals__
         # runtime bug (see ci.yml) — load it only when the flag path runs.
         import from .compiler.ai.lift { lift, pin_all_lift_llms }
+        import from .compiler.ai.report { explain, strict_mode }
         pin_all_lift_llms(frontier);
         sig = agir_name(source);
         lr = lift(source, sig);
-        if not lr.ok {
-            gaps = "; ".join(lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues)[:600];
-            ce = (" | compile: " + lr.compile_errors[:300]) if lr.compile_errors else "";
-            raise RuntimeError("AI lift failed for '" + sig + "': " + gaps + ce);
+        if (lr.status == "failed") or (strict_mode() and not lr.ok) {
+            raise RuntimeError("AI lift " + lr.status + " for '" + sig + "':\n" + explain(lr));
         }
         path = write_module(lr.module_src, sig, 1, WORKDIR);
         tg = _persist(reg, sig, "lifted from SKILL.md (AI compiler)", lr.ir_text, path, "lifted-skill-ai", 1);
@@ -684,7 +686,8 @@ def register_skill(source: str, kind: str) -> dict {
 glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
                             "flows": "annotator flows", "assemble": "assemble",
                             "gates": "gates", "repair": "repair",
-                            "author": "claude authoring", "bind": "env/par bind"};
+                            "author": "claude authoring", "autofix": "mechanical fixes",
+                            "bind": "env/par bind"};
 
 def compile_stage_label(stage: str) -> str {
     return str(_STAGE_LABELS.get(stage, stage));
@@ -706,6 +709,9 @@ def compile_stage_line(ev: dict) -> str {
         return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
     } elif s == "gates" {
         return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
+    } elif s == "autofix" {
+        n_fx = int(ev.get("fixes", 0));
+        return (str(n_fx) + " fix(es) applied") if n_fx else "nothing to fix";
     } elif s == "bind" {
         # the SkillRT-inspired mechanical passes: G7 env binding + G8 concurrency
         g7 = int(ev.get("g7_issues", 0));
@@ -725,15 +731,20 @@ def compile_stage_secs(ev: dict) -> str {
 }
 
 def compile_skill(source: str, eject: bool = False, eject_path: str = "",
-                  progress: any = None, agent: bool = False) -> dict {
-    # `sigil compile SKILL.md [-e [out.jac]]` — the gated AI lift, always:
-    # spec loop -> spine -> flows -> assemble -> G1/G4/G5 + bounded repair.
-    # ok=False returns the issues (the CLI prints them; nothing is persisted).
-    # On success the skill is SET IN THE TREE (a TaskGraph on the Registry) and,
-    # with eject, ALSO written out as one self-contained runnable .jac program.
+                  progress: any = None, agent: bool = False,
+                  skill_dir: str = "", strict: bool = False) -> dict {
+    # `sigil compile SKILL.md [-e [out.jac]]` — the fix-forward AI lift:
+    # spec loop -> spine -> flows -> assemble -> autofix chain + gates +
+    # bounded repair. Only `failed` (no runnable module) refuses to persist —
+    # the CLI prints the explain note. Anything runnable is SET IN THE TREE
+    # (a TaskGraph on the Registry) with its findings riding the result;
+    # `--strict` (or SIGIL_STRICT=1) restores fail-on-any-finding. skill_dir
+    # lets the autofixes embody sibling files ("See FORMS.md") at compile time.
+    # With eject, the module is ALSO written out as one runnable .jac program.
     # LAZY imports — see the register_skill note on the jac-test topology bug.
     import from .compiler.ai.lift { lift, pin_all_lift_llms, set_lift_progress }
     import from .compiler.ai.eject { eject_program, write_program }
+    import from .compiler.ai.report { explain, strict_mode }
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
     pin_all_lift_llms(frontier);
@@ -747,13 +758,14 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
         import from .compiler.ai.author_agent { agent_lift }
         lr = agent_lift(source, sig, progress);
     } else {
-        lr = lift(source, sig);
+        lr = lift(source, sig, skill_dir=skill_dir);
     }
     issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
-    if not lr.ok {
-        return {"ok": False, "signature": sig, "issues": issues,
+    if (lr.status == "failed") or ((strict or strict_mode()) and not lr.ok) {
+        return {"ok": False, "status": lr.status, "signature": sig, "issues": issues,
+                "findings": lr.findings, "fixes": lr.fixes,
                 "compile_errors": lr.compile_errors, "repairs": lr.repairs,
-                "env": lr.env_report, "par": lr.par_report};
+                "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
     }
     path = write_module(lr.module_src, sig, 1, WORKDIR);
     desc = skill_description(source);
@@ -764,9 +776,10 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
         ejected = write_program(eject_program(lr.module_src, sig), ep);
     }
-    return {"ok": True, "signature": tg.signature, "module": tg.module,
-            "issues": issues, "repairs": lr.repairs, "eject": ejected,
-            "env": lr.env_report, "par": lr.par_report};
+    return {"ok": True, "status": lr.status, "signature": tg.signature, "module": tg.module,
+            "issues": issues, "findings": lr.findings, "fixes": lr.fixes,
+            "repairs": lr.repairs, "eject": ejected,
+            "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
 }
 
 def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
