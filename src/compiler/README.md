@@ -16,13 +16,25 @@ src/compiler/
     flows.jac          Stage 3: IO/Context/Knowledge/HIL flows — flow/wait SPAWN fan-out
     assemble.jac       Stage 4: the rule-id join + reflexive 5d -> AG-IR YAML
     gates.jac          G1 standalone · G4 compile oracle · G5 STRUCT-COV
+    autofix.jac        mechanical fix-forward: lanes / pointer inlining / hollow re-own
     repair.jac         per-error-class repair (view repair + scoped repair_ir loop)
-    lift.jac           the public entrypoint: lift(skill, name) -> LiftResult
+    report.jac         severity classification · status (failed|degraded|fixed|clean) · explain
+    lift.jac           the public entrypoint: lift(skill, name, skill_dir) -> LiftResult
 ```
 
 Opt-in wiring: `SIGIL_AI_LIFT=1 sigil register-skill ./SKILL.md` routes the md
-path through the gated LIFT (a gate failure raises — fail loud — rather than
-persisting an unfaithful skill); unset, the legacy one-shot `lift_skill` runs.
+path through the fix-forward LIFT; unset, the legacy one-shot `lift_skill` runs.
+
+**The raise contract is fix-forward.** The gates DIAGNOSE; they do not veto. A
+lift fails only when no runnable module exists (G4 rejects the IR after the
+whole repair ladder) — and a failure raises the `explain()` note (what failed,
+what the ladder tried, the next concrete step), never a bare error. Everything
+runnable persists: mechanical autofixes land first (each re-gated through G4),
+scoped model repair second, faithful degradation third, and whatever remains
+rides `LiftResult.findings` as typed `{gate, severity, message}` entries —
+errors are runtime crashes / violated mandates (G3/G6/G8/G9), warnings are
+faithfulness audits (G1/G5/G7/spec/spine/assemble). `--strict` / `SIGIL_STRICT=1`
+restores fail-on-any-finding for CI.
 
 The first-class entry is the CLI:
 
