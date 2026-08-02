@@ -194,3 +194,202 @@ test "_diagnostic stays within its budget and says what it dropped" {
     assert len(d) < 1400;
     assert "more error(s)" in d;
 }
+
+# ---------------------------------------------------------------------------
+# G9-TY — the fault this gate exists for was caught LIVE: a fresh compile
+# shipped a model slot typed `-> str` into a tool body demanding `list`,
+# green through every gate, TypeError at runtime.
+# ---------------------------------------------------------------------------
+
+glob TY_CONFLICT_IR: str = """---
+name: ty-conflict
+description: model slot typed str feeding a tool that demands list[str].
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: TyAgent
+  carries:
+    task:
+      type: str
+      role: input
+    proposed:
+      type: str
+      produced_by: decide
+    out_path:
+      type: str
+      produced_by: emit
+nodes:
+  - id: decide
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [proposed]
+    doc: "Propose one clean name per input item."
+  - id: emit
+    type: ACT
+    owner: code
+    reads: [proposed]
+    writes: [out_path]
+    doc: "Write the proposed names to out.txt."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: decide, to: emit, modality: mandatory}
+  - {from: emit, to: done, modality: mandatory}
+tools:
+  write_out:
+    sig: "(proposed) -> path"
+    serves: [emit]
+    body: |
+      def write_out(proposed):
+          if not isinstance(proposed, list) or not all(isinstance(h, str) for h in proposed):
+              raise TypeError('proposed must be a list of strings')
+          with open('out.txt', 'w') as f:
+              f.write(','.join(proposed))
+          return 'out.txt'
+""";
+
+test "G9: a str carry feeding a tool that guard-raises on non-list is a conflict" {
+    issues = gate_type_unification(TY_CONFLICT_IR);
+    assert len([i for i in issues if "'proposed'" in i and "list[str]" in i]) == 1, issues;
+}
+
+test "G9 autofix adopts the consumer's demand and the patched IR passes clean" {
+    fx = autofix_carry_types(TY_CONFLICT_IR);
+    assert len(list(fx["fixes"])) == 1, fx["fixes"];
+    assert "list[str]" in str(fx["fixes"][0]);
+    fixed = str(fx["ir_text"]);
+    assert gate_type_unification(fixed) == [];
+    # the oracle stays the authority: the patched IR must still lower + check,
+    # and the slot's return schema now derives from the unified carry type.
+    v = compile_gate(fixed, "ty_conflict_fixed");
+    assert v.ok, v.errors;
+    assert "-> list[str] by llm" in v.module_src;
+}
+
+test "G9: an annotated tool param is a demand too" {
+    ir = TY_CONFLICT_IR.replace(
+        "      def write_out(proposed):\n          if not isinstance(proposed, list) or not all(isinstance(h, str) for h in proposed):\n              raise TypeError('proposed must be a list of strings')\n",
+        "      def write_out(proposed: list):\n");
+    issues = gate_type_unification(ir);
+    assert len([i for i in issues if "'proposed'" in i]) == 1, issues;
+}
+
+test "G9: a coercion branch is NOT read as a demand" {
+    # `if isinstance(x, str): ...` ACCEPTS str — only a guard that raises (or
+    # an assert) states a contract.
+    ir = TY_CONFLICT_IR.replace(
+        "          if not isinstance(proposed, list) or not all(isinstance(h, str) for h in proposed):\n              raise TypeError('proposed must be a list of strings')\n",
+        "          if isinstance(proposed, str):\n              proposed = [proposed]\n");
+    assert gate_type_unification(ir) == [];
+    assert autofix_carry_types(ir)["fixes"] == [];
+}
+
+glob TY_UNTYPED_IR: str = """---
+name: ty-untyped
+description: a model-written carry crosses into embodied code untyped.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: UntypedAgent
+  carries:
+    task:
+      type: str
+      role: input
+    plan:
+      type: any
+      produced_by: draft
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [plan]
+    doc: "Draft the plan."
+  - id: apply
+    type: CODE
+    owner: code
+    reads: [plan]
+    doc: "Apply the plan."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: draft, to: apply, modality: mandatory}
+  - {from: apply, to: done, modality: mandatory}
+tools:
+  apply_plan:
+    sig: "(plan) -> str"
+    serves: [apply]
+    body: |
+      def apply_plan(plan):
+          return str(plan)
+""";
+
+test "G9: an untyped model->code carry with no stated demand is flagged" {
+    issues = gate_type_unification(TY_UNTYPED_IR);
+    assert len([i for i in issues if "'plan'" in i and "untyped" in i]) == 1, issues;
+    # nothing states the true type, so there is no mechanical fix — only a report
+    assert autofix_carry_types(TY_UNTYPED_IR)["fixes"] == [];
+}
+
+glob TY_PROVENANCE_IR: str = """---
+name: ty-provenance
+description: an embodied ACT writing from a carry nothing produces.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: ProvAgent
+  carries:
+    task:
+      type: str
+      role: input
+    content:
+      type: str
+nodes:
+  - id: emit
+    type: ACT
+    owner: code
+    reads: [content]
+    writes: [out_path]
+    doc: "Write content to disk."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: emit, to: done, modality: mandatory}
+tools:
+  write_it:
+    sig: "(content) -> path"
+    serves: [emit]
+    body: |
+      def write_it(content):
+          with open('out.txt', 'w') as f:
+              f.write(str(content))
+          return 'out.txt'
+""";
+
+test "G9: an embodied ACT reading a producer-less carry is a disconnected artifact" {
+    # Caught live: a relearned agent ran green to TERMINAL while its write node
+    # consumed a carry nothing produced — the 'artifact' was the carry's seed
+    # (the task string) echoed into the input file.
+    issues = gate_type_unification(TY_PROVENANCE_IR);
+    assert len([i for i in issues if "'emit'" in i and "'content'" in i and "no node produces" in i.lower()]) == 1, issues;
+
+    # the same carry declared role: input is a legitimate boundary — clean.
+    ir2 = TY_PROVENANCE_IR.replace("    content:\n      type: str\n", "    content:\n      type: str\n      role: input\n");
+    assert gate_type_unification(ir2) == [];
+}
+
+test "G9 + autofix never raise on garbage input" {
+    assert gate_type_unification("::: not yaml {{{") == [];
+    fx = autofix_carry_types("::: not yaml {{{");
+    assert fx["fixes"] == [];
+}

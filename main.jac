@@ -507,26 +507,32 @@ with entry:__main__ {
         import from src.sigil_mcp_serve { serve_stdio }
         sys.exit(serve_stdio(library, run_task, solve_task));
     } elif cmd == "gate" {
-        # gate <file.agir> [name] — run G4, the compile oracle, over one AG-IR and
-        # exit nonzero if it fails. This is the compiler's own ground truth exposed
-        # as a command, so anything outside the process (a repair agent, a CI step,
-        # a human iterating on a hand-written IR) can check an IR the same way the
+        # gate <file.agir> [name] — run G4 (the compile oracle) + G9-TY (typed-
+        # dataflow unification) over one AG-IR and exit nonzero if either fails.
+        # This is the compiler's own ground truth exposed as a command, so
+        # anything outside the process (a repair agent, a CI step, a human
+        # iterating on a hand-written IR) can check an IR the same way the
         # pipeline does.
         irp = _arg(argv, 1);
         if not irp {
             print("usage: gate <file.agir> [name]");
         } else {
-            import from src.compiler.ai.gates { compile_gate }
+            import from src.compiler.ai.gates { compile_gate, gate_type_unification }
             with open(irp) as f { ir_src = f.read(); }
             gname = _arg(argv, 2) if len(argv) > 2 else os.path.splitext(os.path.basename(irp))[0];
             gv = compile_gate(ir_src, gname);
-            if gv.ok {
-                print("gate: ok  (" + str(len(gv.module_src.splitlines())) + " lines lowered)");
-            } else {
+            if not gv.ok {
                 print("gate: FAILED");
                 print(gv.errors);
                 sys.exit(1);
             }
+            g9 = gate_type_unification(ir_src);
+            if g9 {
+                print("gate: FAILED  (G4 ok, G9-TY found " + str(len(g9)) + " issue(s))");
+                for i9 in g9 { print("  - " + str(i9)); }
+                sys.exit(1);
+            }
+            print("gate: ok  (" + str(len(gv.module_src.splitlines())) + " lines lowered)");
         }
     } elif cmd == "replay" {
         # replay <agent.jac> <observability.jsonl> "<task>" [workdir] — re-run a
@@ -721,7 +727,7 @@ with entry:__main__ {
         print("  relearn <sig> [hint]                recompile a skill fresh with the frontier model");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
         print("  replay <agent.jac> <obs.jsonl> \"<task>\"   re-run a recorded run's cognition through a module (no model cost)");
-        print("  gate <file.agir> [name]             run G4, the compile oracle, on one AG-IR (exits nonzero if it fails)");
+        print("  gate <file.agir> [name]             run G4 (compile oracle) + G9-TY (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
         print("claude code (no API key — uses your claude CLI)");
         print("  --claude                            global flag: run EVERY model tier on your Claude Code CLI");

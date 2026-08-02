@@ -8,9 +8,11 @@ spine validator, the assemble join (reflexive 5d + cross-refs), G1 standalone
 (embody-don't-point), G4 the compile oracle, G5 STRUCT-COV (per-mandate
 realization on the COMPILED module), and the SkillRT-inspired mechanical
 passes — G7-ENV (dependency manifest probed at install time; missing deps are
-hard issues unless SIGIL_G7_ADVISORY=1) and G8-PAR (concurrency extracted
+hard issues unless SIGIL_G7_ADVISORY=1), G8-PAR (concurrency extracted
 from the typed dataflow; false parallelism is hard, missed parallelism rides
-par_report as advisory). Repair is per error class and bounded:
+par_report as advisory), and G9-TY (carry/slot/consumer type unification on
+the final IR; fixable mismatches are patched mechanically by
+autofix_carry_types and re-gated through G4). Repair is per error class and bounded:
 assemble/G1 issues route back to the owning flows (view repair, one pass); G4
 failures run the scoped repair_ir loop. `ok` is true only when every gate is
 clean — anything less rides the LiftResult, never swallowed.
@@ -23,7 +25,7 @@ import from .spec_loop { extract_spec, pin_lift_llm }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, autofix_carry_types }
 import from .repair { repair_compile_loop, pin_repair_llm }
 
 def pin_all_lift_llms(m: any) -> None {
@@ -112,8 +114,29 @@ def lift(skill: str, name: str, parallel: bool = True) -> LiftResult {
     g4 = ro.verdict;
     ir_text = ro.ir_text;
 
-    # G5 STRUCT-COV on the compiled module: how is each mandate realized?
+    # G9-TY — typed-dataflow unification, mechanical, BEFORE G5 reads the
+    # module. Fixable mismatches (a consumer tool demands a type the carry
+    # table contradicts or omits) are patched by autofix_carry_types — pure
+    # code, no model — then re-gated through G4: the oracle stays the
+    # authority, a patch it rejects is dropped. Residual G9 findings are
+    # hard issues (they are runtime crashes with a green compile).
     gate_issues: list = list(g1);
+    if g4.ok {
+        fx = autofix_carry_types(ir_text);
+        if fx["fixes"] {
+            v9 = compile_gate(str(fx["ir_text"]), name);
+            if v9.ok {
+                ir_text = str(fx["ir_text"]);
+                g4 = v9;
+                for f9 in list(fx["fixes"]) { repairs.append("G9 autofix: " + str(f9)); }
+            } else {
+                repairs.append("G9 autofix proposed " + str(len(fx["fixes"])) + " type fix(es) but the patched IR failed G4 — kept the original");
+            }
+        }
+        for i9 in gate_type_unification(ir_text) { gate_issues.append(str(i9)); }
+    }
+
+    # G5 STRUCT-COV on the compiled module: how is each mandate realized?
     if g4.ok {
         sc = gate_struct_cov(sr.spec, spine.view, g4.module_src);
         for i2 in sc.issues { gate_issues.append(i2); }
