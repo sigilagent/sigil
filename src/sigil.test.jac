@@ -40,20 +40,20 @@ test "describe_soul reports the EFFECTIVE tiers the chat banner shows" {
     assert describe_soul()["chat_model"] == plain["chat_model"];
 }
 
-test "verbose: on by default, togglable, and SIGIL_VERBOSE wins for one run" {
+test "verbose: off by default, togglable, and SIGIL_VERBOSE wins for one run" {
     import os;
     os.environ.pop("SIGIL_VERBOSE", None);
-    assert describe_soul()["verbose"], "verbose must default ON";
-    assert verbose_mode();
-    assert "off" in configure("verbose", "off");
-    assert not describe_soul()["verbose"];
+    assert not describe_soul()["verbose"], "verbose must default OFF (raw token stream is a debugging view)";
     assert not verbose_mode();
-    # the env var overrides the graph, for one run
-    os.environ["SIGIL_VERBOSE"] = "1";
+    assert "on" in configure("verbose", "on");
+    assert describe_soul()["verbose"];
     assert verbose_mode();
+    # the env var overrides the graph, for one run
     os.environ["SIGIL_VERBOSE"] = "0";
     assert not verbose_mode();
-    os.environ.pop("SIGIL_VERBOSE", None);
-    assert "on" in configure("verbose", "on");
+    os.environ["SIGIL_VERBOSE"] = "1";
     assert verbose_mode();
+    os.environ.pop("SIGIL_VERBOSE", None);
+    assert "off" in configure("verbose", "off");
+    assert not verbose_mode();
 }

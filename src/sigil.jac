@@ -152,7 +152,7 @@ node Soul {
     has chat_model: str = "";          # user-facing chat-mode model tier; falls back to frontier_model (the strong one)
     has workspace: str = "";           # where the tools work by default — relative paths and shell jobs resolve here (default ~/.sigil/workspace)
     has sandbox: str = "off";          # containment for the file/shell tools: off (full host access, default) | jail | docker
-    has verbose: bool = True;          # show the model's output as it is generated (compiles especially)
+    has verbose: bool = False;         # stream the model's raw output as it is generated (opt-in debugging view)
 }
 
 node Spec {
@@ -254,14 +254,14 @@ def use_claude_code(on: bool = True) {
 }
 
 def verbose_mode() -> bool {
-    # Show the model's output as it is generated. On by default: a compile is
-    # dozens of model calls and the words being written ARE the artifact, so the
-    # old behaviour — a spinner and then a verdict — hid the only thing worth
-    # watching. SIGIL_VERBOSE overrides the graph for one run; `--quiet` overrides
-    # both, for a pipe.
+    # Show the model's output as it is generated. OFF by default: the stage
+    # lines (spec loop / spine / flows / gates, with their one-line summaries)
+    # are the compile's progress story; the raw token stream is a debugging
+    # view. Opt in per run with SIGIL_VERBOSE=1 or persistently with
+    # `configure verbose on`; `--quiet` overrides both, for a pipe.
     env = (os.getenv("SIGIL_VERBOSE") or "").strip().lower();
     if env { return env in ["1", "true", "yes", "on"]; }
-    try { return bool(awaken().verbose); } except Exception as e { return True; }
+    try { return bool(awaken().verbose); } except Exception as e { return False; }
 }
 
 def claude_mode() -> bool {
