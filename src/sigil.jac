@@ -684,7 +684,7 @@ def register_skill(source: str, kind: str) -> dict {
 glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
                             "flows": "annotator flows", "assemble": "assemble",
                             "gates": "gates", "repair": "repair",
-                            "author": "claude authoring"};
+                            "author": "claude authoring", "bind": "env/par bind"};
 
 def compile_stage_label(stage: str) -> str {
     return str(_STAGE_LABELS.get(stage, stage));
@@ -706,6 +706,15 @@ def compile_stage_line(ev: dict) -> str {
         return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
     } elif s == "gates" {
         return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
+    } elif s == "bind" {
+        # the SkillRT-inspired mechanical passes: G7 env binding + G8 concurrency
+        g7 = int(ev.get("g7_issues", 0));
+        g8 = int(ev.get("g8_issues", 0));
+        po = int(ev.get("par_opps", 0));
+        parts: list = ["env ✓" if not g7 else ("env: " + str(g7) + " unbound")];
+        if g8 { parts.append("par: " + str(g8) + " false-parallel"); }
+        if po { parts.append(str(po) + " par opportunities"); }
+        return " · ".join(parts);
     }
     return "";
 }
@@ -743,7 +752,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
     if not lr.ok {
         return {"ok": False, "signature": sig, "issues": issues,
-                "compile_errors": lr.compile_errors, "repairs": lr.repairs};
+                "compile_errors": lr.compile_errors, "repairs": lr.repairs,
+                "env": lr.env_report, "par": lr.par_report};
     }
     path = write_module(lr.module_src, sig, 1, WORKDIR);
     desc = skill_description(source);
@@ -755,7 +765,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
         ejected = write_program(eject_program(lr.module_src, sig), ep);
     }
     return {"ok": True, "signature": tg.signature, "module": tg.module,
-            "issues": issues, "repairs": lr.repairs, "eject": ejected};
+            "issues": issues, "repairs": lr.repairs, "eject": ejected,
+            "env": lr.env_report, "par": lr.par_report};
 }
 
 def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
