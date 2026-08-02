@@ -288,7 +288,8 @@ def _jac_type(tstr: any, types: any) -> list {
     mapping: dict = {
         "str": ["str", "\"\""], "path": ["str", "\"\""],
         "int": ["int", "0"], "float": ["float", "0.0"],
-        "bool": ["bool", "False"], "any": ["any", "None"], "dict": ["dict", "{}"]
+        "bool": ["bool", "False"], "any": ["any", "None"],
+        "dict": ["dict", "{}"], "list": ["list", "[]"]
     };
     if t in mapping { return list(mapping[t]); }
     return ["any", "None"];
@@ -1442,7 +1443,9 @@ def _emit_walker(ir: any) -> list {
                 # A list-returning slot is where byLLM's JSON leakage shows up as a
                 # phantom element ("" or '"},{"'), which every downstream count check
                 # then reads as a real item. Strip contentless entries at the source.
-                if str(tt).startswith("list") { val = f"_clean_strlist({call})"; }
+                # list()-wrapped: the helper's ::py:: return is Unknown, which a
+                # TYPED list carry (G9-unified) rejects at jac check.
+                if str(tt).startswith("list") { val = f"list(_clean_strlist({call}))"; }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));

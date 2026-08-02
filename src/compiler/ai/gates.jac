@@ -8,12 +8,15 @@ Every verdict is typed and must be ROUTED by the caller — an unrouted failure
 is a silent success (pipeline B.9.1).
 """
 
+import ast;
 import os;
 import re;
 import shutil;
 import subprocess;
 import tempfile;
+import textwrap;
 import traceback;
+import yaml;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
 import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
@@ -279,6 +282,347 @@ def gate_concurrency(ir_text: str) -> dict {
     } except Exception {
         return {"stages": [], "opportunities": [], "issues": [], "dlp": []};
     }
+}
+
+# ---------------------------------------------------------------------------
+# G9-TY — typed-dataflow unification (mechanical on the FINAL IR).
+#
+# The carry table declares one type per lane; the producing slot's return
+# schema and every consuming tool's contract both derive from it. Nothing
+# audited that triangle: a fresh compile shipped a model slot returning `str`
+# into a tool body demanding `list` — green through every gate, TypeError at
+# runtime. Worse, an untyped carry lowers the walker field to `any`, so the
+# G4 jac-check is structurally BLIND to the mismatch. The demand a tool body
+# states is ground truth (its code is frozen); the carry type must match it.
+#
+# Evidence read per tool param, mirroring the _bind_args join (name first,
+# then positional over the node's reads):
+#   - a param annotation            def f(headers: list) / (rows: list[str])
+#   - a guard-clause isinstance     if not isinstance(x, list): raise ...
+#   - an assert isinstance          assert isinstance(x, dict)
+# refined to list[T] when the same guard runs all(isinstance(h, T) for h in x).
+#
+# autofix_carry_types applies the unification MECHANICALLY (no model): adopt
+# the consumer's demand into walker.carries.<c>.type and let the caller
+# re-gate through G4 — the oracle stays the authority on the patched IR.
+# ---------------------------------------------------------------------------
+
+glob _TY_SCALARS: list = ["str", "int", "float", "bool"];
+
+def _ty_base(t: any) -> str {
+    # IR type string -> comparable base kind ("" when unknown/custom).
+    s = str(t or "").strip().rstrip("?").strip();
+    if not s { return ""; }
+    s = s.split("|")[0].strip();
+    if s.startswith("enum{") { return "str"; }
+    b = s.split("[")[0].strip();
+    if b == "path" { return "str"; }
+    if b in _TY_SCALARS { return b; }
+    if b in ["list", "dict", "any"] { return b; }
+    return "";   # custom obj/enum types: out of scope, never flagged
+}
+
+def _ty_class(t: any) -> str {
+    b = _ty_base(t);
+    if b in _TY_SCALARS { return "scalar"; }
+    if b in ["list", "dict"] { return b; }
+    return "";
+}
+
+def _ann_type(ann: any) -> str {
+    # ast annotation / type expression -> IR type string ("" when unmappable).
+    if isinstance(ann, ast.Name) {
+        nm = str(ann.id);
+        if nm in ["str", "int", "float", "bool", "list", "dict"] { return nm; }
+        return "";
+    }
+    if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) {
+        base = str(ann.value.id).lower();
+        if base == "list" {
+            sl = ann.slice;
+            if isinstance(sl, ast.Name) and (str(sl.id) in ["str", "int"]) {
+                return "list[" + str(sl.id) + "]";
+            }
+            return "list";
+        }
+        if base == "dict" { return "dict"; }
+    }
+    return "";
+}
+
+def _g9_refine_list(guard_test: any, param: str) -> str {
+    # `all(isinstance(h, T) for h in <param>)` anywhere in the guard test
+    # refines a bare `list` demand to list[T].
+    for nd in ast.walk(guard_test) {
+        if not (isinstance(nd, ast.Call) and isinstance(nd.func, ast.Name) and (str(nd.func.id) == "all")) { continue; }
+        if not nd.args { continue; }
+        gen = nd.args[0];
+        if not isinstance(gen, ast.GeneratorExp) { continue; }
+        elt = gen.elt;
+        iters_param = False;
+        for comp in gen.generators {
+            if isinstance(comp.iter, ast.Name) and (str(comp.iter.id) == param) { iters_param = True; }
+        }
+        if not iters_param { continue; }
+        if isinstance(elt, ast.Call) and isinstance(elt.func, ast.Name) and (str(elt.func.id) == "isinstance") and (len(elt.args) == 2) {
+            it = _ann_type(elt.args[1]);
+            if it in ["str", "int"] { return "list[" + it + "]"; }
+        }
+    }
+    return "list";
+}
+
+def _g9_guard_demands(fn: any) -> list {
+    # [[param, type], ...] from guard clauses that RAISE (or assert) on an
+    # isinstance failure — the only isinstance shape that is a demand rather
+    # than a coercion branch (`if isinstance(x, str): x = json.loads(x)`
+    # ACCEPTS str and must not be read as demanding it).
+    out: list = [];
+    for st in ast.walk(fn) {
+        guard_test: any = None;
+        if isinstance(st, ast.If) {
+            raises = [b for b in st.body if isinstance(b, ast.Raise)];
+            if raises { guard_test = st.test; }
+        } elif isinstance(st, ast.Assert) {
+            guard_test = st.test;
+        }
+        if guard_test is None { continue; }
+        for nd in ast.walk(guard_test) {
+            neg = isinstance(nd, ast.UnaryOp) and isinstance(nd.op, ast.Not);
+            call: any = getattr(nd, "operand") if neg else nd;
+            # in an if-raise the demand is the NEGATED isinstance; in an
+            # assert it is the bare one.
+            if neg == isinstance(st, ast.Assert) { continue; }
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and (str(call.func.id) == "isinstance") and (len(call.args) == 2)) { continue; }
+            if not isinstance(call.args[0], ast.Name) { continue; }
+            pname = str(call.args[0].id);
+            t = _ann_type(call.args[1]);
+            if not t { continue; }
+            if t == "list" { t = _g9_refine_list(guard_test, pname); }
+            out.append([pname, t]);
+        }
+    }
+    return out;
+}
+
+def _g9_tool_params(td: any) -> list {
+    # The tool's entry-function params as [[name, demanded_type], ...] —
+    # annotation first, guard/assert demand as fallback. "" when untyped.
+    body = td.get("body") if isinstance(td, dict) else None;
+    if not body { return []; }
+    tree: any = None;
+    try { tree = ast.parse(textwrap.dedent(str(body))); } except Exception { return []; }
+    for st in tree.body {
+        if not (isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef)) { continue; }
+        demands: dict = {};
+        for d in _g9_guard_demands(st) {
+            if str(d[0]) not in demands { demands[str(d[0])] = str(d[1]); }
+        }
+        out: list = [];
+        for a in st.args.args {
+            t = _ann_type(a.annotation) if (a.annotation is not None) else "";
+            if not t { t = str(demands.get(str(a.arg), "")); }
+            out.append([str(a.arg), t]);
+        }
+        return out;
+    }
+    return [];
+}
+
+def _g9_tool_for(ir: any, nd: any) -> list {
+    # [tool_name, tool_def] bound to this node (serves / explicit / 1:1 name),
+    # mirroring the mechanical half's _node_tool join; [] when none.
+    tools = ir.get("tools");
+    if not isinstance(tools, dict) { return []; }
+    nid = nd.get("id");
+    tn = nd.get("tool");
+    if isinstance(tn, list) { tn = tn[0] if tn else None; }
+    if isinstance(tn, str) and (tn in tools) { return [str(tn), tools[tn]]; }
+    for k in tools {
+        t = tools[k];
+        if isinstance(t, dict) and (nid in list(t.get("serves") or [])) { return [str(k), t]; }
+    }
+    if nid in tools { return [str(nid), tools[nid]]; }
+    return [];
+}
+
+def _g9_evidence(ir: any) -> list {
+    # [carries, producers, demands] where demands: carry -> [[tool, param, type], ...]
+    wlk = ir.get("walker") if isinstance(ir.get("walker"), dict) else {};
+    carries = wlk.get("carries") if isinstance(wlk.get("carries"), dict) else {};
+    producers: dict = {};
+    demands: dict = {};
+    for nd in list(ir.get("nodes") or []) {
+        if not isinstance(nd, dict) { continue; }
+        for w in list(nd.get("writes") or []) {
+            cur: list = list(producers.get(str(w), []));
+            cur.append(nd);
+            producers[str(w)] = cur;
+        }
+        if str(nd.get("owner", "")) != "code" { continue; }
+        bound = _g9_tool_for(ir, nd);
+        if not bound { continue; }
+        params = _g9_tool_params(bound[1]);
+        # positional fallback mirrors _bind_args: the index runs over ALL of
+        # the node's reads (not just carry lanes), advancing once per param.
+        rl = list(nd.get("reads") or []);
+        i = 0;
+        for p in params {
+            pname = str(p[0]);
+            ptype = str(p[1]);
+            carry = "";
+            if pname in carries { carry = pname; }
+            elif (i < len(rl)) and (str(rl[i]) in carries) { carry = str(rl[i]); }
+            i += 1;
+            if (not carry) or (not ptype) { continue; }
+            cur2: list = list(demands.get(carry, []));
+            cur2.append([str(bound[0]), pname, ptype]);
+            demands[carry] = cur2;
+        }
+    }
+    return [carries, producers, demands];
+}
+
+def _g9_is_model(nd: any) -> bool {
+    return isinstance(nd, dict) and (str(nd.get("owner", "")) == "model");
+}
+
+def gate_type_unification(ir_text: str) -> list[str] {
+    issues: list = [];
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return []; }
+    ev = _g9_evidence(ir);
+    carries: dict = ev[0] if isinstance(ev[0], dict) else {};
+    producers: dict = ev[1] if isinstance(ev[1], dict) else {};
+    demands: dict = ev[2] if isinstance(ev[2], dict) else {};
+
+    for cname in carries {
+        c = carries[cname];
+        if not isinstance(c, dict) { continue; }
+        declared = str(c.get("type") or "");
+        dcls = _ty_class(declared);
+        dm: list = list(demands.get(str(cname), []));
+        prods: list = list(producers.get(str(cname), []));
+        model_prod = [p for p in prods if _g9_is_model(p)];
+
+        # demands must agree among themselves before they can bind the carry
+        classes: list = [];
+        for d in dm {
+            cl = _ty_class(d[2]);
+            if cl and (cl not in classes) { classes.append(cl); }
+        }
+        if len(classes) > 1 {
+            spans = "; ".join(["tool '" + str(d[0]) + "' param '" + str(d[1]) + "' wants '" + str(d[2]) + "'" for d in dm]);
+            issues.append("G9: carry '" + str(cname) + "' has CONFLICTING consumer contracts (" + spans
+                + ") — the tools themselves disagree; align the tool bodies before typing the carry");
+            continue;
+        }
+        if dm and classes {
+            want = str(dm[0][2]);
+            for d in dm {   # prefer the most refined spelling (list[str] over list)
+                if len(str(d[2])) > len(want) { want = str(d[2]); }
+            }
+            if dcls and (dcls != classes[0]) {
+                issues.append("G9: carry '" + str(cname) + "' is declared '" + declared + "' but tool '"
+                    + str(dm[0][0]) + "' requires '" + want + "' for param '" + str(dm[0][1])
+                    + "' — the walker crashes at this boundary at runtime. Set walker.carries."
+                    + str(cname) + ".type: " + want + " (autofix adopts the consumer's type; the producing"
+                    + " slot's return schema then enforces the shape at generation)");
+            } elif (not declared.strip()) or (_ty_base(declared) == "any") {
+                issues.append("G9: carry '" + str(cname) + "' is untyped ('" + (declared if declared else "missing")
+                    + "') but tool '" + str(dm[0][0]) + "' requires '" + want
+                    + "' — untyped lowers the walker field to `any`, so jac check cannot see the mismatch."
+                    + " Set walker.carries." + str(cname) + ".type: " + want);
+            }
+        } elif model_prod and ((not declared.strip()) or (_ty_base(declared) == "any")) {
+            # a model-written carry consumed by embodied code with NO stated
+            # demand: the slot's return schema has nothing to derive from.
+            code_readers: list = [];
+            for nd2 in list(ir.get("nodes") or []) {
+                if not isinstance(nd2, dict) { continue; }
+                if str(cname) not in list(nd2.get("reads") or []) { continue; }
+                if (str(nd2.get("owner", "")) == "code") and _g9_tool_for(ir, nd2) { code_readers.append(str(nd2.get("id"))); }
+            }
+            if code_readers {
+                issues.append("G9: carry '" + str(cname) + "' crosses model->code untyped — slot '"
+                    + str(model_prod[0].get("id")) + "' returns whatever shape the model chose and code node(s) ["
+                    + ", ".join(code_readers) + "] consume it blind. Declare walker.carries." + str(cname) + ".type");
+            }
+        }
+    }
+
+    # -- IO provenance: an embodied ACT's reads must be produced, not seeded --
+    # (caught live: a relearned agent ran green to TERMINAL while writing its
+    # input file from a carry nothing produced — the carry held its task-string
+    # seed, so the "artifact" was the task echoed into the input path.)
+    for nd3 in list(ir.get("nodes") or []) {
+        if not isinstance(nd3, dict) { continue; }
+        if str(nd3.get("type", "")) != "ACT" { continue; }
+        embodied = False;
+        b3 = _g9_tool_for(ir, nd3);
+        if b3 and isinstance(b3[1], dict) and (str(b3[1].get("body") or "").strip() or str(b3[1].get("command") or "").strip()) { embodied = True; }
+        if (not embodied) and list(nd3.get("reads") or []) { embodied = True; }   # _write_artifact fallback
+        if not embodied { continue; }
+        for rd3 in list(nd3.get("reads") or []) {
+            rc = str(rd3);
+            if (rc not in carries) or (rc == "task") { continue; }
+            cdef = carries[rc] if isinstance(carries[rc], dict) else {};
+            if str(cdef.get("role", "")) == "input" { continue; }
+            if not list(producers.get(rc, [])) {
+                issues.append("G9: ACT '" + str(nd3.get("id")) + "' writes its artifact from carry '" + rc
+                    + "' which NO node produces — at runtime the carry holds its seed/default, so the"
+                    + " deliverable is disconnected from the pipeline. Wire a producer or mark the carry role: input");
+            }
+        }
+    }
+    return issues;
+}
+
+def autofix_carry_types(ir_text: str) -> dict {
+    # The mechanical half of G9: adopt an agreeing consumer demand into
+    # walker.carries.<c>.type. Pure code, no model. Returns the (possibly
+    # unchanged) IR text + human-readable fix notes; the CALLER re-gates
+    # through G4 — a patch the oracle rejects is never adopted silently.
+    fixes: list = [];
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return {"ir_text": ir_text, "fixes": []}; }
+    ev = _g9_evidence(ir);
+    carries: dict = ev[0] if isinstance(ev[0], dict) else {};
+    demands: dict = ev[2] if isinstance(ev[2], dict) else {};
+    for cname in carries {
+        c = carries[cname];
+        if not isinstance(c, dict) { continue; }
+        dm: list = list(demands.get(str(cname), []));
+        if not dm { continue; }
+        classes: list = [];
+        for d in dm {
+            cl = _ty_class(d[2]);
+            if cl and (cl not in classes) { classes.append(cl); }
+        }
+        if len(classes) != 1 { continue; }   # disagreeing tools: not fixable mechanically
+        want = str(dm[0][2]);
+        for d in dm {
+            if len(str(d[2])) > len(want) { want = str(d[2]); }
+        }
+        declared = str(c.get("type") or "");
+        dcls = _ty_class(declared);
+        if dcls == classes[0] { continue; }              # same class: keep the author's spelling
+        if declared.strip() and (_ty_base(declared) == "") { continue; }   # custom obj/enum: never overwrite
+        c["type"] = want;
+        fixes.append("carry '" + str(cname) + "': type '" + (declared if declared else "missing")
+            + "' -> '" + want + "' (required by tool '" + str(dm[0][0]) + "' param '" + str(dm[0][1]) + "')");
+    }
+    if not fixes { return {"ir_text": ir_text, "fixes": []}; }
+    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
+    body: dict = {};
+    for k in ir {
+        if str(k) != "_frontmatter" { body[k] = ir[k]; }
+    }
+    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
+    if fm {
+        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
+    }
+    return {"ir_text": out, "fixes": fixes};
 }
 
 # ---------------------------------------------------------------------------
