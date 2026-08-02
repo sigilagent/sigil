@@ -177,6 +177,86 @@ test "a path-first write tool binds content by ROLE, not position" {
     assert "_write_file(self.philosophy_md, None)" not in src;
 }
 
+# The read side of the same hole: a SENSE tool whose path param has no carry to
+# bind — the input filename lives only in the task string. The ACT-only rung
+# left it None and the tool's own guard killed the run at the FIRST node
+# (caught live: _read_input_csv(None) -> "'path' must be a non-empty string").
+glob SENSE_PATH_IR: str = """---
+name: csv-reader
+description: Read the input CSV named by the task.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  read_input_csv:
+    sig: "(path: str) -> list"
+    surface: SENSE
+    serves: [read_it]
+    doc: "Read a CSV file into rows."
+    body: |
+      def read_input_csv(path):
+          if not isinstance(path, str) or not path:
+              raise ValueError("'path' must be a non-empty string")
+          import csv
+          with open(path) as f:
+              return list(csv.reader(f))
+walker:
+  name: CsvAgent
+  carries:
+    task:
+      type: str
+      role: input
+    rows:
+      type: list
+      produced_by: read_it
+nodes:
+  - id: read_it
+    type: SENSE
+    owner: code
+    op: read_input_csv
+    tool: read_input_csv
+    writes: [rows]
+  - id: done
+    type: TERMINAL
+    reads: [rows]
+edges:
+  - {from: read_it, to: done, modality: mandatory}
+""";
+
+test "a SENSE tool's input path resolves from the task, never None" {
+    src = transpile_ir(SENSE_PATH_IR, "csv-reader");
+    assert "_read_input_csv(_inname(self.task))" in src;
+    assert "_read_input_csv(None)" not in src;
+    # and never the ACT helper: _outname prefers the save-verb filename, which
+    # on the read side is the OUTPUT
+    assert "_read_input_csv(_outname" not in src;
+}
+
+test "_inname prefers the read-verb filename and skips save-claimed ones" {
+    import os;
+    import re;
+    asset = "";
+    with open(os.path.join(os.path.dirname(__file__), "assets", "osp_runtime.py.txt")) as f {
+        asset = str(f.read());
+    }
+    m = re.search(r"def _inname\(.*?(?=\ndef )", asset, re.S);
+    assert m, "_inname must ship in the runtime asset";
+    ns: dict = {};
+    exec(str(m.group(0)), ns);
+    fn = ns["_inname"];
+    # the two live task shapes
+    assert fn("messy.csv") == "messy.csv";
+    assert fn("clean the CSV file messy.csv and summarize it") == "messy.csv";
+    # the misbind _outname would make: save-verb filename is the OUTPUT
+    assert fn("clean data.csv and save as out.csv") == "data.csv";
+    # bare-filename fallback skips save-claimed names even with no read verb
+    assert fn("take stuff.csv then save as out.csv") == "stuff.csv";
+    # no input named: honest empty, the tool's guard speaks
+    assert fn("write a poem and save as poem.txt") == "";
+}
+
 # `task` is not always the only input the IR declares. A carry marked
 # `role: input` that no node produces can ONLY come from the invocation — bind
 # just `task` and that field keeps its "" default, so the first node reading it
@@ -397,6 +477,19 @@ test "a ROUTE guard outside the enum shapes lowers to its real comparison" {
     assert 'self.errors != ""' in src;
     assert "elif True {" not in src;
     assert "if True {" not in src;
+}
+
+# A guard's RHS can name a CARRY, not just a literal — it must compare against
+# the carry's VALUE. The quoted-name fallback lowered `round < budget` to
+# `self.round < "budget"`, an int<str TypeError at the first ROUTE (caught live:
+# claude-api's `input_tokens_estimate > context_window` killed all 9 cells).
+test "a ROUTE guard with a carry-name RHS compares values, not a quoted name" {
+    ir = BUDGET_ROUTE_IR.replace('guard: "round < 3"', 'guard: "round < budget"')
+                        .replace("round: {type: int, produced_by: bump}",
+                                 "budget: {type: int, role: input}\n    round: {type: int, produced_by: bump}");
+    src = transpile_ir(ir, "budgeted");
+    assert "self.round < self.budget" in src;
+    assert 'self.round < "budget"' not in src;
 }
 
 # ...but ONLY when the guard's subject is a real carry. A bare word naming
