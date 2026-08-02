@@ -515,6 +515,26 @@ def _outname(task, fallback="output.txt"):
         return m.group(1)
     return fallback
 
+def _inname(task, fallback=""):
+    # The SENSE mirror of _outname — NOT a reuse: _outname's first preference is
+    # the save-verb filename, which on the read side is exactly the wrong file
+    # ("clean data.csv and save as out.csv" must read data.csv, never out.csv).
+    # Prefer the filename following a read-side verb; else the first bare
+    # filename NOT claimed by a save-side verb; else fallback ("" keeps the
+    # tool's own guard error honest when the task truly names no input).
+    import re
+    t = task or ""
+    m = re.search(r'(?:read|open|load|parse|clean|process|convert|analy[sz]e|summari[sz]e|merge|from)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    if m:
+        return m.group(1)
+    saved = set()
+    for sm in re.finditer(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I):
+        saved.add(sm.group(1))
+    for bm in re.finditer(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I):
+        if bm.group(1) not in saved:
+            return bm.group(1)
+    return fallback
+
 def _write_artifact(content, path):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
