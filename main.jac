@@ -487,6 +487,10 @@ with entry:__main__ {
             } else {
                 print("compiled skill: " + str(r["signature"]) + "  [compiled-skill]  -> " + str(r["module"]));
                 for rp in list(r["repairs"] or []) { print("  (repair) " + str(rp)); }
+                # SkillRT-inspired advisories: G7 env findings (advisory mode) +
+                # G8 parallelism opportunities — informational, never a failure
+                for ev in list(r.get("env") or []) { print("  (env) " + str(ev)); }
+                for pv in list(r.get("par") or []) { print("  (par) " + str(pv)); }
                 if r["eject"] {
                     print("ejected runnable: " + str(r["eject"]));
                     print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");

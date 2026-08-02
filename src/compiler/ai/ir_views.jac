@@ -39,6 +39,8 @@ obj LiftResult {
     has assemble_issues: list[str] = [];
     has gate_issues: list[str] = [];
     has repairs: list[str] = [];
+    has env_report: list[str] = [];    # G7-ENV findings (also in gate_issues unless advisory)
+    has par_report: list[str] = [];    # G8-PAR opportunities + DLP candidates (advisory)
 }
 
 obj StructCov {

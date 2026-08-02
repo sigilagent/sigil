@@ -21,6 +21,7 @@ CLI / test harness:
 import os;
 import re;
 import from .toolib { builtin, builtin_names, builtin_catalogue }
+import from .envbind { extract_manifest, preflight_src }
 import glob;
 import textwrap;
 import traceback;
@@ -1762,11 +1763,17 @@ def _emit_nodes(ir: any) -> str {
     return _j("\n", out);
 }
 
-def _emit_run(ir: any, walker_name: any) -> str {
+def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
     types = ir.get("types");
     edges = _list(ir.get("edges"));
     nodes = _list(ir.get("nodes"));
     out: list = ["def run(task: str, model: Model, skill: str) -> str {", "    llm = model;", ""];
+    if env {
+        # environment binding (SkillRT AOT pass 2): probe the manifest BEFORE
+        # the walker runs — a missing dep fails loud here, not mid-graph
+        out.append("    _env_preflight();");
+        out.append("");
+    }
     var: dict = {};
     for n in nodes {
         nid = n.get("id");
@@ -1877,6 +1884,8 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     parts.append(f"\"\"\"OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.\n\nSkill: {sk}\nShape: {shape}\nMechanical lowering of the IR as written (not the hand-tuned production agent).\n\"\"\"");
     parts.append("import from jaclang.byllm.lib { Model }");
     parts.append(tools_block);
+    envs = preflight_src(extract_manifest(ir));
+    if envs { parts.append("# ===== ENVIRONMENT (binding manifest + preflight; SkillRT AOT pass 2) =====\n" + envs); }
     kn = _emit_knowledge(ir);
     if kn { parts.append("# ===== KNOWLEDGE (static globs) =====\n" + kn); }
     mn = model_name if model_name else "gpt-4o-mini";
@@ -1897,7 +1906,7 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     }
     parts.append("# ===== NODES =====\n" + _emit_nodes(ir));
     parts.append("# ===== WALKER =====\n" + walker_block);
-    parts.append("# ===== ENTRYPOINT =====\n" + _emit_run(ir, walker_name));
+    parts.append("# ===== ENTRYPOINT =====\n" + _emit_run(ir, walker_name, env=bool(envs)));
     return _j("\n\n", parts) + "\n";
 }
 
