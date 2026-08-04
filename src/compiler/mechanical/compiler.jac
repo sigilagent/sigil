@@ -797,6 +797,28 @@ def _is_live_tool(name: any, surf: any) -> bool {
     return False;
 }
 
+# RUNG -1 normalization, done ONCE on the shared IR before any codegen. A tool
+# named after a builtin, carrying no body/command of its own, is the compiler's
+# to embody — and its CANONICAL sig must reach the NODE binding site, not just
+# the wrapper. Splicing sig+body only onto a local copy inside _emit_tools left
+# _node_tool reading the author's empty sig, so a builtin bound to a node lowered
+# to a ZERO-ARG call: `_write_file()` -> "[write_file: no path given]", a silent
+# no-op with a green compile (caught by real-run verification of the cookbook).
+def _normalize_builtins(ir: any) -> None {
+    tools = ir.get("tools");
+    if not isinstance(tools, dict) { return; }
+    for name in list(tools) {
+        t = tools[name];
+        if not isinstance(t, dict) { continue; }
+        if str(t.get("body") or "").strip() or str(t.get("command") or "").strip() { continue; }
+        bi = builtin(name);
+        if bi is None { continue; }
+        t["sig"] = str(bi["sig"]);
+        t["body"] = str(bi["body"]);
+        if not str(t.get("surface") or "").strip() { t["surface"] = str(bi["surface"]); }
+    }
+}
+
 def _emit_tools(ir: any) -> str {
     out: list = ["::py::", "import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile"];
     sense_tools: list = [];
@@ -1933,6 +1955,7 @@ def _widen_repair_reads(ir: any) -> None {
 
 def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     ir = _load_ir(ir_text);
+    _normalize_builtins(ir);            # builtin sig/body onto the shared IR, before node binding
     _widen_repair_reads(ir);
     fm = _dict(ir.get("_frontmatter"));
     _FALLBACKS.clear();                 # embodiment-ladder fallbacks for THIS transpile
