@@ -315,6 +315,16 @@ let input/output filenames that live only in the task fall to the fallback. Do n
 hand a write tool a single positional carry and hope — that is the misbinding the
 role rule exists to prevent.
 
+**Never name a carry with a bare tool-parameter name** — `path`, `content`, `text`,
+`data`, `file`, `out`, `dest`. Binding rule 1 is by name, so a carry literally
+named `path` *hijacks* the `path` parameter of every tool that has one, even when
+that carry is the wrong path. A `grep` step whose search directory is a carry named
+`path` will silently steer a later `write_file`'s destination to the search
+directory instead of the task's output file — a green compile that writes nowhere.
+Qualify the name to its role: `search_path`, `input_text`, `csv_row`, `out_file`.
+The qualified name still binds correctly (`search_path` is pathish, so it
+role-binds a `path` parameter) without colliding.
+
 ---
 
 ## 8. Knowledge — embody, never point

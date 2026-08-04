@@ -19,7 +19,7 @@ walker:
   name: GrepSummarizeDir
   carries:
     task:         { type: str,  role: input }
-    path:         { type: str,  produced_by: extract_path }
+    search_path:         { type: str,  produced_by: extract_path }
     pattern:      { type: str,  produced_by: extract_pattern }
     matches:      { type: str,  produced_by: search_matches }
     summary_txt:  { type: str,  produced_by: summarize }
@@ -30,7 +30,7 @@ nodes:
     type: GEN-RAW
     owner: model
     reads: [task]
-    writes: [path]
+    writes: [search_path]
     doc: "From the task text, extract the directory or file path to search. Output exactly the path string only — no quotes, no backticks, no extra words."
 
   - id: extract_pattern
@@ -45,7 +45,7 @@ nodes:
     owner: code
     op: grep
     tool: grep
-    reads: [pattern, path]
+    reads: [pattern, search_path]
     writes: [matches]
     doc: "Search the given path (file or directory) for the regex pattern and return the raw matched lines with file/line context."
 
