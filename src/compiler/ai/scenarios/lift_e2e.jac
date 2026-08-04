@@ -1,7 +1,10 @@
-"""Scenario — lift() end-to-end + view repair, MockLLM-scripted with LIVE
-assemble/G4. See workflow_loop.jac for why this runs under `jac run`.
-Exits nonzero on failure."""
+"""Scenario — the STAGED lift() front-end end-to-end + view repair,
+MockLLM-scripted with LIVE assemble/G4. Forces SIGIL_STAGED=1: lift() now
+defaults to the direct front-end (see lift_direct.jac); this scenario exercises
+the staged spine/flows/assemble path and its coverage-fallback target.
+See workflow_loop.jac for why this runs under `jac run`. Exits nonzero on failure."""
 
+import os;
 import from jaclang.byllm.lib { MockLLM }
 import from src.compiler.ai.lift_types { Modality, RuleKind, Cohesion }
 import from src.compiler.ai.spec_loop { Rule, RuleSet }
@@ -25,6 +28,7 @@ glob _events: list = [];
 def _collect(ev: dict) -> None { _events.append(ev); }
 
 with entry:__main__ {
+    os.environ["SIGIL_STAGED"] = "1";   # this scenario tests the staged front-end
     set_lift_progress(_collect);
     spec = RuleSet(skill_name="csv-toy", rules=[
         Rule(id="r1", quote="Parse the input file with the standard library.", kind=RuleKind.STEP, modality=Modality.MANDATORY),
