@@ -1,0 +1,142 @@
+---
+name: confirm_delete_glob
+description: List files matching a glob pattern found in the task, require an explicit human "yes" to proceed, and delete only then.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+tools:
+  extract_glob_pattern:
+    sig: "(task) -> str"
+    surface: SENSE
+    doc: "Extract a glob pattern from the task: prefers backticked or quoted tokens containing *, ?, or [. Falls back to the first token with a glob metachar. Empty string if none."
+    body: |
+      def extract_glob_pattern(task: str) -> str:
+          import re
+          t = task or ""
+          # backticked pattern with glob metachar
+          m = re.search(r"`([^`]*[\*\?\[][^`]*)`", t)
+          if m:
+              return m.group(1).strip()
+          # quoted pattern with glob metachar
+          m = re.search(r"['\"]([^'\"]*[\*\?\[][^'\"]*)['\"]", t)
+          if m:
+              return m.group(1).strip()
+          # first token containing a glob metachar
+          for tok in re.findall(r"\S+", t):
+              if any(ch in tok for ch in ("*", "?", "[")):
+                  return tok.strip()
+          return ""
+  list_matches:
+    sig: "(glob_pattern) -> list[str]"
+    surface: SENSE
+    doc: "Return a sorted, de-duplicated list of file paths matching the glob pattern (recursive supported via **). Does not modify anything."
+    body: |
+      def list_matches(glob_pattern: str) -> list[str]:
+          from glob import glob
+          if not glob_pattern:
+              return []
+          files = glob(glob_pattern, recursive=True)
+          # keep as-is; deletion tool will filter non-files
+          return sorted(set(files))
+  parse_confirmation:
+    sig: "(confirm_answer) -> bool"
+    surface: SENSE
+    doc: "Return True only on an explicit, clear yes. Accepts the whole-word 'yes' or a lone 'y' (case-insensitive). Anything else is False."
+    body: |
+      def parse_confirmation(confirm_answer: str) -> bool:
+          import re
+          if not confirm_answer:
+              return False
+          ans = (confirm_answer or "").strip().lower()
+          tokens = re.findall(r"[a-z]+", ans)
+          if "yes" in tokens:
+              return True
+          # allow a single-letter affirmative only if it's the whole input
+          return ans == "y"
+  delete_files:
+    sig: "(matched_files, allowed) -> str"
+    surface: ACT·artifact
+    doc: "Delete regular files in matched_files only when allowed is True. Never delete without explicit confirmation and never delete directories. Returns a human-readable report."
+    body: |
+      def delete_files(matched_files: list[str], allowed: bool) -> str:
+          import os
+          paths = matched_files or []
+          deleted = []
+          skipped = []
+          if allowed:
+              for p in paths:
+                  try:
+                      if os.path.isfile(p):
+                          os.remove(p)
+                          deleted.append(p)
+                      else:
+                          skipped.append(f"{p} (not a regular file)")
+                  except Exception as e:
+                      skipped.append(f"{p} (error: {e})")
+              action = "DELETION PERFORMED"
+          else:
+              skipped.extend(paths)
+              action = "NO DELETION (confirmation not explicit)"
+          report_lines = [action, "", f"Matched: {len(paths)}", f"Deleted: {len(deleted)}", f"Skipped: {len(skipped)}"]
+          if deleted:
+              report_lines.append("\nDeleted files:")
+              report_lines.extend(deleted)
+          if skipped:
+              report_lines.append("\nSkipped entries:")
+              report_lines.extend(skipped)
+          return "\n".join(report_lines) + "\n"
+
+walker:
+  name: ConfirmDeleteGlob
+  carries:
+    task:           { type: str,        role: input }
+    glob_pattern:   { type: str,        produced_by: extract_pattern }
+    matched_files:  { type: list[str],  produced_by: list_files }
+    confirm_answer: { type: str,        role: input }
+    allowed:        { type: bool,       produced_by: decide_delete }
+    delete_report:  { type: str,        produced_by: delete_matched }
+
+nodes:
+  - id: extract_pattern
+    type: SENSE
+    owner: code
+    op: extract_glob_pattern
+    tool: extract_glob_pattern
+    reads: [task]
+    writes: [glob_pattern]
+    doc: "Mechanically extract the glob pattern from the task."
+  - id: list_files
+    type: SENSE
+    owner: code
+    op: list_matches
+    tool: list_matches
+    reads: [glob_pattern]
+    writes: [matched_files]
+    doc: "List files matching the extracted glob pattern. No changes made."
+  - id: decide_delete
+    type: ROUTE
+    owner: code
+    op: parse_confirmation
+    tool: parse_confirmation
+    reads: [confirm_answer]
+    writes: [allowed]
+    doc: "Human-in-the-loop gate. True only on an explicit 'yes' (or a lone 'y'). Any other answer yields False."
+  - id: delete_matched
+    type: ACT
+    owner: code
+    op: delete_files
+    tool: delete_files
+    reads: [matched_files, allowed]
+    writes: [delete_report]
+    doc: "Delete only when allowed is True; otherwise do nothing. Never delete directories."
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: extract_pattern, to: list_files,   modality: mandatory}
+  - {from: list_files,      to: decide_delete, modality: mandatory}
+  - {from: decide_delete,   to: delete_matched, modality: mandatory}
+  - {from: delete_matched,  to: done,          modality: mandatory}

@@ -1,0 +1,59 @@
+---
+name: tldr_one_line
+description: Use when you need to read a named document, generate a single-sentence TLDR of its main point, and write that one line to a named output file.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+tools:
+  read_file:
+    surface: SENSE
+    serves: [read_doc]
+  write_file:
+    surface: ACT·artifact
+    serves: [write_out]
+
+walker:
+  name: TldrOneLine
+  carries:
+    task:
+      type: str
+      role: input
+    doc_text:
+      type: str
+      produced_by: read_doc
+    tldr:
+      type: str
+      produced_by: make_tldr
+    tldr_file:
+      type: str
+      produced_by: write_out
+
+nodes:
+  - id: read_doc
+    type: SENSE
+    owner: code
+    reads: []
+    writes: [doc_text]
+    doc: "Read the input file named in the task. Read-only; no modifications."
+  - id: make_tldr
+    type: GEN-RAW
+    owner: model
+    reads: [task, doc_text]
+    writes: [tldr]
+    doc: "Produce a single-sentence TLDR capturing the document's main point. Exactly one sentence, concise, no line breaks, no quotes or prefixes. Output only that sentence."
+  - id: write_out
+    type: ACT
+    owner: code
+    reads: [tldr]
+    writes: [tldr_file]
+    doc: "Write the TLDR line to the output file named in the task."
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: read_doc, to: make_tldr, modality: mandatory}
+  - {from: make_tldr, to: write_out, modality: mandatory}
+  - {from: write_out, to: done, modality: mandatory}

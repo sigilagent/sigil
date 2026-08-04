@@ -1,0 +1,108 @@
+---
+name: write_bug_report
+description: Create a bug report from a task description using a fixed template and save it to a Markdown file named in the task.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+knowledge:
+  bug_template:
+    resident_on: [extract_fields]
+    template: |
+      Use this fixed bug report template exactly, in this order, with these section titles:
+      1) Title — one-line summary.
+      2) Environment — OS, browser/app version, device, commit/tag; bullet list or paragraph.
+      3) Steps to Reproduce — numbered, concrete, reproducible steps.
+      4) Expected — what should happen.
+      5) Actual — what actually happens (include errors/messages).
+      6) Severity — one of: Low, Medium, High, Critical.
+
+      Output requirement for extraction:
+      - Return only a JSON object with these exact keys:
+        {
+          "title": str,
+          "environment": str | list[str],
+          "steps": list[str],
+          "expected": str,
+          "actual": str,
+          "severity": "Low" | "Medium" | "High" | "Critical"
+        }
+
+tools:
+  render_bug_report:
+    sig: "(report) -> str"
+    surface: ACT·artifact
+    doc: "Render the bug report to Markdown with the exact section titles and order."
+    body: |
+      def render_bug_report(report: dict) -> str:
+          t = (report.get("title") or "").strip()
+          env = report.get("environment")
+          if isinstance(env, list):
+              env_text = "\n".join(f"- {str(x).strip()}" for x in env)
+          else:
+              env_text = str(env or "").strip()
+          steps = report.get("steps")
+          if isinstance(steps, list):
+              steps_text = "\n".join(f"{i+1}. {str(s).strip()}" for i, s in enumerate(steps))
+          else:
+              steps_text = str(steps or "").strip()
+          expected = str(report.get("expected") or "").strip()
+          actual = str(report.get("actual") or "").strip()
+          severity = str(report.get("severity") or "").strip()
+          parts = [
+              f"Title: {t}",
+              "Environment:",
+              env_text,
+              "Steps to Reproduce:",
+              steps_text,
+              "Expected:",
+              expected,
+              "Actual:",
+              actual,
+              f"Severity: {severity}",
+          ]
+          return "\n".join(parts).rstrip() + "\n"
+  write_file:
+    surface: ACT·artifact
+    serves: [save]
+
+walker:
+  name: BugReportWriter
+  carries:
+    task:       { type: str,  role: input }
+    report:     { type: dict, produced_by: extract_fields }
+    report_md:  { type: str,  produced_by: render }
+    out_file:   { type: str,  produced_by: save }
+
+nodes:
+  - id: extract_fields
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [report]
+    doc: "Extract the six fields from the task per the bug template knowledge. Output only a JSON object with keys: title, environment, steps, expected, actual, severity. Steps must be a list of concise, reproducible actions. Severity must be one of Low, Medium, High, Critical. No markdown."
+  - id: render
+    type: ACT
+    owner: code
+    op: render_bug_report
+    tool: render_bug_report
+    reads: [report]
+    writes: [report_md]
+    doc: "Deterministically format the report to Markdown with the exact section titles and order: Title, Environment, Steps to Reproduce, Expected, Actual, Severity."
+  - id: save
+    type: ACT
+    owner: code
+    op: write_file
+    tool: write_file
+    reads: [report_md]
+    writes: [out_file]
+    doc: "Write the markdown to the output path named in the task; return the written file path."
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: extract_fields, to: render, modality: mandatory}
+  - {from: render,        to: save,   modality: mandatory}
+  - {from: save,          to: done,   modality: mandatory}

@@ -1,0 +1,96 @@
+---
+name: append_contact_csv
+description: Extract a contact’s name, email, and company from the task, then append one CSV row to the contacts file the task names.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+tools:
+  find_csv_filename:
+    sig: "(task) -> path"
+    doc: "Return the first .csv filename mentioned in the task; default to 'contacts.csv' if none."
+    body: |
+      def find_csv_filename(task: str) -> str:
+          import re
+          text = task or ""
+          m = re.search(r'(?P<fname>[^\s\'"]+\.csv)\b', text, flags=re.I)
+          fname = m.group('fname') if m else "contacts.csv"
+          return fname
+  build_csv_row:
+    sig: "(name, email, company) -> str"
+    doc: "Build a single CSV row with proper quoting: name,email,company (no trailing newline)."
+    body: |
+      def build_csv_row(name: str, email: str, company: str) -> str:
+          import io, csv
+          output = io.StringIO()
+          writer = csv.writer(output, lineterminator="")
+          writer.writerow([name or "", email or "", company or ""])
+          return output.getvalue()
+  append_file:
+    sig: "(content, path) -> str"
+    surface: ACT·artifact
+    doc: "Append content plus a newline to path; create the file and parent directories if needed. Return the path."
+    body: |
+      def append_file(content: str, path: str) -> str:
+          import os
+          d = os.path.dirname(path)
+          if d:
+              os.makedirs(d, exist_ok=True)
+          to_write = content if (content or "").endswith("\n") else (content or "") + "\n"
+          with open(path, "a", encoding="utf-8", newline="") as f:
+              f.write(to_write)
+          return path
+
+walker:
+  name: AppendContactCsv
+  carries:
+    task:           { type: str,  role: input }
+    name:           { type: str,  produced_by: extract_contact }
+    email:          { type: str,  produced_by: extract_contact }
+    company:        { type: str,  produced_by: extract_contact }
+    contacts_path:  { type: path, produced_by: extract_path }
+    csv_row:        { type: str,  produced_by: build_row }
+    written_file:   { type: str,  produced_by: append_row }
+
+nodes:
+  - id: extract_contact
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [name, email, company]
+    doc: "From the free-text task, extract exactly three fields: full name, email address, and company. Output only these fields into the provided slots. If a field is not present, leave it empty. Use lowercase for the email."
+
+  - id: build_row
+    type: CODE
+    owner: code
+    op: build_csv_row
+    tool: build_csv_row
+    reads: [name, email, company]
+    writes: [csv_row]
+
+  - id: extract_path
+    type: CODE
+    owner: code
+    op: find_csv_filename
+    tool: find_csv_filename
+    reads: [task]
+    writes: [contacts_path]
+
+  - id: append_row
+    type: ACT
+    owner: code
+    op: append_file
+    tool: append_file
+    reads: [csv_row, contacts_path]
+    writes: [written_file]
+
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: extract_contact, to: build_row,   modality: mandatory}
+  - {from: build_row,       to: extract_path, modality: mandatory}
+  - {from: extract_path,    to: append_row,   modality: mandatory}
+  - {from: append_row,      to: done,         modality: mandatory}
