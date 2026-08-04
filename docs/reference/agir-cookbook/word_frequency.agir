@@ -1,0 +1,73 @@
+---
+name: word_frequencies_top20
+description: Count word frequencies in a task-named text file, lowercase and ignore punctuation, and write the top 20 (word and count, most frequent first) to a task-named output file.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+knowledge: {}
+
+tools:
+  read_file:
+    surface: SENSE
+    serves: [read_input]
+  write_file:
+    surface: ACT·artifact
+    serves: [write_output]
+  count_top_words:
+    sig: "(text) -> str"
+    doc: "Lowercase, strip punctuation, count words, sort by frequency desc then word asc, emit top 20 as 'word count' lines."
+    serves: [compute]
+    body: |
+      def count_top_words(text: str) -> str:
+          import re
+          from collections import Counter
+          tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+          counts = Counter(tokens)
+          items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+          top = items[:20]
+          lines = [f"{w} {c}" for w, c in top]
+          return "\n".join(lines) + ("\n" if lines else "")
+
+walker:
+  name: WordFrequenciesTop20
+  carries:
+    task:        { type: str, role: input }
+    input_text:  { type: str, produced_by: read_input }
+    output_text: { type: str, produced_by: compute }
+    out_file:    { type: str, produced_by: write_output }
+
+nodes:
+  - id: read_input
+    type: SENSE
+    owner: code
+    op: read_file
+    tool: read_file
+    reads: []
+    writes: [input_text]
+    doc: "Read the input file named in the task (via task-filename fallback)."
+  - id: compute
+    type: CODE
+    owner: code
+    op: count_top_words
+    tool: count_top_words
+    reads: [input_text]
+    writes: [output_text]
+    doc: "Deterministically compute top-20 word frequencies: lowercase, ignore punctuation."
+  - id: write_output
+    type: ACT
+    owner: code
+    op: write_file
+    tool: write_file
+    reads: [output_text]
+    writes: [out_file]
+    doc: "Write the result lines to the output file named in the task (via task-filename fallback)."
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: read_input,  to: compute,      modality: mandatory}
+  - {from: compute,     to: write_output, modality: mandatory}
+  - {from: write_output,to: done,         modality: mandatory}

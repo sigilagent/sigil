@@ -1,0 +1,76 @@
+---
+name: grep_summarize_dir
+description: Search a directory named in the task for a regex pattern named in the task, then write a short plain-English summary of what the matches show to the output file named in the task.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+tools:
+  grep:
+    surface: SENSE
+    serves: [search_matches]
+  write_file:
+    surface: ACT·artifact
+    serves: [save_summary]
+
+walker:
+  name: GrepSummarizeDir
+  carries:
+    task:         { type: str,  role: input }
+    search_path:         { type: str,  produced_by: extract_path }
+    pattern:      { type: str,  produced_by: extract_pattern }
+    matches:      { type: str,  produced_by: search_matches }
+    summary_txt:  { type: str,  produced_by: summarize }
+    out_file:     { type: str,  produced_by: save_summary }
+
+nodes:
+  - id: extract_path
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [search_path]
+    doc: "From the task text, extract the directory or file path to search. Output exactly the path string only — no quotes, no backticks, no extra words."
+
+  - id: extract_pattern
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [pattern]
+    doc: "From the task text, extract the regex to search for. Output exactly the regex pattern string usable by grep (no surrounding slashes, no flags, no quotes)."
+
+  - id: search_matches
+    type: SENSE
+    owner: code
+    op: grep
+    tool: grep
+    reads: [pattern, search_path]
+    writes: [matches]
+    doc: "Search the given path (file or directory) for the regex pattern and return the raw matched lines with file/line context."
+
+  - id: summarize
+    type: GEN-RAW
+    owner: model
+    reads: [task, matches]
+    writes: [summary_txt]
+    doc: "Write a short plain-English summary (2–3 sentences) of what the matches indicate: themes, notable files/areas, rough counts or frequency, and any obvious implications. Do not quote or include raw matched lines. Plain text only."
+
+  - id: save_summary
+    type: ACT
+    owner: code
+    op: write_file
+    tool: write_file
+    reads: [summary_txt]
+    writes: [out_file]
+    doc: "Write the summary to the output file named in the task. The path parameter falls back to the task’s named output."
+
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: extract_path,     to: extract_pattern, modality: mandatory}
+  - {from: extract_pattern,  to: search_matches,  modality: mandatory}
+  - {from: search_matches,   to: summarize,       modality: mandatory}
+  - {from: summarize,        to: save_summary,    modality: mandatory}
+  - {from: save_summary,     to: done,            modality: mandatory}

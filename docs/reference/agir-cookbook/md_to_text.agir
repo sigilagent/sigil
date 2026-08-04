@@ -1,0 +1,95 @@
+---
+name: md_to_plaintext
+description: Read a Markdown file named in the task, strip Markdown formatting to plain text, and save to the output file named in the task.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+
+tools:
+  read_file:
+    surface: SENSE
+    serves: [read_md]
+  write_file:
+    surface: ACT·artifact
+    serves: [write_out]
+  md_to_text:
+    sig: "(md_text) -> str"
+    surface: ACT·artifact
+    doc: "Convert Markdown to readable plain text: remove heading markers, emphasis, links (keep link text), and strip code fences/backticks while preserving content."
+    body: |
+      def md_to_text(md_text: str) -> str:
+          import re
+          s = md_text or ""
+          s = s.replace("\r\n", "\n").replace("\r", "\n")
+
+          # Strip fenced code fences but keep inner content
+          s = re.sub(r"```[^\n]*\n(.*?)\n```", r"\1", s, flags=re.S)
+          # Remove inline code backticks
+          s = s.replace("`", "")
+
+          # Images: keep alt text
+          s = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", s)
+          # Links: keep link text
+          s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+          # Autolinks: remove angle brackets
+          s = re.sub(r"<(https?://[^>]+)>", r"\1", s)
+
+          # Headings: remove leading hashes
+          s = re.sub(r"^[ \t]*#{1,6}[ \t]+", "", s, flags=re.M)
+          # Setext headings: drop underline lines
+          s = re.sub(r"^(=+|-{2,})\s*$", "", s, flags=re.M)
+
+          # Emphasis and strong
+          s = re.sub(r"(\*\*|__)(.*?)\1", r"\2", s, flags=re.S)
+          s = re.sub(r"(\*|_)(.*?)\1", r"\2", s, flags=re.S)
+          # Strikethrough
+          s = re.sub(r"~~(.*?)~~", r"\1", s, flags=re.S)
+
+          # Trim trailing spaces and collapse excessive blank lines
+          s = re.sub(r"[ \t]+$", "", s, flags=re.M)
+          s = re.sub(r"\n{3,}", "\n\n", s)
+
+          return (s.strip() + "\n") if s.strip() else ""
+
+walker:
+  name: MdToPlaintext
+  carries:
+    task:       { type: str, role: input }
+    md_text:    { type: str, produced_by: read_md }
+    plain_text: { type: str, produced_by: convert }
+    out_file:   { type: str, produced_by: write_out }
+
+nodes:
+  - id: read_md
+    type: SENSE
+    owner: code
+    op: read_file
+    tool: read_file
+    reads: []
+    writes: [md_text]
+    doc: "Read the Markdown source file named in the task (path bound from the task)."
+  - id: convert
+    type: CODE
+    owner: code
+    op: md_to_text
+    tool: md_to_text
+    reads: [md_text]
+    writes: [plain_text]
+    doc: "Strip Markdown syntax to readable plain text while preserving content."
+  - id: write_out
+    type: ACT
+    owner: code
+    op: write_file
+    tool: write_file
+    reads: [plain_text]
+    writes: [out_file]
+    doc: "Write the plain text to the output file named in the task (path bound from the task)."
+  - id: done
+    type: TERMINAL
+
+edges:
+  - {from: read_md,  to: convert,   modality: mandatory}
+  - {from: convert,  to: write_out, modality: mandatory}
+  - {from: write_out, to: done,     modality: mandatory}

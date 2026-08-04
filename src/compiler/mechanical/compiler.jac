@@ -312,7 +312,7 @@ def _jac_type(tstr: any, types: any) -> list {
     return ["any", "None"];
 }
 
-def _bind_arg(param: any, arg_fields: any) -> str {
+def _bind_arg(param: any, arg_fields: any, sense: bool = False) -> str {
     p = str(param);
     pl = p.lower();
     if p in BIND { return str(BIND[p]); }
@@ -323,6 +323,16 @@ def _bind_arg(param: any, arg_fields: any) -> str {
     if pl.startswith("original") { return "(args.inputs[0] if args.inputs else None)"; }
     if pl.startswith("output") or pl in ["out", "dest", "outfile", "filename", "file"] { return "_clean_path(args.output_spec.path)"; }
     if pl.startswith("unpacked") { return "\"unpacked/\""; }
+    # a bare `path` is role-ambiguous: a SENSE tool's path is an INPUT (prefer
+    # an explicit OpArgs input, else the task-named source via _inname — the
+    # dispatcher used to bind None here and the tool's own guard killed the
+    # run); an ACT tool's path is its DESTINATION, same as the output family.
+    if pl in ["path", "in_path", "input_path", "src_path", "source_path", "file_path", "filepath"] {
+        if sense {
+            return "(args.inputs[0] if getattr(args, \"inputs\", None) else _inname(getattr(args, \"task\", \"\") or \"\"))";
+        }
+        return "_clean_path(args.output_spec.path)";
+    }
     # strip a trailing _<ext>/_dir/_path and retry against the fields/BIND.
     base = re.sub(r"_(pptx|docx|xlsx|pdf|md|html|js|dir|path|file)$", "", pl);
     if base != pl {
@@ -526,9 +536,16 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
         # tool a null path, which raises inside the generated module. Resolve it
         # the way the no-tool ACT fallback below already does — the filename the
         # task asks for, else a deterministic name off the carry being written.
-        # Only for ACT (write_target set); a SENSE path param is an INPUT to read.
         if (b == "None") and write_target and ("task" in ck) and (pl in PATH_PARAMS) {
             b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
+        }
+        # The SENSE twin — the read side of the same hole (caught live: the
+        # first node lowered to _read_input_csv(None) and the tool's own guard
+        # killed the run). The input filename lives only in the task string;
+        # _inname prefers read-verb filenames, so "clean data.csv and save as
+        # out.csv" binds data.csv here while the ACT rung above binds out.csv.
+        if (b == "None") and (not write_target) and ("task" in ck) and (pl in PATH_PARAMS) {
+            b = "_inname(self.task)";
         }
         out.append(b);
         i += 1;
@@ -581,7 +598,7 @@ def _load_ir(text: str) -> any {
 # ---------------------------------------------------------------------------
 # section emitters
 # ---------------------------------------------------------------------------
-def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any) -> list {
+def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any, sense: bool = False) -> list {
     lines: list = ["", f"def {fnname}(op_name, args):"];
     # CHANGE 2 — operation = ordered pipeline. Group tools by served op (preserving IR
     # order = pipeline order). A single-tool op is a direct return; a multi-tool op runs
@@ -591,7 +608,7 @@ def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any) -> list {
     by_op: dict = {};
     for entry in toollist {
         tn = entry[0]; params = entry[1]; serves = entry[2];
-        bound = _j(", ", [_bind_arg(p, arg_fields) for p in params]);
+        bound = _j(", ", [_bind_arg(p, arg_fields, sense) for p in params]);
         for op in serves {
             if str(op) not in by_op { by_op[str(op)] = []; ops.append(str(op)); }
             by_op[str(op)].append([_safe(str(tn)), bound]);
@@ -780,6 +797,28 @@ def _is_live_tool(name: any, surf: any) -> bool {
     return False;
 }
 
+# RUNG -1 normalization, done ONCE on the shared IR before any codegen. A tool
+# named after a builtin, carrying no body/command of its own, is the compiler's
+# to embody — and its CANONICAL sig must reach the NODE binding site, not just
+# the wrapper. Splicing sig+body only onto a local copy inside _emit_tools left
+# _node_tool reading the author's empty sig, so a builtin bound to a node lowered
+# to a ZERO-ARG call: `_write_file()` -> "[write_file: no path given]", a silent
+# no-op with a green compile (caught by real-run verification of the cookbook).
+def _normalize_builtins(ir: any) -> None {
+    tools = ir.get("tools");
+    if not isinstance(tools, dict) { return; }
+    for name in list(tools) {
+        t = tools[name];
+        if not isinstance(t, dict) { continue; }
+        if str(t.get("body") or "").strip() or str(t.get("command") or "").strip() { continue; }
+        bi = builtin(name);
+        if bi is None { continue; }
+        t["sig"] = str(bi["sig"]);
+        t["body"] = str(bi["body"]);
+        if not str(t.get("surface") or "").strip() { t["surface"] = str(bi["surface"]); }
+    }
+}
+
 def _emit_tools(ir: any) -> str {
     out: list = ["::py::", "import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile"];
     sense_tools: list = [];
@@ -889,7 +928,7 @@ def _emit_tools(ir: any) -> str {
             for fkv in _items(td.get("fields")) { arg_fields.append(fkv[0]); }
         }
     }
-    if sense_tools { out += _dispatcher_lines("_run_sense", sense_tools, arg_fields); }
+    if sense_tools { out += _dispatcher_lines("_run_sense", sense_tools, arg_fields, True); }
     if act_tools { out += _dispatcher_lines("_run_act", act_tools, arg_fields); }
     out.append(_shared_helpers());
     out.append("::py::");
@@ -1304,6 +1343,10 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         elif rt.startswith("\"") or rt.startswith("'") { rv = rt; }
         elif re.match(r"^-?\d+(\.\d+)?$", rt) { rv = rt; }
         elif rt in m2e { rv = str(m2e[rt]) + "." + str(rt); }
+        # RHS naming a CARRY compares against the carry's VALUE, not the quoted
+        # name (caught live: `input_tokens_estimate > context_window` lowered to
+        # `> "context_window"` — int>str TypeError killed all 9 claude-api cells)
+        elif carries and (rt.split(".")[0] in list(carries)) { rv = "self." + str(rt); }
         else { rv = _q(rt); }
         return f"{neg}{left} {op} {rv}";
     }
@@ -1912,6 +1955,7 @@ def _widen_repair_reads(ir: any) -> None {
 
 def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     ir = _load_ir(ir_text);
+    _normalize_builtins(ir);            # builtin sig/body onto the shared IR, before node binding
     _widen_repair_reads(ir);
     fm = _dict(ir.get("_frontmatter"));
     _FALLBACKS.clear();                 # embodiment-ladder fallbacks for THIS transpile
