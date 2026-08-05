@@ -89,12 +89,14 @@
       radial-gradient(560px 420px at 12% 30%, rgba(34,211,238,.13), transparent 62%);
   }
   .hero .wrap{position:relative;z-index:1}
-  /* Single full-width column: the copy runs the whole content width instead of
-     being squeezed into a 1.15fr track beside the mark. The mark is no longer a
-     grid track — it is anchored to the right of the hero (see .sigil-wrap), so
-     it stays in frame without stealing width from the text. */
-  .hero-grid{display:block}
-  .hero-grid>div{min-width:0}   /* let the copy shrink so the install bar scrolls instead of clipping */
+  /* Hero splits in two bands. The TOP band keeps the two-column pairing —
+     headline + lead beside the rotating mark — because that pairing is the
+     hero. Everything BELOW it (code, install bar, buttons) runs the full
+     content width instead of staying trapped in the left track. */
+  .hero-top{display:grid;grid-template-columns:1.15fr .85fr;gap:52px;align-items:center}
+  .hero-top>div{min-width:0}
+  .hero-rest{margin-top:6px}
+  .hero-rest>div{min-width:0}   /* let the install bar scroll instead of clipping */
   .eyebrow{
     display:inline-flex;align-items:center;gap:9px;
     font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;
@@ -142,16 +144,8 @@
   /* The mark rides its own row at the top-right of the hero, in flow: it stays
      in frame without overlapping the copy or stealing width from it. (It used
      to be a grid column, which squeezed every paragraph to ~60% width.) */
-  .sigil-wrap{
-    display:flex;justify-content:flex-end;align-items:flex-start;
-    height:0;                 /* takes no vertical space: the copy still starts at the top */
-    margin-bottom:0;
-  }
-  .sigil{
-    width:100%;max-width:190px;height:auto;
-    transform:translateY(-8px);
-    filter:drop-shadow(0 0 40px rgba(139,92,246,.35));
-  }
+  .sigil-wrap{display:flex;justify-content:center;align-items:center}
+  .sigil{width:100%;max-width:300px;height:auto;filter:drop-shadow(0 0 40px rgba(139,92,246,.35))}
   /* the three shapes counter-rotate, alternating direction:
      circle (ring) ↻ CW · hexagon ↺ CCW · triangle ↻ CW */
   .sigil .ring{animation:spin 60s linear infinite;transform-box:view-box;transform-origin:center}
@@ -165,7 +159,7 @@
 
   /* ---------- generic section ---------- */
   section{padding:74px 0;position:relative}
-  .section-head{max-width:680px;margin-bottom:44px}
+  .section-head{margin-bottom:44px}   /* full width: nothing sits to its right */
   .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--violet);margin-bottom:14px}
   h2.section-title{font-size:clamp(27px,3.6vw,38px);font-weight:700;letter-spacing:-.03em}
   .section-head p{color:var(--muted);font-size:17.5px;margin:16px 0 0}
@@ -304,7 +298,7 @@
 
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   .stack{display:flex;flex-direction:column;gap:18px}
-  .lead{font-size:16px;color:var(--muted);margin:0 0 22px;max-width:640px}
+  .lead{font-size:16px;color:var(--muted);margin:0 0 22px}   /* full width */
   .lead code{color:var(--cyan);background:rgba(34,211,238,.09);padding:1px 6px;border-radius:5px}
 
   /* ---------- layout tree ---------- */
@@ -351,14 +345,9 @@
   .foot-links a{color:var(--muted)}
   .foot-links a:hover{color:var(--text)}
 
-  @media (max-width:1180px){
-    /* not enough room beside the copy: fade the mark into the background so it
-       reads as texture rather than colliding with the text */
-    .sigil-wrap{opacity:.22}
-  }
   @media (max-width:860px){
-    /* no room at all — the copy owns the hero */
-    .sigil-wrap{display:none}
+    .hero-top{grid-template-columns:1fr;gap:40px}
+    .sigil-wrap{order:-1}
     .sigil{max-width:250px}
     .two-col{grid-template-columns:1fr}
     .what-grid{grid-template-columns:repeat(2,1fr)}
@@ -448,7 +437,13 @@
 <header class="hero">
   <div class="hero-glow"></div>
   <div class="wrap">
-    <div class="hero-grid">
+    <div class="hero-top">
+      <div class="hero-copy">
+          <span class="eyebrow"><span class="dot"></span>The skill compiler · SKILL.md → runnable agent harness</span>
+          <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
+          <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
+          <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
+      </div>
       <div class="sigil-wrap">
         <!-- animated sigil mark -->
         <svg class="sigil" viewBox="0 0 260 260" aria-hidden="true">
@@ -488,11 +483,8 @@
           <circle cx="130" cy="130" r="11" fill="none" stroke="#22d3ee" stroke-width="1" opacity=".6"/>
         </svg>
       </div>
-      <div>
-        <span class="eyebrow"><span class="dot"></span>The skill compiler · SKILL.md → runnable agent harness</span>
-        <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
-        <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
-        <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
+    </div>
+    <div class="hero-rest">
         <div class="hero-install" style="margin-bottom:18px">
           <span class="hero-install-label">Compile a skill</span>
           <div class="code" data-code>
@@ -521,7 +513,6 @@
           </a>
           <a class="btn btn-ghost" href="#idea">How it works</a>
         </div>
-      </div>
     </div>
   </div>
 </header>
