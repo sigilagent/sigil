@@ -199,6 +199,25 @@ def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
+# Compile-time clarification, rendered in the compile TUI's own aesthetic: an amber
+# '?' marker (matching the cyan '✔' of a finished stage), a dimmed legend, and an
+# inline prompt — the same shape as the ejected agent's runtime human gates. Passed
+# to compile_skill as the `ask` callback when --clarify is set; each answer binds an
+# underspecified obligation's modality (Do / Maybe / Don't) before authoring.
+def _clarify_ask_tui(question: str) -> str {
+    amber = chr(27) + "[38;5;220m";
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    try {
+        sys.stdout.write(chr(10) + "  " + amber + "?" + rst + " " + str(question) + chr(10));
+        sys.stdout.write("      " + dim + "do" + rst + " = always · " + dim + "maybe"
+                         + rst + " = when the task calls for it · " + dim + "dont" + rst + " = never" + chr(10));
+        sys.stdout.write("      " + amber + "> " + rst);
+        sys.stdout.flush();
+    } except Exception {  }
+    try { return str(input()); } except Exception { return ""; }
+}
+
 # The all-zeros superroot — the root every plain `jac run` executes against.
 glob SUPERROOT: str = "00000000000000000000000000000000";
 
@@ -458,14 +477,18 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--agent] [--strict]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--clarify] [--strict] [--agent|--legacy]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
+            clarify = False; frontend = "";
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
                 if flg == "--agent" { agent_author = True; }
                 elif flg == "--strict" { strict = True; }
+                elif flg == "--clarify" { clarify = True; }
+                elif flg == "--legacy" { frontend = "legacy"; }
+                elif flg == "--staged" { frontend = "staged"; }
                 elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
@@ -475,11 +498,18 @@ with entry:__main__ {
             }
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
+            # --clarify asks inline; only meaningful with an interactive stdin.
+            _stdin_tty = False;
+            try { _stdin_tty = bool(sys.stdin.isatty()); } except Exception {  }
+            ask = _clarify_ask_tui if (clarify and _stdin_tty) else None;
+            if clarify and (not _stdin_tty) {
+                print("  (note: --clarify needs an interactive terminal; assuming Maybe + warning instead)");
+            }
             if _tty { print(chr(10) + "  Compiling " + path); }
             if _tty { _install_stream_view(); }
             r = compile_skill(open(path).read(), eject, eject_path,
                               _compile_ev if _tty else None, agent_author,
-                              os.path.dirname(os.path.abspath(path)), strict);
+                              os.path.dirname(os.path.abspath(path)), strict, ask, frontend);
             if _tty { _vb_close(); print(""); }
             if not r["ok"] {
                 # the fix-forward exit note: what failed, what the ladder
@@ -500,6 +530,7 @@ with entry:__main__ {
                     if str(f.get("severity")) != "error" { print("  [" + str(f.get("severity")) + "] " + str(f.get("message"))); }
                 }
                 for pv in list(r.get("par") or []) { print("  (par) " + str(pv)); }
+                for wn in list(r.get("warnings") or []) { print("  (warn) " + str(wn)); }
                 if r["eject"] {
                     print("ejected runnable: " + str(r["eject"]));
                     print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");

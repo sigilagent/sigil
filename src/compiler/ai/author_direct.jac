@@ -42,10 +42,15 @@ Author ONE AG-IR YAML document for the given SKILL, obeying the GUIDE exactly an
 grounded in the FROZEN RULE SET. Keep it minimal and idiomatic: one node per
 obligation, code tools where the work is mechanical (bind a builtin by name with
 no body), model slots only for genuine judgment, carries typed across every
-model->code boundary, never a carry named with a bare tool-parameter name. Every
-MANDATORY STEP/IO rule id in the frozen set MUST appear in some node's traces_to.
-Study the EXAMPLES for the exact shape. Output ONLY the raw AG-IR YAML (starting
-with the '---' frontmatter) — no prose, no explanation, no markdown fences.""";
+model->code boundary, never a carry named with a bare tool-parameter name.
+PROVENANCE IS MANDATORY: every node, tool and knowledge item MUST carry a
+`traces_to: [<rule ids>]` naming the frozen-set rule(s) it realizes — for EVERY
+kind, not only steps: a prohibition rides its slot's node (add the rule id to that
+node's traces_to and fold the 'never...' text into its doc), a knowledge item
+carries the rule id of the reference it embodies, a human gate the rule id of the
+gate. A node that realizes no rule must be removed, not left untraced. The
+EXAMPLES omit traces_to for brevity — you must include it. Output ONLY the raw
+AG-IR YAML (starting with the '---' frontmatter) — no prose, no markdown fences.""";
 sem author_agir_direct.guide = "The complete AG-IR authoring guide. Obey it exactly.";
 sem author_agir_direct.examples = "Gate-clean golden AG-IRs to mimic in shape and idiom.";
 sem author_agir_direct.skill = "The SKILL.md being compiled.";
@@ -116,15 +121,21 @@ def _strip_fence(s: str) -> str {
 }
 
 # The public entry: one authoring pass. Returns {"ir_text": <IR or "">, "notes": [...]}.
-def author_direct(skill: str, spec: RuleSet, name: str) -> dict {
+# `gaps` carries rule-scoped repair directives (raise2's faithfulness closure) —
+# appended to the frozen rule set so the SAME coherent author closes exactly the
+# named gaps and changes nothing else. Empty on a first pass.
+def author_direct(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict {
     notes: list = [];
     guide = _guide_text();
     if not guide { notes.append("direct author: guide not found — authoring against sem only"); }
     examples = _golden_fewshot();
+    rules_md = _rules_md(spec);
+    if gaps.strip() { rules_md = rules_md + "\n\n" + gaps.strip(); }
     ir: str = "";
     try {
-        ir = _strip_fence(author_agir_direct(guide, examples, skill, _rules_md(spec)));
-        notes.append("direct author: " + str(len(ir.splitlines())) + " IR lines");
+        ir = _strip_fence(author_agir_direct(guide, examples, skill, rules_md));
+        notes.append("direct author: " + str(len(ir.splitlines())) + " IR lines"
+                     + (" (repair)" if gaps.strip() else ""));
     } except Exception as e {
         notes.append("direct author failed: " + str(e)[:200]);
         ir = "";
