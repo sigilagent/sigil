@@ -79,7 +79,9 @@
   .nav-toggle{display:none}
 
   /* ---------- hero ---------- */
-  .hero{position:relative;padding:96px 0 72px;overflow:hidden}
+  /* tighter top padding: the eyebrow pill sits high in the frame instead of
+     starting a screenful down */
+  .hero{position:relative;padding:44px 0 72px;overflow:hidden}
   .hero-glow{
     position:absolute;inset:0;z-index:0;pointer-events:none;
     background:
@@ -87,8 +89,12 @@
       radial-gradient(560px 420px at 12% 30%, rgba(34,211,238,.13), transparent 62%);
   }
   .hero .wrap{position:relative;z-index:1}
-  .hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:52px;align-items:center}
-  .hero-grid>div{min-width:0}   /* let grid tracks shrink so the install bar scrolls instead of clipping */
+  /* Single full-width column: the copy runs the whole content width instead of
+     being squeezed into a 1.15fr track beside the mark. The mark is no longer a
+     grid track — it is anchored to the right of the hero (see .sigil-wrap), so
+     it stays in frame without stealing width from the text. */
+  .hero-grid{display:block}
+  .hero-grid>div{min-width:0}   /* let the copy shrink so the install bar scrolls instead of clipping */
   .eyebrow{
     display:inline-flex;align-items:center;gap:9px;
     font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;
@@ -106,7 +112,9 @@
     -webkit-background-clip:text;background-clip:text;color:transparent;
     font-style:italic;
   }
-  .hero-sub{font-size:19px;color:var(--muted);margin:24px 0 8px;max-width:560px}
+  /* full-width copy: the old 560px cap made the lead paragraph read as a narrow
+     column against a full-width heading */
+  .hero-sub{font-size:19px;color:var(--muted);margin:24px 0 8px;max-width:none}
   .hero-sub strong{color:var(--text);font-weight:600}
   .hero-tag{font-family:var(--mono);font-size:13.5px;color:var(--faint);margin-bottom:32px}
   .btns{display:flex;gap:14px;flex-wrap:wrap}
@@ -128,8 +136,22 @@
   .btn svg{width:17px;height:17px}
 
   /* sigil mark */
-  .sigil-wrap{display:flex;justify-content:center;align-items:center}
-  .sigil{width:100%;max-width:340px;height:auto;filter:drop-shadow(0 0 40px rgba(139,92,246,.35))}
+  /* The mark is decoration, not a column: anchor it to the right edge of the
+     hero and let the copy run full width underneath it. Non-interactive so it
+     never eats a click on the text/buttons beneath. */
+  /* The mark rides its own row at the top-right of the hero, in flow: it stays
+     in frame without overlapping the copy or stealing width from it. (It used
+     to be a grid column, which squeezed every paragraph to ~60% width.) */
+  .sigil-wrap{
+    display:flex;justify-content:flex-end;align-items:flex-start;
+    height:0;                 /* takes no vertical space: the copy still starts at the top */
+    margin-bottom:0;
+  }
+  .sigil{
+    width:100%;max-width:190px;height:auto;
+    transform:translateY(-8px);
+    filter:drop-shadow(0 0 40px rgba(139,92,246,.35));
+  }
   /* the three shapes counter-rotate, alternating direction:
      circle (ring) ↻ CW · hexagon ↺ CCW · triangle ↻ CW */
   .sigil .ring{animation:spin 60s linear infinite;transform-box:view-box;transform-origin:center}
@@ -262,7 +284,8 @@
   .oneliner .copy-btn{flex:0 0 auto;font-size:12px;padding:6px 12px;margin-top:1px}
   .oneliner-note{font-size:13px;color:var(--faint);margin:12px 2px 0;font-family:var(--mono)}
   /* hero variant of the install one-liner */
-  .hero-install{margin:0 0 30px;max-width:600px}
+  /* full-width: the code + install bars align with the copy above them */
+  .hero-install{margin:0 0 30px;max-width:none}
   .hero-install-label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
   .hero-install .oneliner{padding:14px 16px;gap:12px}
   .hero-install .oneliner code{font-size:13px}
@@ -328,9 +351,14 @@
   .foot-links a{color:var(--muted)}
   .foot-links a:hover{color:var(--text)}
 
+  @media (max-width:1180px){
+    /* not enough room beside the copy: fade the mark into the background so it
+       reads as texture rather than colliding with the text */
+    .sigil-wrap{opacity:.22}
+  }
   @media (max-width:860px){
-    .hero-grid{grid-template-columns:1fr;gap:40px}
-    .sigil-wrap{order:-1}
+    /* no room at all — the copy owns the hero */
+    .sigil-wrap{display:none}
     .sigil{max-width:250px}
     .two-col{grid-template-columns:1fr}
     .what-grid{grid-template-columns:repeat(2,1fr)}
@@ -421,40 +449,6 @@
   <div class="hero-glow"></div>
   <div class="wrap">
     <div class="hero-grid">
-      <div>
-        <span class="eyebrow"><span class="dot"></span>The skill compiler · SKILL.md → runnable agent harness</span>
-        <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
-        <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
-        <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
-        <div class="hero-install" style="margin-bottom:18px">
-          <span class="hero-install-label">Compile a skill</span>
-          <div class="code" data-code>
-            <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">your terminal</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="k">sigil</span> compile ./SKILL.md <span class="p">-e</span> agent.jac
-./agent.jac <span class="s">"extract the tables from report.pdf"</span></code></pre>
-          </div>
-          <p class="hero-tag" style="margin:10px 0 0">No API key? <a href="#claude" style="color:var(--cyan)">Compile on the Claude Code CLI you already have</a> — and serve the skills back to it as tools.</p>
-        </div>
-        <div class="hero-install">
-          <span class="hero-install-label">Install · macOS &amp; Linux</span>
-          <div class="oneliner" data-code>
-            <span class="pr">$</span>
-            <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
-            <button class="copy-btn">Copy</button>
-          </div>
-        </div>
-        <div class="btns">
-          <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
-            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            View on GitHub
-          </a>
-          <a class="btn btn-paper" href="https://arxiv.org/abs/2607.27309" target="_blank" rel="noopener">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>
-            Read the paper
-          </a>
-          <a class="btn btn-ghost" href="#idea">How it works</a>
-        </div>
-      </div>
       <div class="sigil-wrap">
         <!-- animated sigil mark -->
         <svg class="sigil" viewBox="0 0 260 260" aria-hidden="true">
@@ -493,6 +487,40 @@
           <circle cx="130" cy="130" r="11" fill="url(#core)"/>
           <circle cx="130" cy="130" r="11" fill="none" stroke="#22d3ee" stroke-width="1" opacity=".6"/>
         </svg>
+      </div>
+      <div>
+        <span class="eyebrow"><span class="dot"></span>The skill compiler · SKILL.md → runnable agent harness</span>
+        <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
+        <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
+        <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
+        <div class="hero-install" style="margin-bottom:18px">
+          <span class="hero-install-label">Compile a skill</span>
+          <div class="code" data-code>
+            <div class="code-head"><div class="dots"><i></i><i></i><i></i></div><span class="lbl">your terminal</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="k">sigil</span> compile ./SKILL.md <span class="p">-e</span> agent.jac
+./agent.jac <span class="s">"extract the tables from report.pdf"</span></code></pre>
+          </div>
+          <p class="hero-tag" style="margin:10px 0 0">No API key? <a href="#claude" style="color:var(--cyan)">Compile on the Claude Code CLI you already have</a> — and serve the skills back to it as tools.</p>
+        </div>
+        <div class="hero-install">
+          <span class="hero-install-label">Install · macOS &amp; Linux</span>
+          <div class="oneliner" data-code>
+            <span class="pr">$</span>
+            <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
+            <button class="copy-btn">Copy</button>
+          </div>
+        </div>
+        <div class="btns">
+          <a class="btn btn-primary" href="https://github.com/sigilagent/sigil" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn btn-paper" href="https://arxiv.org/abs/2607.27309" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>
+            Read the paper
+          </a>
+          <a class="btn btn-ghost" href="#idea">How it works</a>
+        </div>
       </div>
     </div>
   </div>
