@@ -732,7 +732,8 @@ def compile_stage_secs(ev: dict) -> str {
 
 def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False,
-                  skill_dir: str = "", strict: bool = False) -> dict {
+                  skill_dir: str = "", strict: bool = False,
+                  ask: any = None, frontend: str = "") -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the fix-forward AI lift:
     # spec loop -> spine -> flows -> assemble -> autofix chain + gates +
     # bounded repair. Only `failed` (no runnable module) refuses to persist —
@@ -747,9 +748,19 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     import from .compiler.ai.report { explain, strict_mode }
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
-    pin_all_lift_llms(frontier);
     set_lift_progress(progress);
     sig = agir_name(source);
+    # FRONT-END SELECTION. Default is raise2 (faithfulness-first). The legacy staged/
+    # direct lift and the Claude agent author stay available behind flags:
+    #   default            raise2
+    #   --agent            agent_lift
+    #   SIGIL_FRONTEND=legacy|staged   the pre-raise2 lift() (staged forces the spine pipeline)
+    fe = frontend if frontend else os.environ.get("SIGIL_FRONTEND", "");
+    if (not agent) and (fe not in ["legacy", "lift", "staged"]) {
+        return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask);
+    }
+    pin_all_lift_llms(frontier);
+    if fe == "staged" { os.environ["SIGIL_STAGED"] = "1"; }
     if agent {
         # `--agent`: keep the grounded spec loop and the gate battery, but let a
         # Claude Code session author the AG-IR against the compile oracle instead
@@ -780,6 +791,50 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
             "issues": issues, "findings": lr.findings, "fixes": lr.fixes,
             "repairs": lr.repairs, "eject": ejected,
             "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
+}
+
+def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_path: str,
+                    progress: any, skill_dir: str, strict: bool, ask: any) -> dict {
+    # The DEFAULT front-end: the faithfulness-first raise. Faithfulness FAILS the
+    # compile (an agent that violates the skill is not a success); underspecified
+    # modality is assumed MAYBE + warned, or asked inline via the TUI asker (`ask`,
+    # provided by the CLI when --clarify is set). --strict additionally makes any
+    # assumed-Maybe warning fatal (CI: force the author to make the skill specific).
+    import from .compiler.ai.raise2 { raise2, explain2, pin_raise2_llms }
+    import from .compiler.ai.eject { eject_program, write_program }
+    import from .compiler.ai.report { strict_mode }
+    pin_raise2_llms(frontier);
+    rr = raise2(source, sig, skill_dir=skill_dir, ask=ask);
+
+    findings: list = [];
+    for d in rr.proof.dropped { findings.append({"gate": "faith", "severity": "error", "message": str(d.message)}); }
+    for a in rr.proof.added { findings.append({"gate": "faith", "severity": "error", "message": str(a.message)}); }
+    hard_warn = (strict or strict_mode()) and (len(rr.warnings) > 0);
+    ok = rr.ok and (not hard_warn);
+    note = explain2(rr);
+    if rr.warnings {
+        note = note + chr(10) + chr(10) + "skill quality:" + chr(10)
+             + chr(10).join(["  " + str(w) for w in rr.warnings]);
+    }
+    if not ok {
+        return {"ok": False, "status": rr.status, "signature": sig,
+                "issues": [str(f["message"]) for f in findings],
+                "findings": findings, "fixes": [], "repairs": rr.repairs,
+                "warnings": rr.warnings, "compile_errors": rr.compile_errors,
+                "env": [], "par": [], "explain": note};
+    }
+    path = write_module(rr.module_src, sig, 1, WORKDIR);
+    desc = skill_description(source);
+    tg = _persist(reg, sig, desc if desc else "compiled from SKILL.md (raise2)",
+                  rr.ir_text, path, "compiled-skill-raise2", 1);
+    ejected = "";
+    if eject {
+        ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
+        ejected = write_program(eject_program(rr.module_src, sig), ep);
+    }
+    return {"ok": True, "status": rr.status, "signature": tg.signature, "module": tg.module,
+            "issues": [], "findings": findings, "fixes": [], "repairs": rr.repairs,
+            "warnings": rr.warnings, "eject": ejected, "env": [], "par": [], "explain": note};
 }
 
 def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
