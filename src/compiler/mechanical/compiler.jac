@@ -429,25 +429,57 @@ def _serving_tool(ir: any, nid: any, surf_prefix: str) -> any {
 }
 
 # Resolve the tool bound to a node (any surface): the node's explicit `tool:`, else a
-# tool whose `serves` lists this node id. Returns [name, params] or [].
+# tool whose `serves` lists this node id. Returns [name, params, surface] or [].
 def _node_tool(ir: any, nid: any, nd: any) -> any {
     tools = _dict(ir.get("tools"));
     tname = nd.get("tool") if isinstance(nd, dict) else None;
     # a node's `tool:` may be a list (multi-tool node) -> not hashable for `in tools`;
     # collapse to the first named tool, and only probe dict membership with a str.
     if isinstance(tname, list) { tname = tname[0] if tname else None; }
-    if isinstance(tname, str) and (tname in tools) { return [str(tname), _parse_sig(tools[tname].get("sig"))[0]]; }
+    if isinstance(tname, str) and (tname in tools) {
+        return [str(tname), _parse_sig(tools[tname].get("sig"))[0], str(tools[tname].get("surface") or "")];
+    }
     # tool whose `serves` lists this node
     for kv in _items(tools) {
         t = kv[1];
         if isinstance(t, dict) and (nid in list(_list(t.get("serves")))) {
-            return [str(kv[0]), _parse_sig(t.get("sig"))[0]];
+            return [str(kv[0]), _parse_sig(t.get("sig"))[0], str(t.get("surface") or "")];
         }
     }
     # tool whose NAME matches the node id (common 1:1 convention, e.g. node
     # `aggregate` <-> tool `aggregate`)
-    if nid in tools { return [str(nid), _parse_sig(tools[nid].get("sig"))[0]]; }
+    if nid in tools { return [str(nid), _parse_sig(tools[nid].get("sig"))[0], str(tools[nid].get("surface") or "")]; }
     return [];
+}
+
+# Carries that some CODE-owned or tool-bound node writes — live objects
+# (workbook, builder, frames) flow through these. A model slot's TEXT return
+# must never clobber one: the slot still runs (its advice rides the trace),
+# but the carry keeps the code-produced value (caught live: xlsx's
+# enforce_template_matching slot overwrote the openpyxl Workbook with prose —
+# `'str' object has no attribute 'save'` at the save node, 9/9 cells).
+def _code_written_carries(ir: any) -> list {
+    out: list = [];
+    for n in _list(ir.get("nodes")) {
+        if not isinstance(n, dict) { continue; }
+        owned = (str(n.get("owner", "")) == "code") or bool(_node_tool(ir, n.get("id"), n));
+        if owned {
+            for w in _list(n.get("writes")) {
+                if str(w) not in out { out.append(str(w)); }
+            }
+        }
+    }
+    return out;
+}
+
+def _slot_assign(tgt: any, call: str, carries: any, types: any, code_owned: any) -> str {
+    if tgt and (str(tgt) in list(code_owned)) and (str(tgt) in list(carries)) {
+        tt = str(_jac_type(carries[str(tgt)].get("type"), types)[0]);
+        if tt != "str" {
+            return "        " + call + ";  # advisory only: '" + str(tgt) + "' is code-produced — model text must not clobber the object";
+        }
+    }
+    return _assign_carry(tgt, call, carries, types);
 }
 
 # Standard write-assignment for a code-tool dispatch whose ::py:: return is Unknown:
@@ -1138,11 +1170,41 @@ def _consumer_hint(ir: any, carry: str) -> str {
     return "";
 }
 
+# Guard-literal map: carry -> the string literals its route guards test with
+# ==. A str discriminator produced by a slot is otherwise UNCONSTRAINED — the
+# model can answer outside the guard set and the route dead-ends (caught live:
+# xlsx's tool_choice slot said "spreadsheet_primary_io"; guards knew "pandas"/
+# "openpyxl"; 8/9 cells silently no-opped). The slot's sem gets the value set.
+def _guard_literals(ir: any, carries: any) -> dict {
+    import re;
+    out: dict = {};
+    for e in _list(ir.get("edges")) {
+        g = str(e.get("guard") or "");
+        m = re.match(r"\s*(?:not\s+)?([A-Za-z_]\w*)\s*==\s*(.+)$", g);
+        if not m { continue; }
+        fld = str(m.group(1));
+        rhs: str = str(m.group(2)).strip();
+        if not (rhs.startswith("\"") or rhs.startswith("'")) {
+            rhs = str(re.split(r"[\s(]", rhs, maxsplit=1)[0]);
+        }
+        val = rhs.strip("\"'");
+        if not val { continue; }
+        if val.lower() in ["true", "false"] { continue; }
+        if re.match(r"^-?\d+(\.\d+)?$", val) { continue; }
+        if val in list(carries) { continue; }
+        cur: list = list(out.get(fld, []));
+        if val not in cur { cur.append(val); }
+        out[fld] = cur;
+    }
+    return out;
+}
+
 def _emit_slots(ir: any) -> str {
     out: list = [];
     types = ir.get("types");
     wlk = _dict(ir.get("walker"));
     carries = _dict(wlk.get("carries"));
+    gl_map = _guard_literals(ir, carries);
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
         nt = str(n.get("type", ""));
@@ -1220,6 +1282,17 @@ def _emit_slots(ir: any) -> str {
         seed = _slot_seed(ir, n["id"]);
         doc = str(n.get("doc") or "");
         semtext = doc + seed;
+        # discriminator slot: its written carry feeds ==-literal route guards.
+        # Constrain the answer to the guard set, or the route can dead-end.
+        if (ret == "str") and n.get("writes") {
+            wf0 = str(_list(n.get("writes"))[0]);
+            lits = list(gl_map.get(wf0) or []);
+            if lits {
+                semtext = semtext + " Answer with EXACTLY one of: "
+                    + ", ".join(["'" + str(x) + "'" for x in lits])
+                    + " — that exact string, nothing else.";
+            }
+        }
         if semtext.strip() {
             if seed { out.append(f"sem {slot} =\n{_block_lit(semtext)};"); }
             else { out.append(f"sem {slot} = {_q(semtext)};"); }
@@ -1434,6 +1507,7 @@ def _emit_walker(ir: any) -> list {
     nidx = _node_index(ir);
     edges = _list(ir.get("edges"));
 
+    code_owned = _code_written_carries(ir);
     member_to_enum: dict = {};
     for kv in _items(types) {
         td = kv[1];
@@ -1531,8 +1605,16 @@ def _emit_walker(ir: any) -> list {
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));
-                body.append(f"        self.{_safe(tgt)} = {val};");
-                body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
+                # a GEN slot's TEXT must never clobber a code-produced OBJECT
+                # carry (caught live: xlsx's GEN-ENUM enforce_template_matching
+                # overwrote the openpyxl Workbook with prose — every save died)
+                if (str(tgt) in list(code_owned)) and (str(tt) != "str") {
+                    body.append(f"        {call};  # advisory only: '{tgt}' is code-produced — model text must not clobber the object");
+                    body.append("        _tui_llm_out(\"(advisory)\");");
+                } else {
+                    body.append(f"        self.{_safe(tgt)} = {val};");
+                    body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
+                }
                 # author+execute fold: a GEN-RAW that writes a `script` carry needs
                 # the authored code RUN so the deliverable is produced.
                 if (ntype == "GEN-RAW") and (tgt == "script") {
@@ -1614,6 +1696,12 @@ def _emit_walker(ir: any) -> list {
             if default_target {
                 if branches { body.append(f"        else {{ visit [-->][?:{default_target}]; }}"); }
                 else { body.append(f"        visit [-->][?:{default_target}];"); }
+            } elif branches {
+                # ALL out-edges guarded and none matched -> the walk used to END
+                # SILENTLY with ok=True (caught live: xlsx's tool_choice slot
+                # answered outside the guard set and 8/9 cells no-opped). A
+                # route dead-end is a fault — abort loudly, naming the node.
+                body.append(f"        else {{ raise RuntimeError(\"route dead-end at {nid}: no guard matched — discriminator value outside the route's guard set\"); }}");
             }
             if (not branches) and (not default_target) { body.append("        visit [-->];"); }
         } elif (ntype == "ROUTE") and (owner == "model") {
@@ -1623,7 +1711,7 @@ def _emit_walker(ir: any) -> list {
                 slot = _slot_name(nid, carries);
                 creadsR = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
                 callR = f"{slot}({_slot_args(creadsR, carries, types)})";
-                body.append(_assign_carry(writes[0], callR, carries, types));
+                body.append(_slot_assign(writes[0], callR, carries, types, code_owned));
             }
             if len(out_edges) > 1 {
                 # LLM-guided traversal (byLLM `visit ... by llm`): `intent` steers the
@@ -1654,14 +1742,41 @@ def _emit_walker(ir: any) -> list {
                 body.append(f"        # SENSE {nid} (no recognized tool dispatch)");
             }
         } elif (ntype == "SENSE") and (owner == "model") {
-            # bounded cognitive fetch: a by-llm slot (may ReAct over autonomy.tools)
-            tgt3m = writes[0] if writes else None;
-            slot = _slot_name(nid, carries);
-            creads3 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-            call3 = f"{slot}({_slot_args(creads3, carries, types)})";
-            body.append(_assign_carry(tgt3m, call3, carries, types));
+            # bounded cognitive fetch: a by-llm slot (may ReAct over autonomy.tools).
+            # A writes-less model SENSE gets NO slot declared (the emission above
+            # requires writes) — calling one anyway is a NameError at the first
+            # visit (caught live: dispatching-parallel-agents' knowledge-recital
+            # node killed all 9 cells). Its content already rides downstream
+            # prompts as resident knowledge. A tool-bound model SENSE likewise
+            # has no slot: dispatch the tool with carry-threaded args instead.
+            stM = _node_tool(ir, nid, n);
+            if not writes {
+                body.append(f"        # knowledge recital {nid}: resident text rides downstream prompts");
+            } elif stM {
+                exprM = _toolfn_prefix(str(stM[0])) + "(" + _bind_args(stM[1], reads, carries, types) + ")";
+                for alM in _assign_writes(writes, exprM, carries, types) { body.append(alM); }
+            } else {
+                tgt3m = writes[0];
+                slot = _slot_name(nid, carries);
+                creads3 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
+                call3 = f"{slot}({_slot_args(creads3, carries, types)})";
+                body.append(_slot_assign(tgt3m, call3, carries, types, code_owned));
+            }
         } elif ntype == "ACT" {
             tgt5 = writes[0] if writes else "artifact";
+            # a writes-less ACT's write TARGET HINT names its deliverable for
+            # the _outname extension match. The generic "artifact" told _outname
+            # nothing — every export of a multi-file skill landed on the task's
+            # FIRST filename (caught live: the HTML artifact wrote philosophy.md,
+            # then the philosophy write clobbered it). Derive the hint from the
+            # node's primary read carry (html_artifact -> ext hint html -> the
+            # task's sketch.html). Hint only — tgt5 keeps gating typing/dispatch.
+            wt5 = str(tgt5);
+            if (not writes) and (wt5 == "artifact") {
+                for rc0 in reads {
+                    if (rc0 in ckeys) and (wt5 == "artifact") { wt5 = str(rc0); }
+                }
+            }
             # ::py:: dispatcher returns are Unknown: assign only to str (str-wrapped)
             # or `any` carries; for a typed obj/list carry, run the tool but leave the
             # carry at its default (a mechanical transpile can't type the py return).
@@ -1687,15 +1802,17 @@ def _emit_walker(ir: any) -> list {
             stA = _node_tool(ir, nid, n);
             tool_exprA = False;
             if (not expr) and stA {
-                expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types, str(tgt5)) + ")";
+                expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types, wt5) + ")";
                 tool_exprA = True;
             }
+            slot_exprA = False;
             if (not expr) and (owner == "model") {
                 # ACT owner=model with no tool = a cognitive emit (e.g. report,
                 # completion tips) -> a by-llm slot over its reads.
                 slot = _slot_name(nid, carries);
                 creads5 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
                 expr = f"{slot}({_slot_args(creads5, carries, types)})";
+                slot_exprA = True;
             }
             # ACT with no tool but a str content carry it reads -> write it to a
             # deterministic run-dir file (app-controlled path). Applies regardless
@@ -1713,6 +1830,7 @@ def _emit_walker(ir: any) -> list {
             }
             if exprlines { for el in exprlines { body.append(el); } }
             elif expr and tool_exprA { for alA in _assign_writes(writes, expr, carries, types) { body.append(alA); } }
+            elif expr and slot_exprA { body.append(_slot_assign(tgt5, expr, carries, types, code_owned)); }
             elif expr { body.append(_assign_carry(tgt5, expr, carries, types)); }
             else { body.append(f"        # ACT {nid} (no recognized tool dispatch)"); }
         } elif ntype == "CALL" {
@@ -1729,7 +1847,7 @@ def _emit_walker(ir: any) -> list {
                 ttc = str(_jac_type(carries[tgtc].get("type"), types)[0]) if (tgtc and (tgtc in ckeys)) else "str";
                 for fl in _exec_repair_lines(tgtc, "", ttc) { body.append(fl); }
             } else {
-                body.append(_assign_carry(tgtc, callc, carries, types));
+                body.append(_slot_assign(tgtc, callc, carries, types, code_owned));
             }
         } elif ntype == "LOOP" {
             # bounded revise/retry: author/produce, then advance (the back-edge guard
@@ -1741,7 +1859,7 @@ def _emit_walker(ir: any) -> list {
             } elif owner == "model" {
                 slot = _slot_name(nid, carries);
                 creadsL = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-                body.append(_assign_carry(writes[0] if writes else None, f"{slot}({_slot_args(creadsL, carries, types)})", carries, types));
+                body.append(_slot_assign(writes[0] if writes else None, f"{slot}({_slot_args(creadsL, carries, types)})", carries, types, code_owned));
             } else {
                 body.append(f"        # LOOP {nid}");
             }
@@ -1785,7 +1903,23 @@ def _emit_walker(ir: any) -> list {
         } elif ntype == "CODE" {
             stC = _node_tool(ir, nid, n);
             if stC {
-                expr = _toolfn_prefix(str(stC[0])) + "(" + _bind_args(stC[1], reads, carries, types) + ")";
+                # a CODE node served by an ACT-surface tool is a WRITE: its path
+                # param must resolve write-side (_outname), not read-side. The
+                # untagged call bound `path` via _inname, which by design skips
+                # save-claimed filenames — save_workbook got path="" and every
+                # xlsx cell died at .save (caught live). The write-target hint
+                # comes from writes[0], else the primary read carry.
+                surfC = str(stC[2]) if len(list(stC)) > 2 else "";
+                wtC = "";
+                if surfC.startswith("ACT") {
+                    wtC = str(writes[0]) if writes else "";
+                    if not wtC {
+                        for rcC in reads {
+                            if (rcC in ckeys) and (not wtC) { wtC = str(rcC); }
+                        }
+                    }
+                }
+                expr = _toolfn_prefix(str(stC[0])) + "(" + _bind_args(stC[1], reads, carries, types, wtC) + ")";
                 for alC in _assign_writes(writes, expr, carries, types) { body.append(alC); }
             } elif n.get("body") {
                 tgtC = writes[0] if writes else None;
@@ -1892,7 +2026,11 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             if str(meta.get("role")) != "input" { continue; }
             if meta.get("produced_by") { continue; }
             if str(_jac_type(meta.get("type"), types)[0]) != "str" { continue; }
-            extra_in.append(f"{k}=task");
+            # _safe the carry name: an autofix-minted lane can be path-shaped
+            # (e.g. './canvas-fonts'), and the `has` decl is already _safe'd — the
+            # spawn kwarg MUST match it or the module is a syntax error (caught
+            # live: canvas-design's minted font-dir carry broke its whole compile).
+            extra_in.append(f"{_safe(k)}=task");
         }
         sargs = _j(", ", ["task=task"] + extra_in);
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");

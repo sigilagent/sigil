@@ -5,6 +5,22 @@ def _ir_with_tools(tools: dict) -> dict {
     return {"tools": tools, "nodes": [], "edges": []};
 }
 
+test "a tool body reading process IO is flagged; param-reading bodies are not" {
+    ir = _ir_with_tools({
+        "hooky": {"body": "import json, sys\ndata = json.load(sys.stdin)\nreturn data.get('user_input')", "sig": "() -> str"},
+        "arger": {"body": "import sys\npath = sys.argv[1]\nreturn open(path).read()", "sig": "() -> str"},
+        "clean": {"body": "return (text or '').upper()", "sig": "(text: str) -> str"},
+        # `input` as a variable/param name is NOT the builtin prompt call
+        "named": {"body": "return input_path or ''", "sig": "(input_path: str) -> str"}
+    });
+    m = extract_manifest(ir);
+    pio = m["proc_io"];
+    assert "hooky" in pio;
+    assert "arger" in pio;
+    assert "clean" not in pio;
+    assert "named" not in pio;
+}
+
 test "python imports are extracted and mapped to pip names" {
     ir = _ir_with_tools({
         "render": {"body": "import fitz\nfrom PIL import Image\nreturn out", "sig": "(out) -> path"},

@@ -197,7 +197,27 @@ def extract_manifest(ir: any) -> dict {
             }
         }
     }
-    return {"py": py, "bin": bins};
+    return {"py": py, "bin": bins, "proc_io": _proc_io_tools(tools)};
+}
+
+# Tool bodies that read PROCESS-level IO instead of their params. A skill's
+# hook script lifted verbatim keeps its `json.load(sys.stdin)` / `sys.argv`
+# input plumbing — under any harness that owns argv/stdin the tool opens the
+# harness's flags as files or hangs on EOF (caught live: using-superpowers
+# crashed all cells with FileNotFoundError('--arm'); xlsx died at node 1 on
+# json.load of an EOF stdin). A compiled tool receives inputs via params only.
+def _proc_io_tools(tools: dict) -> dict {
+    import re;
+    hits: dict = {};
+    for kv in tools.items() {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        body = str(t.get("body") or "");
+        if not body.strip() { continue; }
+        m = re.search(r"sys\.argv|sys\.stdin|(?<![\w.])input\(\)", body);
+        if m { hits[str(kv[0])] = str(m.group(0)); }
+    }
+    return hits;
 }
 
 def probe_manifest(manifest: dict) -> dict {

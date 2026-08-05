@@ -261,7 +261,8 @@ def gate_env_binding(ir_text: str) -> list[str] {
     issues: list = [];
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return []; }
-    pr = probe_manifest(extract_manifest(ir));
+    mf = extract_manifest(ir);
+    pr = probe_manifest(mf);
     for m in list(pr["missing_py"]) {
         issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(m[2])]) + "] import '" + str(m[0])
             + "' — not importable in this runtime. Bind it (pip install " + str(m[1])
@@ -270,6 +271,16 @@ def gate_env_binding(ir_text: str) -> list[str] {
     for b in list(pr["missing_bin"]) {
         issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(b[1])]) + "] shell out to '" + str(b[0])
             + "' — not on PATH. Install it or embody a python fallback.");
+    }
+    # process-IO provenance: a tool that reads sys.argv/sys.stdin/input() takes
+    # the HARNESS's process inputs, not the walker's carries — under any real
+    # harness it opens foreign flags as files or hangs on EOF (caught live:
+    # FileNotFoundError('--arm') across every using-superpowers cell). Inputs
+    # reach a compiled tool through its params; re-author the body.
+    pio = mf.get("proc_io") or {};
+    for kv in pio.items() {
+        issues.append("G7: tool '" + str(kv[0]) + "' reads process IO (" + str(kv[1])
+            + ") — a compiled tool receives inputs via its params, not argv/stdin. Re-author the body.");
     }
     return issues;
 }
