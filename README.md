@@ -27,6 +27,9 @@ check in the skill becomes structure the model cannot skip.
 sigil compile ./SKILL.md -e agent.jac    # SKILL.md  →  one runnable agent
 ./agent.jac "extract the tables from report.pdf"
 SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
+
+sigil eject-agent clean_csv ./csvbot     # …or the whole agent: memory, cron,
+cd csvbot && ./csvbot daemon start       #    channels, a daemon of its own
 ```
 
 <table align="center"><tr>

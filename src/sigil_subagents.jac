@@ -17,7 +17,7 @@ rather than report a failure that never happened.
 """
 
 import from jaclang.byllm.lib { Model }
-import from .sigil { bind_chat_model }
+import from .sigil_core { bind_chat_model }
 import from .sigil_workspace {
     ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
     ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search, _trace

@@ -20,7 +20,7 @@ import sys;
 import os;
 import re;
 import from .sigil_logo { BANNER_LOGO }
-import from .sigil { describe_soul, configure, library, recollect, teach }
+import from .sigil_core { describe_soul, configure, library, recollect, teach }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }

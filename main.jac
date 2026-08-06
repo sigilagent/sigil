@@ -46,6 +46,7 @@ import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
 import from src.sigil_runtime { _jac_bin, read_pid, project_root }
 import from src.sigil_api { JSON_MARKER }
+import from src.eject_agent { eject_agent, carries_compiler }
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
     scheduler_running,
@@ -627,6 +628,31 @@ with entry:__main__ {
             print("removed " + str(r["path"]) + " — Sigil no longer starts at login");
         } else {
             print("usage: daemon start|stop|restart|status|logs|run|install|uninstall");
+        }
+    } elif cmd == "eject-agent" {
+        # eject-agent <signature|all> <dir> [name] — the compiled skill as a WHOLE
+        # agent: its own graph, memory, schedule, channels and daemon. `-e` on
+        # compile still emits the one-shot single file; this is the other thing.
+        sig = _arg(argv, 1);
+        outd = _arg(argv, 2);
+        if (not sig) or (not outd) {
+            print("usage: eject-agent <signature|all> <dir> [name]");
+        } else {
+            sigs: list = [] if sig == "all" else [sig];
+            r = eject_agent(_arg(argv, 3), user_path(outd), sigs, "");
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            leaks = list(r["compiler_leaks"]);
+            print("ejected agent '" + str(r["name"]) + "' -> " + str(r["path"]));
+            print("  skills : " + ", ".join([str(x) for x in list(r["skills"])]));
+            print("  runtime: " + str(r["modules"]) + " modules, no compiler");
+            if leaks {
+                print("xx but it carries the compiler after all:", file=sys.stderr);
+                for l in leaks { print("     " + str(l), file=sys.stderr); }
+                sys.exit(1);
+            }
+            print("");
+            print("  cd " + str(r["path"]) + " && ./" + str(r["name"]) + " solve \"<task>\"");
+            print("  ./" + str(r["name"]) + " daemon start      # it keeps working without you");
         }
     } elif cmd == "where" {
         # Which agent am I talking to? One question, one answer — the graph path.

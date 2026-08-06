@@ -15,6 +15,7 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | [chat-and-tools](chat-and-tools.md) | Chat mode and the full tool-belt |
 | [workspace-and-tools](workspace-and-tools.md) | The workspace, the sandbox switch, the exec gate, and never-timed-out shell jobs |
 | [automation-and-cron](automation-and-cron.md) | Scheduling work the agent runs later |
+| [ejecting-agents](ejecting-agents.md) | Taking a compiled skill out: one-shot program, or a whole agent |
 | [daemon](daemon.md) | Running headless: the background scheduler, one graph, start-at-login |
 | [channels](channels.md) | Connecting Discord / Telegram / WhatsApp / Slack |
 | [memory-and-skills](memory-and-skills.md) | Durable memory and the compiled-skill library |

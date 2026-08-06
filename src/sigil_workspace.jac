@@ -34,8 +34,8 @@ import tempfile;
 import subprocess;
 import from urllib.request { Request, urlopen }
 import from urllib.parse { urlparse, quote_plus }
-import from .sigil {
-    awaken, Soul, compile_skill, claude_mode, verbose_mode,
+import from .sigil_core {
+    awaken, Soul, claude_mode, verbose_mode, compiler_available, compile_via_seam,
     compile_stage_label, compile_stage_line, compile_stage_secs
 }
 import from .approvals { check_exec, allowlist_add }
@@ -662,10 +662,18 @@ def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
     try {
         with open(full, "r") as f { src = f.read(); }
     } except Exception as e { _trace("compile", str(e), False); return "error reading " + path + ": " + str(e); }
+    if not compiler_available() {
+        # An ejected runtime ships skills; it does not author them. Say which
+        # build this is rather than failing on a missing name.
+        _trace("compile", "unavailable in this agent", False);
+        return ("This agent was ejected without the compiler, so it cannot compile "
+                + "a SKILL.md. It runs the skills it shipped with — list_skills() "
+                + "shows them.");
+    }
     _trace("compile", _rel(full));
     want_eject = bool(eject) or bool(eject_path);
     streaming = _stream_view_on();
-    try { r = compile_skill(src, want_eject, eject_path, _compile_stage, False); }
+    try { r = compile_via_seam(src, want_eject, eject_path, _compile_stage); }
     except Exception as e { _trace("compile", str(e)[:120], False); return "compile error: " + str(e)[:400]; }
     finally { if streaming { _stream_view_off(); } }
     if not r["ok"] {
