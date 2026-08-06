@@ -98,13 +98,30 @@ def _fix_lanes(ir: any, skill_dir: str) -> list {
                 fixes.append("lane: read '" + r + "' resolved from the skill directory — inlined "
                              + str(len(content)) + " chars as knowledge resident on '" + nid + "'");
             } else {
+                # A read ref can be path-shaped ('./canvas-fonts') or otherwise
+                # not a valid identifier — minting a carry under that raw name
+                # emits `spawn Agent(./canvas-fonts=task)`, a syntax error that
+                # breaks the whole module (caught live: canvas-design). Sanitize
+                # to a valid identifier and REWRITE the node's read to match, so
+                # the lane, the read, and every lowering site all agree.
+                cn = re.sub(r"[^0-9a-zA-Z_]", "_", r);
+                # collapse leading underscores: a carry named '__x' (from
+                # './x' -> '__x') is Python name-mangled inside the walker
+                # class, so the spawn kwarg __x=task is rejected by __init__
+                # (caught live: canvas-design's './canvas-fonts' -> '__canvas_fonts').
+                cn = re.sub(r"^_+", "", cn);
+                if re.match(r"^[0-9]", cn) { cn = "c_" + cn; }
+                if not cn { cn = "minted_input"; }
+                if cn != r {
+                    nd["reads"] = [(cn if str(x) == r else x) for x in list(nd.get("reads") or [])];
+                }
                 if "walker" not in ir { ir["walker"] = {"carries": {}}; }
                 if not isinstance(ir["walker"].get("carries"), dict) { ir["walker"]["carries"] = {}; }
-                ir["walker"]["carries"][r] = {"type": "str", "role": "input"};
+                ir["walker"]["carries"][cn] = {"type": "str", "role": "input"};
                 carries = _carries(ir);
-                lanes.append(r);
-                fixes.append("lane: minted input carry '" + r + "' (node '" + nid
-                             + "' read it but no lane existed — it now seeds from the task input)");
+                lanes.append(cn);
+                fixes.append("lane: minted input carry '" + cn + "' (node '" + nid
+                             + "' read '" + r + "' but no lane existed — it now seeds from the task input)");
             }
         }
         for wr in list(nd.get("writes") or []) {

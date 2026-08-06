@@ -505,14 +505,33 @@ def _outname(task, fallback="output.txt"):
     # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
     # filename that follows a save/output/write verb; else the first bare filename; else fallback.
+    # EXTENSION-AWARE: the fallback name encodes WHICH deliverable this write is
+    # ("html_file.out", "philosophy_md_file.out") — when a task names several files
+    # (philosophy.md AND sketch.html), extension-blind first-match sent EVERY export
+    # to the same path (caught live: the HTML artifact wrote over philosophy.md).
+    # Prefer candidates whose extension matches an ext token in the fallback.
     import re
     t = task or ""
+    want = None
+    fl = (fallback or "").lower()
+    for ext in ("html", "pdf", "docx", "xlsx", "pptx", "csv", "json", "md", "gif", "png", "svg", "py", "js", "txt"):
+        if re.search(r'(?:^|[_.-])' + ext + r'(?:$|[_.-])', fl):
+            want = ext
+            break
+    cands = []
     m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
     if m:
-        return m.group(1)
-    m = re.search(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
-    if m:
-        return m.group(1)
+        cands.append(m.group(1))
+    cands += re.findall(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
+    if want:
+        for c in cands:
+            ce = c.rsplit(".", 1)[-1].lower()
+            if ce == want or (want == "html" and ce == "htm"):
+                return c
+        # a typed write must never land on a foreign-extension path
+        return re.sub(r'[^A-Za-z0-9_.-]', '_', (fl.rsplit('.', 1)[0] or 'output')) + "." + want
+    if cands:
+        return cands[0]
     return fallback
 
 def _inname(task, fallback=""):
