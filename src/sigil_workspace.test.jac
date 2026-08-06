@@ -171,3 +171,35 @@ test "web_search: claude is only reached in claude mode, and the message says so
     assert "BRAVE_API_KEY" in out and "FIRECRAWL_API_KEY" in out, out;
     assert "web_fetch" in out, out;          # still says what DOES work without a key
 }
+
+test "before_tool and after_tool fire around a tool call" {
+    # Both were declared lifecycle events with no call site. Every tool call
+    # passes through the trace, so that is where they belong.
+    import from .hooks { hook_add, hook_remove, hook_list }
+    def fired(n: str) -> int {
+        for h in hook_list() { if h["name"] == n { return int(h["fired"]); } }
+        return -1;
+    }
+    hook_remove("_t_before_hook");
+    hook_remove("_t_after_hook");
+    hook_remove("_t_fail_hook");
+    hook_add("_t_before_hook", "before_tool", "note", "seen");
+    hook_add("_t_after_hook", "after_tool", "note", "seen");
+    hook_add("_t_fail_hook", "tool_failed", "note", "seen");
+    b0 = fired("_t_before_hook");
+    a0 = fired("_t_after_hook");
+    f0 = fired("_t_fail_hook");
+
+    _trace_start("exec", "echo hi");
+    _trace("exec", "echo hi");
+    assert fired("_t_before_hook") == b0 + 1, "before_tool must fire ahead of the work";
+    assert fired("_t_after_hook") == a0 + 1, "after_tool must fire after it";
+
+    _trace("exec", "false", False);
+    assert fired("_t_fail_hook") == f0 + 1;
+    assert fired("_t_after_hook") == a0 + 1, "a failure must not fire the success event";
+
+    hook_remove("_t_before_hook");
+    hook_remove("_t_after_hook");
+    hook_remove("_t_fail_hook");
+}

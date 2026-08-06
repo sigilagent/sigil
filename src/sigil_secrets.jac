@@ -57,6 +57,23 @@ def resolve_refs(text: str) -> str {
     return out;
 }
 
+def has_unresolved(text: str) -> bool {
+    # A `secret:` reference whose env var is unset survives resolve_refs verbatim,
+    # and the literal string "secret:tg_token" is perfectly truthy. A caller that
+    # only checked for emptiness would hand that to a provider as a credential —
+    # a bridge long-polling Telegram forever with a token that is the word
+    # "secret". Callers that need a real value ask this first.
+    return "secret:" in str(text or "");
+}
+
+def resolve_credential(text: str) -> str {
+    # The resolved value, or "" when anything in it is still a dangling reference.
+    raw = str(text or "");
+    if not raw { return ""; }
+    out = str(resolve_refs(raw));
+    return "" if has_unresolved(out) else out;
+}
+
 def redact_secrets(text: str) -> str {
     # mask any live secret value appearing in text so it never prints / logs
     soul = awaken();

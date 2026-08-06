@@ -29,19 +29,28 @@ import from src.sigil {
     compile_stage_label, compile_stage_line, compile_stage_secs, verbose_mode
 }
 import from src.cron {
-    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
+    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick,
+    cron_run_now, cron_daemon, next_due_ms
 }
+import from src.sigil_cron { fmt_when, human_secs }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
+import from src.sigil_bridge { bridge_run, bridge_running, REPLY_MARKER }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.sigil_docs { list_docs, read_doc }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
+import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit, approvals_pending, approvals_clear }
 import from src.agent { run_task }
 import from src.sigil_tasks { tasks_list, tasks_show }
 import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
-import from src.sigil_runtime { _jac_bin }
+import from src.sigil_runtime { _jac_bin, read_pid, project_root }
+import from src.sigil_api { JSON_MARKER }
+import from src.sigil_daemon {
+    daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
+    scheduler_running,
+    service_install, service_uninstall, log_path, graph_path
+}
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
@@ -199,6 +208,69 @@ def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
+# ---------------------------------------------------------------------------
+# One agent, wherever you invoke it.
+#
+# jac resolves the graph store relative to the WORKING DIRECTORY, so `sigil` run
+# from two directories was two different agents with two different memories,
+# skills and schedules — and the daemon, which has to pick one, would have been
+# a third. Every entry pins cwd to the project.
+#
+# That would break the paths a person typed, so the invocation directory is kept
+# (the `sigil` wrapper passes it as SIGIL_PWD before it cds) and every
+# user-supplied path resolves against it. The installed launcher already cd'd to
+# ~/.sigil/app, which is why `sigil compile ./SKILL.md` from anywhere else could
+# never find the file.
+# ---------------------------------------------------------------------------
+glob _PWD0: str = "";
+
+def _pin_project_dir() -> None {
+    _PWD0 = os.environ.get("SIGIL_PWD") or os.getcwd();
+    try {
+        os.chdir(project_root());
+    } except Exception {
+        return None;
+    }
+    return None;
+}
+
+def user_path(p: str) -> str {
+    s = str(p or "");
+    if not s { return s; }
+    s = os.path.expanduser(s);
+    if os.path.isabs(s) { return s; }
+    return os.path.abspath(os.path.join(_PWD0 or os.getcwd(), s));
+}
+
+def _to_int(s: str, dflt: int) -> int {
+    try { return int(str(s).strip()); } except Exception { return dflt; }
+}
+
+def _json_text(payload: dict) -> str {
+    # One JSON line for the `api` command. Anything the encoder cannot represent
+    # becomes its string form rather than an exception — an endpoint returning a
+    # slightly lossy answer beats one returning a 500 because a value was a node.
+    import json;
+    try { return str(json.dumps(payload, default=_stringify)); }
+    except Exception { return "{\"ok\": false, \"data\": null, \"error\": \"unencodable result\"}"; }
+}
+
+def _stringify(o: any) -> str {
+    return str(o);
+}
+
+def _warn_no_ticker() -> None {
+    # A schedule with nothing ticking it is the failure mode this release exists
+    # to end. Say so at the moment the job is written, not after a week of runs=0.
+    if scheduler_running() { return None; }
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    print(dim + "   nothing is ticking the schedule right now — start it with "
+          + "`sigil daemon start` (background) or `sigil cron daemon` (foreground),"
+          + " or these jobs never fire." + rst);
+    return None;
+}
+
 # Compile-time clarification, rendered in the compile TUI's own aesthetic: an amber
 # '?' marker (matching the cyan '✔' of a finished stage), a dimmed legend, and an
 # inline prompt — the same shape as the ejected agent's runtime human gates. Passed
@@ -271,8 +343,18 @@ def serve_observatory(port: str) {
 }
 
 with entry:__main__ {
+    # Before anything reads the graph: pin cwd to the project so every entry —
+    # CLI, TUI, daemon, a job the daemon fires — is the SAME agent.
+    _pin_project_dir();
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
+
+    # `--claude` is a per-invocation flag, but the daemon's work happens in
+    # CHILD processes — every tick, every channel message. A flag that stopped at
+    # the process boundary would mean background jobs ran on a provider key the
+    # user does not have, which is exactly how the first end-to-end fire failed.
+    # The environment is what children inherit, so that is where the mode lives.
+    if str(os.environ.get("SIGIL_CLAUDE") or "") == "1" { _CLAUDE_MODE = True; }
 
     # Must precede any awaken() — that is where the tiers bind.
     if _CLAUDE_MODE {
@@ -290,6 +372,7 @@ with entry:__main__ {
             sys.exit(1);
         }
         use_claude_code(True);
+        os.environ["SIGIL_CLAUDE"] = "1";   # every subprocess from here inherits it
         # stderr, not stdout: this is a status line, and `mcp-serve` gives stdout
         # to the JSON-RPC wire where a stray line is a protocol violation.
         _who = ("api key" if str(_auth["mode"]) == "api-key"
@@ -431,20 +514,28 @@ with entry:__main__ {
             }
         }
     } elif cmd == "cron" {
-        # cron add <name> <at|every|cron> <spec> "<task>" [tz] [channel] | list | show <name> | runs <name> | rm <name> | enable/disable <name> | tick
+        # cron add <name> <at|every|cron> <spec> "<task>" [tz] [channel] | list | show <name> | runs <name> | rm <name> | enable/disable <name> | tick | run <name> | daemon [interval]
         sub = _arg(argv, 1);
         if sub == "add" {
             r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
                          _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
-            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next=" + str(r["next_run_ms"]));
+            if not r.get("ok", True) {
+                print("xx " + str(r["error"]), file=sys.stderr);
+                sys.exit(1);
+            }
+            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next="
+                  + fmt_when(int(r["next_run_ms"])));
+            _warn_no_ticker();
         } elif sub == "list" {
             js = cron_list();
             if not js { print("(no cron jobs)"); }
             for j in js {
                 print("  " + str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
                       + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
-                      + " err=" + str(j["errors"]) + "  " + str(j["last_status"]));
+                      + " err=" + str(j["errors"]) + "  " + str(j["last_status"])
+                      + "  next=" + fmt_when(int(j["next_run_ms"])));
             }
+            if js { _warn_no_ticker(); }
         } elif sub == "show" { print(cron_show(_arg(argv, 2))); }
         elif sub == "runs" {
             for r in cron_runs(_arg(argv, 2)) { print("  " + ("ok " if r["ok"] else "err") + "  " + str(r["summary"])); }
@@ -453,9 +544,181 @@ with entry:__main__ {
         elif sub == "disable" { print(cron_enable(_arg(argv, 2), False)); }
         elif sub == "tick" {
             t = cron_tick();
-            print("tick: fired " + str(t["count"]) + " job(s)");
+            # the armed count is the daemon's heartbeat: it proves the tick can
+            # see the jobs on the graph, which is the whole question when a job
+            # sits at runs=0.
+            print("tick: fired " + str(t["count"]) + " job(s), " + str(t["armed"]) + " armed");
             for f in list(t["fired"]) { print("  " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err")); }
-        } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick ..."); }
+        } elif sub == "run" {
+            nm = _arg(argv, 2);
+            if not nm { print("usage: cron run <name>"); }
+            else {
+                out = cron_run_now(nm);
+                if not out["ok"] { print("xx " + str(out["error"]), file=sys.stderr); sys.exit(1); }
+                ran = dict(out["ran"]);
+                print(("ok  " if ran["ok"] else "err ") + str(ran["name"]));
+                print(redact_secrets(str(ran["summary"])));
+            }
+        } elif sub == "daemon" {
+            iv = _to_int(_arg(argv, 2), 30);
+            if scheduler_running() {
+                print("xx a cron daemon is already running (pid "
+                      + str(read_pid("cron")) + ")", file=sys.stderr);
+                sys.exit(1);
+            }
+            cron_daemon(iv);
+        } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick|run|daemon ..."); }
+    } elif cmd == "daemon" {
+        # daemon start [interval] | stop | restart [interval] | status | logs [n]
+        #        | run [interval]  (foreground supervisor — what start spawns)
+        #        | install [interval] | uninstall   (launchd / systemd)
+        sub = _arg(argv, 1);
+        if sub == "run" {
+            daemon_run(_to_int(_arg(argv, 2), 30));
+        } elif (sub == "start") or (sub == "restart") {
+            if sub == "restart" and daemon_running() { daemon_stop(); }
+            iv = _to_int(_arg(argv, 2), 30);
+            r = daemon_start(iv);
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("sigil daemon started — pid " + str(r["pid"]) + ", ticking every "
+                  + str(iv) + "s");
+            print("  graph : " + str(r["graph"]));
+            print("  log   : " + str(r["log"]) + "   (sigil daemon logs)");
+        } elif sub == "stop" {
+            r = daemon_stop();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("sigil daemon stopped (pid " + str(r["pid"]) + ")");
+        } elif (sub == "status") or (not sub) {
+            s = daemon_status();
+            if s["running"] {
+                print("sigil daemon: running — pid " + str(s["pid"])
+                      + ", up " + human_secs(int(s["uptime_s"]))
+                      + ", tick " + str(s["interval_s"]) + "s");
+            } else {
+                print("sigil daemon: NOT running   (sigil daemon start)");
+            }
+            print("  graph   : " + str(s["graph"]));
+            print("  log     : " + str(s["log"]));
+            print("  jobs    : " + str(s["jobs"]) + " scheduled, " + str(s["armed"]) + " armed");
+            print("  next due: " + fmt_when(int(s["next_due_ms"])));
+            brs = [str(b) for b in list(s["bridges"])];
+            want = [str(c) for c in list(s["channels"])];
+            if want or brs {
+                missing = [c for c in want if c not in brs];
+                line = ", ".join(brs) if brs else "none";
+                if missing { line += "   (not connected: " + ", ".join(missing) + ")"; }
+                print("  channels: " + line);
+            }
+            print("  at login: " + str(s["service"]) + "   (sigil daemon install)");
+        } elif sub == "logs" {
+            print(daemon_logs(_to_int(_arg(argv, 2), 40)));
+        } elif sub == "install" {
+            r = service_install(_to_int(_arg(argv, 2), 30));
+            if not r["ok"] {
+                print("xx could not install the service: " + str(r["error"]), file=sys.stderr);
+                print("   unit file written to " + str(r["path"]), file=sys.stderr);
+                sys.exit(1);
+            }
+            print("installed the " + str(r["manager"]) + " service — Sigil now starts at login");
+            print("  unit: " + str(r["path"]));
+        } elif sub == "uninstall" {
+            r = service_uninstall();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("removed " + str(r["path"]) + " — Sigil no longer starts at login");
+        } else {
+            print("usage: daemon start|stop|restart|status|logs|run|install|uninstall");
+        }
+    } elif cmd == "where" {
+        # Which agent am I talking to? One question, one answer — the graph path.
+        print("graph     : " + graph_path());
+        print("project   : " + project_root());
+        print("invoked in: " + (_PWD0 or os.getcwd()));
+        print("daemon    : " + ("running" if daemon_running() else "not running"));
+    } elif cmd == "api" {
+        # api <name> <json-args> — the machine-readable face of the CLI, and the
+        # ONLY thing the HTTP endpoints run. Prints one JSON object behind a
+        # marker so a caller can find it past jac's startup chatter. Every
+        # endpoint therefore answers from this graph, in this process, which is
+        # the whole reason the Observatory can now see the agent.
+        import json;
+        name = _arg(argv, 1);
+        raw = _arg(argv, 2) if len(argv) > 2 else "{}";
+        a: dict = {};
+        try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
+        payload: dict = {"ok": True, "data": None, "error": ""};
+        try {
+            if name == "soul" { payload["data"] = describe_soul(); }
+            elif name == "graph" {
+                import from src.sigil { graph_snapshot }
+                payload["data"] = graph_snapshot();
+            }
+            elif name == "library" { payload["data"] = library(); }
+            elif name == "mcp" { payload["data"] = mcp_status(); }
+            elif name == "observability" {
+                import from src.sigil { observability_tail }
+                payload["data"] = observability_tail(int(a.get("n", 120)));
+            }
+            elif name == "recall" { payload["data"] = recollect(str(a.get("query", "")), int(a.get("k", 8))); }
+            elif name == "teach" { payload["data"] = teach(str(a.get("fact", "")), str(a.get("kind", "fact"))); }
+            elif name == "configure" { payload["data"] = configure(str(a.get("key", "")), str(a.get("value", ""))); }
+            elif name == "solve" { payload["data"] = run_task(str(a.get("task", "")), str(a.get("skill", ""))); }
+            elif name == "register_skill" { payload["data"] = register_skill(str(a.get("source", "")), str(a.get("kind", "md"))); }
+            elif name == "add_mcp" {
+                payload["data"] = add_mcp(str(a.get("name", "")), str(a.get("transport", "stdio")),
+                                          str(a.get("target", "")), list(a.get("args") or []));
+            }
+            elif name == "eval" { payload["data"] = eval_skill(str(a.get("signature", "")), str(a.get("probe", ""))); }
+            elif name == "relearn" { payload["data"] = relearn(str(a.get("signature", "")), str(a.get("hint", ""))); }
+            elif name == "forget" { payload["data"] = forget(str(a.get("signature", ""))); }
+            elif name == "chat" {
+                _r = run_task(str(a.get("text", "")), "");
+                payload["data"] = {
+                    "id": "sigil-chatcmpl", "object": "chat.completion",
+                    "model": str(a.get("model", "sigil")),
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant", "content": str(_r["result"])}}]
+                };
+            }
+            elif name == "models" {
+                _data: list = [];
+                for tier in ["frontier", "small", "router"] {
+                    _data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
+                }
+                for e in list(library()) {
+                    _sk = dict(e);
+                    _data.append({"id": "sigil-skill/" + str(_sk["signature"]),
+                                  "object": "model", "owned_by": "sigil"});
+                }
+                payload["data"] = {"object": "list", "data": _data};
+            }
+            elif name == "tools_invoke" {
+                import from src.sigil_mcp { dispatch }
+                _res = dispatch(str(a.get("name", "")), [dict(a.get("arguments") or {})]);
+                if _res is None {
+                    payload["ok"] = False;
+                    payload["error"] = "no registered tool '" + str(a.get("name", "")) + "'";
+                } else { payload["data"] = _res; }
+            }
+            elif name == "inbound" {
+                payload["data"] = inbound(str(a.get("channel", "webhook")), str(a.get("peer", "anon")),
+                                          str(a.get("text", "")), str(a.get("thread_id", "")));
+            }
+            elif name == "cron_tick" { payload["data"] = cron_tick(); }
+            elif name == "cron_list" { payload["data"] = cron_list(); }
+            elif name == "tasks" { payload["data"] = tasks_list(int(a.get("n", 20))); }
+            elif name == "hooks" { payload["data"] = hook_list(); }
+            elif name == "channels" { payload["data"] = channel_list(); }
+            elif name == "approvals" { payload["data"] = approvals_get(); }
+            else {
+                payload["ok"] = False;
+                payload["error"] = "unknown api '" + str(name) + "'";
+            }
+        } except Exception as _apierr {
+            payload["ok"] = False;
+            payload["error"] = str(_apierr)[:600];
+        }
+        print(JSON_MARKER);
+        print(_json_text(payload));
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);
@@ -467,6 +730,7 @@ with entry:__main__ {
                 elif low.endswith(".ir") or low.endswith(".agir") or low.endswith(".yaml") or low.endswith(".yml") { kind = "agir"; }
                 else { kind = "md"; }
             }
+            path = user_path(path);
             src = path if kind == "osp" else open(path).read();
             r = register_skill(src, kind);
             print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
@@ -496,6 +760,10 @@ with entry:__main__ {
                 }
                 i += 1;
             }
+            # resolve both against the directory the user typed them in, not the
+            # project dir this process pinned itself to
+            path = user_path(path);
+            if eject_path { eject_path = user_path(eject_path); }
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             # --clarify asks inline; only meaningful with an interactive stdin.
@@ -558,7 +826,7 @@ with entry:__main__ {
             print("usage: gate <file.agir> [name]");
         } else {
             import from src.compiler.ai.gates { compile_gate, gate_type_unification }
-            with open(irp) as f { ir_src = f.read(); }
+            with open(user_path(irp)) as f { ir_src = f.read(); }
             gname = _arg(argv, 2) if len(argv) > 2 else os.path.splitext(os.path.basename(irp))[0];
             gv = compile_gate(ir_src, gname);
             if not gv.ok {
@@ -584,7 +852,7 @@ with entry:__main__ {
             print("usage: replay <agent.jac> <observability.jsonl> \"<task>\" [workdir]");
         } else {
             import from src.compiler.ai.replay { replay_run }
-            rr = replay_run(modp, obsp, rtask, rwd);
+            rr = replay_run(user_path(modp), user_path(obsp), rtask, user_path(rwd));
             print("replay: " + str(rr["calls_used"]) + "/" + str(rr["calls_recorded"])
                   + " recorded calls, " + str(rr["nodes"]) + " nodes visited");
             if rr["error"] { print("  error: " + str(rr["error"])); }
@@ -593,10 +861,40 @@ with entry:__main__ {
     } elif cmd == "channel" {
         sub = _arg(argv, 1);
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
-        elif sub == "list" { for c in channel_list() { print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  " + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])); } }
+        elif sub == "list" {
+            for c in channel_list() {
+                live = "connected" if bridge_running(str(c["name"])) else "no bridge";
+                print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  "
+                      + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])
+                      + "  " + live);
+            }
+        }
         elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
-        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])); }
-        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("reply: " + str(r["reply"]) + "  (in=" + str(r["in_mid"]) + " out=" + str(r["out_mid"]) + " thread=" + str(r["thread_id"]) + ")"); }
+        elif sub == "send" {
+            r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            state = "delivered" if r.get("delivered") else "recorded but NOT delivered";
+            print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])
+                  + "  [" + state + "]");
+            if r.get("delivery_error") { print("  " + str(r["delivery_error"])); }
+            if r.get("note") { print("  " + str(r["note"])); }
+        }
+        elif sub == "inbound" {
+            # The seam every bridge uses: one message in, one reply out, in a
+            # FRESH process so the answer comes from the current graph. The
+            # marker is how the bridge finds the reply in the output.
+            r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            print(REPLY_MARKER);
+            print(str(r["reply"]));
+        }
+        elif sub == "run" {
+            # channel run <name> [port] — this channel's transport, foreground
+            nm = _arg(argv, 2);
+            if not nm { print("usage: channel run <name> [port]"); }
+            else {
+                r = bridge_run(nm, _to_int(_arg(argv, 3), 0));
+                if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            }
+        }
         elif sub == "setup" {
             # channel setup <discord|telegram|whatsapp|slack> — print connection guidance
             k = _arg(argv, 2);
@@ -627,7 +925,7 @@ with entry:__main__ {
                 print(line + "  " + str(m["text"]));
             }
         }
-        else { print("usage: channel add|list|rm|send|inbound|setup <kind>|connect <name> <kind>|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
+        else { print("usage: channel add|list|rm|send|inbound|run <name>|setup <kind>|connect <name> <kind>|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
     } elif cmd == "hook" {
         sub = _arg(argv, 1);
         if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }
@@ -646,7 +944,24 @@ with entry:__main__ {
         elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
         elif sub == "deescalate" { print(approvals_deescalate()); }
         elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
-        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
+        elif sub == "pending" {
+            pend = approvals_pending();
+            if not pend { print("(nothing waiting on you)"); }
+            for a in pend {
+                print("  " + human_secs(int(a["age_s"])) + " ago  " + str(a["cmd"])[:100]);
+            }
+            if pend {
+                print("   approve one with: sigil approvals approve \"<cmd-prefix>\" allow-always");
+                if daemon_running() {
+                    # A blocked command in a background run is not a hang — it
+                    # ran, was refused, and said so. Point at the reason.
+                    print("   (the daemon is running: nothing headless can answer these, so a"
+                          + " blocked command is reported as BLOCKED and the job moves on)");
+                }
+            }
+        }
+        elif sub == "clear" { print(approvals_clear()); }
+        else { print("usage: approvals get|pending|clear|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
     } elif cmd == "tasks" {
         # tasks list [n] | show <n>  — unified ledger over solve Attempts + cron runs
         sub = _arg(argv, 1);
@@ -690,7 +1005,7 @@ with entry:__main__ {
         sub = _arg(argv, 1);
         if sub == "install" {
             if not _arg(argv, 2) { print("usage: plugin install <openclaw.plugin.json>"); }
-            else { r = plugin_install(_arg(argv, 2)); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
+            else { r = plugin_install(user_path(_arg(argv, 2))); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
         }
         elif sub == "rm" { print(plugin_remove(_arg(argv, 2))); }
         elif (sub == "list") or (not sub) {
@@ -703,7 +1018,7 @@ with entry:__main__ {
         # migrate openclaw <dir>  — fold an OpenClaw export (SOUL.md + config + skills) onto the graph
         sub = _arg(argv, 1); path = _arg(argv, 2);
         if (sub == "openclaw") and path {
-            r = migrate_openclaw(path);
+            r = migrate_openclaw(user_path(path));
             print("migrated: persona=" + str(r["persona"]) + "  ethos+=" + str(r["ethos"])
                   + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
         }

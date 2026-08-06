@@ -12,6 +12,9 @@ import from .sigil { awaken, Soul }
 import from .agent { run_task }
 import from .hooks { fire_hooks }
 import from .sigil_sessions { session_note }
+import from .sigil_secrets { resolve_credential }
+import from .sigil_transports { deliver }
+import from .sigil_api { report_for }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message
@@ -105,13 +108,35 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
             "signature": str(res["signature"]), "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};
 }
 
+def channel_credentials(ch: Channel) -> list[str] {
+    # [token, target]. `config` holds a `secret:<name>` reference, never a value —
+    # resolved from the environment at send time so the token stays off the graph
+    # and out of anything that prints it. "<credential>|<target>" carries the
+    # second coordinate some providers need (a WhatsApp phone id, a webhook URL).
+    raw = str(ch.config or "");
+    if not raw { return ["", ""]; }
+    resolved = str(resolve_credential(raw));
+    if "|" in resolved {
+        bits = resolved.split("|", 1);
+        return [bits[0].strip(), bits[1].strip()];
+    }
+    return [resolved, ""];
+}
+
 def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
-    # Outbound send (agent-initiated / broadcast). The adapter for `channel`
-    # delivers it; we record it on the graph.
+    # Outbound send. This used to write a Message node and stop — the graph said
+    # "sent" and nothing left the machine. Now it goes over the channel's actual
+    # transport, and the record says which of those two things happened.
     soul = awaken();
     ch = _get_channel(soul, channel);
     m = _record(ch, "out", peer, text, thread_id);
-    return {"ok": True, "channel": channel, "peer": peer, "text": text, "mid": m.mid, "thread_id": thread_id};
+    creds = channel_credentials(ch);
+    sent = deliver(ch.kind, str(creds[0]), peer, text, thread_id, str(creds[1]));
+    out = {"ok": True, "channel": channel, "peer": peer, "text": text,
+           "mid": m.mid, "thread_id": thread_id, "delivered": bool(sent["ok"])};
+    if not sent["ok"] { out["delivery_error"] = str(sent["error"]); }
+    if sent.get("note") { out["note"] = str(sent["note"]); }
+    return out;
 }
 
 def react(channel: str, mid: str, emoji: str) -> str {
@@ -166,7 +191,7 @@ walker:pub api_inbound {
     has text: str = "";
     has thread_id: str = "";
     can run with Root entry {
-        r = inbound(self.channel, self.peer, self.text, self.thread_id);
-        report r;
+        report report_for("inbound", {"channel": self.channel, "peer": self.peer,
+                                      "text": self.text, "thread_id": self.thread_id});
     }
 }

@@ -5,17 +5,34 @@ interval), `cron` (5/6-field expression + tz). Jobs persist as CronJob nodes off
 Soul; each fire records a CronRun (the "background task" record) and runs the job's
 task through solve(). One-shot `at` jobs auto-delete after a successful run.
 
+Firing is `cron_tick()`, and something has to call it. `cron_daemon()` is that
+something: a blocking loop the CLI owns (`sigil cron daemon`), running on the same
+local root the rest of the CLI writes to. That detail is load-bearing — a `jac
+start` server puts scheduled work on its own system-user root, a different graph
+from the one `sigil cron add` writes to, so a server-side scheduler would tick an
+empty Soul forever. `api_cron_tick` exists for an external driver (launchd, an
+outer cron) and ticks whichever graph its process owns.
+
 The due-time arithmetic is compiled NATIVE (`na def compute_next`) — a pure integer
 hot path over timestamps, the kind of thing the native codespace is for.
 """
 
+import time;
+import subprocess;
 import from .sigil { awaken, Soul }
 import from .agent { run_task }
 import from .hooks { fire_hooks }
-import from .sigil_cron { now_ms, parse_at, cron_next }
+import from .channels { message_send }
+import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid }
+import from .sigil_api { report_for }
+import from .sigil_runtime {
+    write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
+}
 
 edge Schedules {}   # Soul -> CronJob
 edge Fired {}       # CronJob -> CronRun
+
+glob RUN_HISTORY: int = 50;   # CronRuns kept per job; older fires are pruned
 
 node CronJob {
     has name: str;
@@ -23,7 +40,7 @@ node CronJob {
     has spec: str = "";            # at: epoch-ms ; every: seconds ; cron: expression
     has tz: str = "UTC";
     has task: str = "";            # the system-event / prompt run when the job fires
-    has channel: str = "";         # optional delivery channel (name of a Channel node)
+    has channel: str = "";         # optional delivery target: "<channel>" or "<channel>:<peer>"
     has wake: bool = True;
     has delete_after_run: bool = False;
     has enabled: bool = True;
@@ -59,7 +76,7 @@ def _schedule_next(job: CronJob, from_ms: int) -> int {
         return compute_next(1, int(job.spec or "0"), 0, from_ms);
     }
     if job.kind == "cron" {
-        return cron_next(job.spec, from_ms);
+        return cron_next(job.spec, from_ms, job.tz);
     }
     return compute_next(0, 0, int(job.spec or "0"), from_ms);
 }
@@ -76,11 +93,27 @@ def cron_add(name: str, kind: str, spec: str, task: str,
     soul = awaken();
     resolved = spec;
     if kind == "at" { resolved = str(parse_at(spec)); }   # normalize to epoch-ms
+    # Refuse a schedule we cannot compute rather than accepting it and firing at
+    # some hour nobody asked for. This is the whole reason cron_next returns 0
+    # instead of guessing.
+    if kind == "cron" and not cron_valid(spec) {
+        return {"ok": False, "name": name, "kind": kind, "next_run_ms": 0,
+                "delete_after_run": False,
+                "error": "not a schedulable cron expression: '" + str(spec) + "'"};
+    }
+    if kind == "every" {
+        try { secs = int(spec or "0"); } except Exception as e { secs = 0; }
+        if secs <= 0 {
+            return {"ok": False, "name": name, "kind": kind, "next_run_ms": 0,
+                    "delete_after_run": False,
+                    "error": "'every' needs a positive interval in seconds, got '" + str(spec) + "'"};
+        }
+    }
     job = CronJob(name=name, kind=kind, spec=resolved, task=task, tz=tz,
                   channel=channel, delete_after_run=(delete_after_run or (kind == "at")));
     soul +>:Schedules:+> job;
     job.next_run_ms = _schedule_next(job, now_ms());
-    return {"name": job.name, "kind": job.kind, "next_run_ms": job.next_run_ms,
+    return {"ok": True, "name": job.name, "kind": job.kind, "next_run_ms": job.next_run_ms,
             "delete_after_run": job.delete_after_run};
 }
 
@@ -130,35 +163,261 @@ def cron_remove(name: str) -> str {
 def cron_enable(name: str, on: bool) -> str {
     soul = awaken();
     for j in _jobs(soul) {
-        if j.name == name { j.enabled = on; return name + (" enabled" if on else " disabled"); }
+        if j.name == name {
+            j.enabled = on;
+            # Re-arm from now: a job disabled for a week has a next_run in the
+            # past, and re-enabling it should mean "from here", not "immediately
+            # and then catch up".
+            if on and (j.kind != "at") { j.next_run_ms = _schedule_next(j, now_ms()); }
+            return name + (" enabled" if on else " disabled");
+        }
     }
     return "no such cron job: " + name;
 }
 
 # ---------------------------------------------------------------------------
-# The tick — fire every due job. Driven by jac-scale's scheduler in server mode,
-# a `cron daemon` loop from the CLI, or an external cron hitting api_cron_tick.
+# Firing.
 # ---------------------------------------------------------------------------
+def parse_target(spec: str) -> list[str] {
+    # A job's delivery target is "<channel>" or "<channel>:<peer>" — the peer half
+    # is how a Telegram chat id or a Slack channel id rides along without adding a
+    # field to CronJob (and without the schema drift that would cost every
+    # existing install). Returns ["", ""] for no target.
+    raw = str(spec or "").strip();
+    if not raw { return ["", ""]; }
+    if ":" in raw {
+        bits = raw.split(":", 1);
+        chan = bits[0].strip();
+        peer = bits[1].strip() or "cron";
+        return [chan, peer] if chan else ["", ""];
+    }
+    return [raw, "cron"];
+}
+
+def _deliver(job: CronJob, text: str) -> None {
+    parts = parse_target(job.channel);
+    target = str(parts[0]);
+    if not target { return None; }
+    try {
+        message_send(target, str(parts[1]), text);
+    } except Exception as e {
+        print("cron: delivery to '" + target + "' failed: " + str(e)[:160]);
+    }
+    return None;
+}
+
+def _prune_runs(job: CronJob) -> None {
+    hist = [job -->[?:CronRun]];
+    if len(hist) <= RUN_HISTORY { return; }
+    for r in hist[:len(hist) - RUN_HISTORY] { del r; }
+}
+
+def _fire(job: CronJob, t: int) -> dict {
+    # Run one job. A job that raises must not take the tick down with it — the
+    # next job in the loop is somebody else's schedule.
+    fire_hooks("cron_fired", job.name);
+    ok = False;
+    summary = "";
+    try {
+        res = run_task(job.task, "");
+        ok = "DONE ok" in str(res["trace"]);
+        summary = str(res["result"]);
+    } except Exception as e {
+        ok = False;
+        summary = "job raised: " + str(e)[:400];
+    }
+    run = CronRun(started_ms=t, ok=ok, summary=summary[:400]);
+    job +>:Fired:+> run;
+    job.runs += 1;
+    if not ok { job.errors += 1; }
+    job.last_status = "ok" if ok else "error";
+    _prune_runs(job);
+    if ok { _deliver(job, summary); }
+    return {"name": job.name, "ok": ok, "summary": summary[:400]};
+}
+
+def _rearm(job: CronJob, t: int) -> bool {
+    # Returns True if the job was consumed (deleted). A one-shot that FAILED used
+    # to keep its due time in the past and re-fire on every single tick forever;
+    # it retires instead, with its error on the record.
+    if job.kind == "at" {
+        if job.delete_after_run and job.last_status == "ok" {
+            del job;
+            return True;
+        }
+        job.enabled = False;
+        job.next_run_ms = 0;
+        return False;
+    }
+    job.next_run_ms = _schedule_next(job, t);
+    if job.next_run_ms <= 0 {
+        # Only reachable if a cron expression stopped being schedulable; park the
+        # job rather than spin on it.
+        job.enabled = False;
+    }
+    return False;
+}
+
 def cron_tick() -> dict {
+    # Fire every due job. Driven by `cron_daemon` (the CLI loop), `sigil cron
+    # tick`, or an external driver through `api_cron_tick`.
     soul = awaken();
     t = now_ms();
     fired: list = [];
+    armed = 0;
     for j in _jobs(soul) {
-        if (not j.enabled) or (j.next_run_ms <= 0) or (j.next_run_ms > t) { continue; }
-        fire_hooks("cron_fired", j.name);
-        res = run_task(j.task, "");
-        ok = "DONE ok" in str(res["trace"]);
-        run = CronRun(started_ms=t, ok=ok, summary=str(res["result"])[:400]);
-        j +>:Fired:+> run;
-        j.runs += 1;
-        if not ok { j.errors += 1; }
-        j.last_status = "ok" if ok else "error";
-        fired.append({"name": j.name, "ok": ok});
-        if j.delete_after_run and ok {
-            del j;
-        } else {
-            j.next_run_ms = _schedule_next(j, t);
+        if (not j.enabled) or (j.next_run_ms <= 0) { continue; }
+        armed += 1;
+        if j.next_run_ms > t { continue; }
+        out = _fire(j, t);
+        fired.append({"name": out["name"], "ok": out["ok"]});
+        _rearm(j, t);
+    }
+    return {"now_ms": t, "fired": fired, "count": len(fired), "armed": armed};
+}
+
+def cron_run_now(name: str) -> dict {
+    # Fire one job immediately, on demand, without disturbing its schedule — the
+    # "don't make me wait five minutes to find out if it works" button.
+    soul = awaken();
+    for j in _jobs(soul) {
+        if j.name == name {
+            out = _fire(j, now_ms());
+            if j.kind == "at" { _rearm(j, now_ms()); }
+            return {"ok": True, "ran": out};
         }
     }
-    return {"now_ms": t, "fired": fired, "count": len(fired)};
+    return {"ok": False, "error": "no such cron job: " + name};
+}
+
+def next_due_ms() -> int {
+    # Earliest next_run_ms across enabled jobs, or 0 when nothing is scheduled.
+    soul = awaken();
+    best = 0;
+    for j in _jobs(soul) {
+        if (not j.enabled) or (j.next_run_ms <= 0) { continue; }
+        if (best == 0) or (j.next_run_ms < best) { best = j.next_run_ms; }
+    }
+    return best;
+}
+
+glob CRON_PID: str = "cron";           # pidfile name under $SIGIL_HOME/run
+glob _STOP: dict = {"now": False};     # set by SIGTERM/SIGINT, read by the loop
+
+def cron_daemon_running() -> bool {
+    return process_running(CRON_PID);
+}
+
+def _stop_signal(signum: int, frame: any) -> None {
+    _STOP["now"] = True;
+    return None;
+}
+
+def _install_stop_handlers() -> None {
+    # A service manager stops things with SIGTERM. Without a handler the process
+    # dies where it stands and leaves its pidfile behind, and the next `status`
+    # reports a daemon that isn't there.
+    import signal;
+    try {
+        signal.signal(int(signal.SIGTERM), _stop_signal);
+        signal.signal(int(signal.SIGINT), _stop_signal);
+    } except Exception as e {
+        return None;   # not the main thread — the caller owns shutdown
+    }
+    return None;
+}
+
+def _nap(seconds: int) -> None {
+    # Sleep in slices so a stop signal is honored in about a second rather than
+    # after a full interval. PEP 475 resumes an interrupted sleep, so the slicing
+    # is what makes shutdown prompt.
+    left = seconds;
+    while (left > 0) and (not _STOP["now"]) {
+        time.sleep(1 if left > 1 else left);
+        left -= 1;
+    }
+    return None;
+}
+
+def tick_isolated(timeout_s: int = 1800) -> dict {
+    # Run one tick in a FRESH process, and not as an optimization.
+    #
+    # A long-lived jac process serves the graph it loaded at startup: a daemon
+    # that called cron_tick() in-process would never see a job added afterwards
+    # by `sigil cron add`. That is the same "runs=0 forever" this module exists
+    # to end, one level up — the daemon would be running, and still nothing would
+    # fire. A subprocess opens the store fresh, so every tick sees every job.
+    #
+    # The tick blocks until the fired job finishes: one job runs at a time, and a
+    # long solve delays the next tick rather than stacking runs on top of it.
+    argv = [_jac_bin(), "run", entry_script(), "--", "cron", "tick"];
+    try {
+        p = subprocess.run(argv, cwd=project_root(), capture_output=True,
+                           text=True, timeout=timeout_s);
+    } except subprocess.TimeoutExpired as e {
+        return {"ok": False, "out": "", "err": "tick exceeded " + str(timeout_s) + "s"};
+    } except Exception as ex {
+        return {"ok": False, "out": "", "err": str(ex)[:300]};
+    }
+    return {"ok": p.returncode == 0, "out": str(p.stdout or ""),
+            "err": str(p.stderr or "")[-600:]};
+}
+
+def _report_tick(res: dict, quiet: bool) -> None {
+    if quiet { return None; }
+    if not res["ok"] {
+        print("cron daemon: tick failed: " + str(res["err"])[:300], flush=True);
+        return None;
+    }
+    for line in str(res["out"]).splitlines() {
+        s = line.strip();
+        # relay the tick's own report, not jac's startup chatter. The quiet
+        # "fired 0, N armed" line stays: it is the heartbeat that says the
+        # scheduler is alive AND can see the schedule.
+        if s.startswith("tick: ") or s.startswith("  ") { print(s, flush=True); }
+    }
+    return None;
+}
+
+def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False,
+                job_timeout_s: int = 1800) -> dict {
+    # The blocking scheduler loop. `max_ticks` bounds it for tests; 0 runs until
+    # stopped. Every tick is wrapped: a scheduler that dies on one bad job is the
+    # failure this whole change exists to end.
+    ticks = 0;
+    _STOP["now"] = False;
+    _install_stop_handlers();
+    write_pidfile(CRON_PID);
+    if not quiet {
+        print("cron daemon: ticking every " + str(interval_s) + "s (ctrl-c to stop)", flush=True);
+    }
+    try {
+        while not _STOP["now"] {
+            try {
+                _report_tick(tick_isolated(job_timeout_s), quiet);
+            } except Exception as e {
+                print("cron daemon: tick failed: " + str(e)[:200], flush=True);
+            }
+            ticks += 1;
+            if (max_ticks > 0) and (ticks >= max_ticks) { break; }
+            _nap(interval_s if interval_s > 0 else 30);
+        }
+    } except KeyboardInterrupt as e {
+        _STOP["now"] = True;
+    } finally {
+        clear_pidfile(CRON_PID);
+        if not quiet { print("cron daemon: stopped", flush=True); }
+    }
+    return {"ticks": ticks};
+}
+
+# ---------------------------------------------------------------------------
+# HTTP driver — for an external scheduler (launchd, systemd timer, an outer
+# cron) that would rather POST than hold a process open.
+#   POST /walker/api_cron_tick   {}
+# ---------------------------------------------------------------------------
+walker:pub api_cron_tick {
+    can run with Root entry {
+        report report_for("cron_tick", {});
+    }
 }

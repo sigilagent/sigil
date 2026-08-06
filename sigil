@@ -13,16 +13,28 @@
 #   sigil --claude compile ./SKILL.md  # every model tier on your claude CLI
 #   claude mcp add sigil -- sigil mcp-serve   # your skills, as Claude Code tools
 #
+# Keep working with the terminal closed — the daemon runs the schedule:
+#   sigil daemon start                 # background scheduler (logs to ~/.sigil/log)
+#   sigil daemon status | logs | stop
+#   sigil daemon install               # start at login (launchd / systemd)
+#
 # Prefer a server + web dashboard? Start the gateway, then point at it:
 #   sigil serve                        # Observatory web UI + HTTP API
 #   export SIGIL_URL=http://localhost:8199   # route commands to that gateway
 #   sigil login                        # once — caches a JWT
 #
-# Config via env:  SIGIL_SESSION · SIGIL_URL (gateway) · SIGIL_USER / SIGIL_PASS · SIGIL_JAC
+# Config via env:  SIGIL_HOME (state) · SIGIL_URL (gateway) · SIGIL_USER / SIGIL_PASS · SIGIL_JAC
 set -euo pipefail
 
 URL="${SIGIL_URL:-http://localhost:8199}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# The graph lives next to the code, and jac resolves it relative to the working
+# directory — so run from two places and you had two agents. Pin it here, and
+# hand the CLI the directory you were actually standing in so the paths you type
+# still resolve (SIGIL_PWD).
+export SIGIL_PWD="${SIGIL_PWD:-$PWD}"
+cd "$HERE"
 JAC="${SIGIL_JAC:-$(command -v jac || echo "$HOME/.local/bin/jac")}"
 TOKFILE="${SIGIL_TOKENFILE:-$HOME/.sigil/token}"
 TOKEN="${SIGIL_TOKEN:-$(cat "$TOKFILE" 2>/dev/null || true)}"
@@ -67,7 +79,11 @@ login() {
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  serve)      exec "$JAC" start --dev "$HERE/observatory.jac" --port "${SIGIL_PORT:-8199}" -a "${SIGIL_API_PORT:-8198}" ;;
+  # NOT `jac start` directly: main.jac's serve pins the working directory and
+  # aligns the server's guest root before the server boots. Exec'ing jac start
+  # here skipped both, which is one of the reasons the Observatory showed an
+  # empty agent.
+  serve)      exec "$JAC" run "$HERE/main.jac" -- serve "${SIGIL_PORT:-8199}" ;;
   login)      login ;;
   update)     echo "Updating Sigil to the latest release…"
               exec bash -c 'curl -fsSL "${SIGIL_INSTALL_URL:-https://github.com/sigilagent/sigil/releases/latest/download/install.sh}" | bash' ;;
@@ -77,7 +93,7 @@ case "$cmd" in
     # Export SIGIL_URL to talk to a running gateway (sigil serve) instead.
     if [ -z "${SIGIL_URL+set}" ]; then
       [ "$cmd" = "local" ] && { cmd="${1:-help}"; shift || true; }
-      exec "$JAC" run "$HERE/main.jac" -s "${SIGIL_SESSION:-$HOME/.sigil/agent.session}" -- "$cmd" "$@"
+      exec "$JAC" run "$HERE/main.jac" -- "$cmd" "$@"
     fi
     # GATEWAY mode — SIGIL_URL is set: POST to the running agent's HTTP endpoints.
     case "$cmd" in
