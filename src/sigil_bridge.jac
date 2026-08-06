@@ -22,7 +22,7 @@ import time;
 import signal;
 import subprocess;
 import from pathlib { Path }
-import from .sigil { awaken }
+import from .sigil_core { awaken }
 import from .channels { Channel, _channels }
 import from .sigil_secrets { resolve_credential }
 import from .sigil_runtime {

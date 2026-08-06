@@ -1,0 +1,18 @@
+[project]
+name = "__NAME__"
+version = "1.0.0"
+description = "__DESC__"
+entry-point = "main.jac"
+
+# Ejected from Sigil. This agent carries the runtime — memory, schedule,
+# channels, hooks, approvals, a daemon — and the skills it shipped with. It does
+# NOT carry the compiler: it runs what it has and cannot author new skills.
+
+[dependencies]
+pyyaml = "latest"
+rich = "~=15.0"
+prompt_toolkit = "~=3.0"
+httpx = "latest"
+
+[plugins.byllm.model]
+default_model = "__MODEL__"

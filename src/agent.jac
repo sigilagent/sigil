@@ -7,7 +7,7 @@ sigil + hooks; neither imports this one).
 """
 
 import from .sigil_mcp { dispatch }
-import from .sigil { solve_task, library, describe_soul }
+import from .sigil_core { solve_task, library, describe_soul }
 import from .hooks { fire_hooks }
 import from .sigil_api { report_for }
 

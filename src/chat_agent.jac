@@ -17,7 +17,7 @@ freshly-recalled memory, so the standing brief stays current without a restart.
 
 import json;
 import from jaclang.byllm.lib { Model }
-import from .sigil {
+import from .sigil_core {
     bind_chat_model, describe_soul, teach, recollect, library,
     cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
 }

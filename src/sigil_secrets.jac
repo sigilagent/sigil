@@ -8,7 +8,7 @@ so a token never lands in `soul`, logs, or the Observatory.
 """
 
 import os;
-import from .sigil { awaken, Soul }
+import from .sigil_core { awaken, Soul }
 
 edge Holds {}   # Soul -> SecretRef
 

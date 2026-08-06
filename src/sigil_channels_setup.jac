@@ -13,7 +13,7 @@ the REPL (`/channels`, `/connect`).
 """
 
 import os;
-import from .sigil { awaken, Soul }
+import from .sigil_core { awaken, Soul }
 import from .channels { channel_add, channel_list }
 import from .sigil_secrets { secret_add }
 

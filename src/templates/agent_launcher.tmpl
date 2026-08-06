@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# __NAME__ — an agent ejected from Sigil.
+#
+#   ./__NAME__ solve "<task>"          # run a skill this agent ships with
+#   ./__NAME__ skills                  # what it can do
+#   ./__NAME__ chat                    # interactive
+#
+# It keeps working with the terminal closed:
+#   ./__NAME__ daemon start            # background scheduler + channel bridges
+#   ./__NAME__ daemon status | logs | stop
+#   ./__NAME__ daemon install          # start at login (launchd / systemd)
+#   ./__NAME__ cron add digest cron "0 9 * * *" "<task>"
+#   ./__NAME__ channel connect telegram telegram
+#
+# State: SIGIL_HOME (default ~/.__NAME__) · graph next to this script.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# The graph is resolved relative to the working directory, so pin it — and hand
+# the CLI the directory you were standing in, so the paths you type still work.
+export SIGIL_PWD="${SIGIL_PWD:-$PWD}"
+export SIGIL_HOME="${SIGIL_HOME:-$HOME/.__NAME__}"
+cd "$HERE"
+JAC="${SIGIL_JAC:-$(command -v jac || echo "$HOME/.local/bin/jac")}"
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  help|"") awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
+  *)       exec "$JAC" run "$HERE/main.jac" -- "$cmd" "$@" ;;
+esac

@@ -1,0 +1,370 @@
+"""__NAME__ — an agent ejected from Sigil.
+
+Its soul, memory, skills and schedule live on a graph next to this file, exactly
+as they do in Sigil. What it does not have is the compiler: it runs the skills it
+shipped with and cannot author new ones. `solve` routes to a shipped skill and,
+on a miss, says so.
+
+    ./__NAME__ solve "<task>"
+    ./__NAME__ skills | soul | teach "…" | recall "…"
+    ./__NAME__ daemon start        # keeps working with the terminal closed
+    ./__NAME__ cron add digest cron "0 9 * * *" "<task>"
+    ./__NAME__ channel connect telegram telegram
+"""
+
+import os;
+import sys;
+import json;
+import from pathlib { Path }
+import from agent.sigil_core {
+    awaken, describe_soul, configure, teach, recollect, library, solve_task,
+    Registry, TaskGraph, Crystallized, models_info, model_alias, use_claude_code
+}
+import from agent.agent { run_task }
+import from agent.cron {
+    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick,
+    cron_run_now, cron_daemon, next_due_ms
+}
+import from agent.sigil_cron { fmt_when, human_secs }
+import from agent.sigil_daemon {
+    daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
+    scheduler_running, service_install, service_uninstall, log_path, graph_path
+}
+import from agent.channels { channel_add, channel_list, channel_remove, message_send, inbound, channel_history }
+import from agent.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
+import from agent.sigil_bridge { bridge_run, bridge_running, REPLY_MARKER }
+import from agent.hooks { hook_add, hook_list, hook_enable, hook_remove }
+import from agent.approvals {
+    approvals_get, approvals_set, allowlist_add, approve, approvals_pending, approvals_clear
+}
+import from agent.sigil_tasks { tasks_list, tasks_show }
+import from agent.sigil_secrets { secret_add, secret_remove, secret_list, redact_secrets }
+import from agent.sigil_sessions { session_show, session_reset, session_list }
+import from agent.sigil_runtime { project_root, read_pid, install_osp }
+
+glob AGENT_NAME: str = "__NAME__";
+glob _PWD0: str = "";
+
+def _arg(argv: list, i: int) -> str {
+    return str(argv[i]) if len(argv) > i else "";
+}
+
+def _to_int(s: str, dflt: int) -> int {
+    try { return int(str(s).strip()); } except Exception { return dflt; }
+}
+
+def cli_args(raw: list) -> list {
+    args: list = [];
+    if "--" in raw { args = raw[raw.index("--") + 1:]; }
+    else { args = raw[1:]; }
+    return [str(a) for a in args];
+}
+
+def _pin_project_dir() -> None {
+    # One agent, wherever you invoke it: the graph store is resolved relative to
+    # the working directory. Pin it, and remember where the caller stood so the
+    # paths they typed still resolve.
+    _PWD0 = os.environ.get("SIGIL_PWD") or os.getcwd();
+    try { os.chdir(project_root()); } except Exception { return None; }
+    return None;
+}
+
+def user_path(p: str) -> str {
+    s = str(p or "");
+    if not s { return s; }
+    s = os.path.expanduser(s);
+    if os.path.isabs(s) { return s; }
+    return os.path.abspath(os.path.join(_PWD0 or os.getcwd(), s));
+}
+
+# ---------------------------------------------------------------------------
+# First run: install the shipped skills onto this agent's own graph.
+#
+# The modules travelled as files; the library is graph state, and this agent's
+# graph starts empty. Idempotent — it only fills what is missing, so it is safe
+# on every invocation.
+# ---------------------------------------------------------------------------
+def bootstrap() -> int {
+    manifest = Path(project_root()) / "agent" / "skills.json";
+    if not manifest.exists() { return 0; }
+    try { spec = dict(json.loads(manifest.read_text() or "{}")); }
+    except Exception { return 0; }
+    soul = awaken();
+    regs = [root -->[?:Registry]];
+    if not regs { return 0; }
+    reg = regs[0];
+    have = [str(tg.signature) for tg in [reg -->[?:TaskGraph]]];
+    added = 0;
+    for entry in list(spec.get("skills") or []) {
+        e = dict(entry);
+        sig = str(e.get("signature") or "");
+        if (not sig) or (sig in have) { continue; }
+        tg = TaskGraph(signature=sig, intent=str(e.get("intent") or ""),
+                       agir="", module=str(e.get("module") or ""),
+                       version=int(e.get("version") or 1), origin="ejected");
+        reg +>:Crystallized:+> tg;
+        added += 1;
+    }
+    return added;
+}
+
+def _warn_no_ticker() -> None {
+    if scheduler_running() { return None; }
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    print(dim + "   nothing is ticking the schedule right now — start it with "
+          + "`./" + AGENT_NAME + " daemon start`, or these jobs never fire." + rst);
+    return None;
+}
+
+with entry:__main__ {
+    _pin_project_dir();
+    argv = cli_args(sys.argv);
+    cmd = _arg(argv, 0) if argv else "help";
+    bootstrap();
+
+    if cmd == "solve" {
+        task = _arg(argv, 1);
+        if not task { print("usage: solve \"<task>\""); }
+        else {
+            r = run_task(task, _arg(argv, 2));
+            print("=== route trace ===");
+            print(r["trace"]);
+            print(redact_secrets(str(r["result"])));
+        }
+    } elif (cmd == "skills") or (cmd == "library") {
+        lib = library();
+        if not lib { print("(this agent ships with no skills)"); }
+        for e in lib {
+            print("  " + str(e["signature"]) + "  v" + str(e["version"])
+                  + "  runs=" + str(e["runs"]) + " ok=" + str(e["successes"]));
+        }
+    } elif cmd == "soul" {
+        s = describe_soul();
+        print("soul: " + str(s["name"]));
+        print("  persona : " + str(s["persona"]));
+        print("  models  : frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]));
+        print("  skills  : " + str(s["skills"]) + "   memories: " + str(len(list(s["memories"]))));
+        for e in list(s["ethos"]) { print("    - " + str(e)); }
+    } elif cmd == "configure" {
+        print(configure(_arg(argv, 1), _arg(argv, 2)));
+    } elif cmd == "models" {
+        mi = models_info();
+        print("  frontier : " + str(mi["frontier"]));
+        print("  small    : " + str(mi["small"]));
+    } elif cmd == "teach" {
+        print(teach(_arg(argv, 1), "fact"));
+    } elif cmd == "recall" {
+        for m in recollect(_arg(argv, 1), 8) { print("  (" + str(m["kind"]) + ") " + str(m["content"])); }
+    } elif cmd == "cron" {
+        sub = _arg(argv, 1);
+        if sub == "add" {
+            r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
+                         _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
+            if not r.get("ok", True) { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next="
+                  + fmt_when(int(r["next_run_ms"])));
+            _warn_no_ticker();
+        } elif sub == "list" {
+            js = cron_list();
+            if not js { print("(no cron jobs)"); }
+            for j in js {
+                print("  " + str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
+                      + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
+                      + "  next=" + fmt_when(int(j["next_run_ms"])));
+            }
+            if js { _warn_no_ticker(); }
+        } elif sub == "show" { print(cron_show(_arg(argv, 2))); }
+        elif sub == "runs" {
+            for r in cron_runs(_arg(argv, 2)) { print("  " + ("ok " if r["ok"] else "err") + "  " + str(r["summary"])); }
+        } elif sub == "rm" { print(cron_remove(_arg(argv, 2))); }
+        elif sub == "enable" { print(cron_enable(_arg(argv, 2), True)); }
+        elif sub == "disable" { print(cron_enable(_arg(argv, 2), False)); }
+        elif sub == "tick" {
+            t = cron_tick();
+            print("tick: fired " + str(t["count"]) + " job(s), " + str(t["armed"]) + " armed");
+            for f in list(t["fired"]) { print("  " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err")); }
+        } elif sub == "run" {
+            out = cron_run_now(_arg(argv, 2));
+            if not out["ok"] { print("xx " + str(out["error"]), file=sys.stderr); sys.exit(1); }
+            ran = dict(out["ran"]);
+            print(("ok  " if ran["ok"] else "err ") + str(ran["name"]));
+            print(redact_secrets(str(ran["summary"])));
+        } elif sub == "daemon" { cron_daemon(_to_int(_arg(argv, 2), 30)); }
+        else { print("usage: cron add|list|show|runs|rm|enable|disable|tick|run|daemon ..."); }
+    } elif cmd == "daemon" {
+        sub = _arg(argv, 1);
+        if sub == "run" { daemon_run(_to_int(_arg(argv, 2), 30)); }
+        elif (sub == "start") or (sub == "restart") {
+            if sub == "restart" and daemon_running() { daemon_stop(); }
+            iv = _to_int(_arg(argv, 2), 30);
+            r = daemon_start(iv);
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print(AGENT_NAME + " daemon started — pid " + str(r["pid"]) + ", ticking every " + str(iv) + "s");
+            print("  graph : " + str(r["graph"]));
+            print("  log   : " + str(r["log"]));
+        } elif sub == "stop" {
+            r = daemon_stop();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print(AGENT_NAME + " daemon stopped (pid " + str(r["pid"]) + ")");
+        } elif (sub == "status") or (not sub) {
+            s = daemon_status();
+            if s["running"] {
+                print(AGENT_NAME + " daemon: running — pid " + str(s["pid"])
+                      + ", up " + human_secs(int(s["uptime_s"])) + ", tick " + str(s["interval_s"]) + "s");
+            } else { print(AGENT_NAME + " daemon: NOT running   (./" + AGENT_NAME + " daemon start)"); }
+            print("  graph   : " + str(s["graph"]));
+            print("  log     : " + str(s["log"]));
+            print("  jobs    : " + str(s["jobs"]) + " scheduled, " + str(s["armed"]) + " armed");
+            print("  next due: " + fmt_when(int(s["next_due_ms"])));
+            brs = [str(b) for b in list(s["bridges"])];
+            if brs { print("  channels: " + ", ".join(brs)); }
+            print("  at login: " + str(s["service"]));
+        } elif sub == "logs" { print(daemon_logs(_to_int(_arg(argv, 2), 40))); }
+        elif sub == "install" {
+            r = service_install(_to_int(_arg(argv, 2), 30));
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("installed the " + str(r["manager"]) + " service — " + AGENT_NAME + " starts at login");
+        } elif sub == "uninstall" {
+            r = service_uninstall();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("removed " + str(r["path"]));
+        } else { print("usage: daemon start|stop|restart|status|logs|run|install|uninstall"); }
+    } elif cmd == "channel" {
+        sub = _arg(argv, 1);
+        if sub == "list" {
+            for c in channel_list() {
+                live = "connected" if bridge_running(str(c["name"])) else "no bridge";
+                print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  "
+                      + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"]) + "  " + live);
+            }
+        } elif sub == "connect" {
+            nm = _arg(argv, 2); k = _arg(argv, 3) if _arg(argv, 3) else _arg(argv, 2);
+            r = channel_bootstrap(nm, k, "");
+            print("connected '" + str(r["name"]) + "'  kind=" + str(r["kind"])
+                  + "  token-env=" + str(r["token_env"]) + " (set=" + str(r["token_set"]) + ")");
+            print(str(r["guide"]));
+        } elif sub == "setup" { print(channel_setup_guide(_arg(argv, 2))); }
+        elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
+        elif sub == "send" {
+            r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            print("sent  [" + ("delivered" if r.get("delivered") else "recorded but NOT delivered") + "]");
+            if r.get("delivery_error") { print("  " + str(r["delivery_error"])); }
+        } elif sub == "inbound" {
+            r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            print(REPLY_MARKER);
+            print(str(r["reply"]));
+        } elif sub == "run" {
+            r = bridge_run(_arg(argv, 2), _to_int(_arg(argv, 3), 0));
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+        } elif sub == "history" {
+            for m in channel_history(_arg(argv, 2), 20) {
+                print("  " + str(m["dir"]) + "  " + str(m["peer"]) + "  " + str(m["text"]));
+            }
+        } else { print("usage: channel list|connect|setup|rm|send|inbound|run|history"); }
+    } elif cmd == "hook" {
+        sub = _arg(argv, 1);
+        if sub == "add" { print(hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5))); }
+        elif sub == "list" {
+            for h in hook_list() {
+                print("  " + str(h["name"]) + "  @" + str(h["event"]) + "  ["
+                      + str(h["kind"]) + "]  fired=" + str(h["fired"]));
+            }
+        } elif sub == "rm" { print(hook_remove(_arg(argv, 2))); }
+        elif sub == "enable" { print(hook_enable(_arg(argv, 2), True)); }
+        elif sub == "disable" { print(hook_enable(_arg(argv, 2), False)); }
+        else { print("usage: hook add|list|rm|enable|disable"); }
+    } elif cmd == "approvals" {
+        sub = _arg(argv, 1);
+        if sub == "set" { print(approvals_set(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "allow" { print(allowlist_add(_arg(argv, 2))); }
+        elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
+        elif sub == "pending" {
+            pend = approvals_pending();
+            if not pend { print("(nothing waiting on you)"); }
+            for a in pend { print("  " + human_secs(int(a["age_s"])) + " ago  " + str(a["cmd"])); }
+        } elif sub == "clear" { print(approvals_clear()); }
+        else {
+            g = approvals_get();
+            print("security=" + str(g["security"]) + " ask=" + str(g["ask"]));
+            print("allowlist: " + ", ".join([str(x) for x in list(g["allowlist"])]));
+        }
+    } elif cmd == "tasks" {
+        sub = _arg(argv, 1);
+        if sub == "show" { print(tasks_show(_to_int(_arg(argv, 2), 0))); }
+        else {
+            n = 1;
+            for row in tasks_list(_to_int(_arg(argv, 2), 20)) {
+                print("  " + str(n) + "  [" + str(row["kind"]) + "]  " + str(row["label"])
+                      + "  " + ("ok " if row["ok"] else "err") + "  " + str(row["summary"])[:80]);
+                n += 1;
+            }
+        }
+    } elif cmd == "secret" {
+        sub = _arg(argv, 1);
+        if sub == "add" { print(secret_add(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "rm" { print(secret_remove(_arg(argv, 2))); }
+        else { for s in secret_list() { print("  " + str(s["name"]) + " -> $" + str(s["env"]) + "  set=" + str(s["set"])); } }
+    } elif cmd == "session" {
+        sub = _arg(argv, 1);
+        if sub == "reset" { print(session_reset(_arg(argv, 2), _arg(argv, 3), "per-peer")); }
+        elif sub == "show" {
+            for t in session_show(_arg(argv, 2), _arg(argv, 3), "per-peer") {
+                print("  " + str(t["role"]) + ": " + str(t["text"])[:160]);
+            }
+        } else { for s in session_list() { print("  " + str(s["key"]) + "  turns=" + str(s["turns"])); } }
+    } elif cmd == "chat" {
+        import from agent.sigil_chat { chat_repl }
+        chat_repl();
+    } elif cmd == "where" {
+        print("agent     : " + AGENT_NAME);
+        print("graph     : " + graph_path());
+        print("project   : " + project_root());
+        print("invoked in: " + (_PWD0 or os.getcwd()));
+        print("daemon    : " + ("running" if daemon_running() else "not running"));
+        print("compiler  : not included (ejected runtime — it runs the skills it shipped with)");
+    } elif cmd == "api" {
+        # the machine-readable face, used by the daemon's own subprocess seam
+        name = _arg(argv, 1);
+        raw = _arg(argv, 2) if len(argv) > 2 else "{}";
+        a: dict = {};
+        try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
+        payload: dict = {"ok": True, "data": None, "error": ""};
+        try {
+            if name == "soul" { payload["data"] = describe_soul(); }
+            elif name == "library" { payload["data"] = library(); }
+            elif name == "solve" { payload["data"] = run_task(str(a.get("task", "")), str(a.get("skill", ""))); }
+            elif name == "teach" { payload["data"] = teach(str(a.get("fact", "")), "fact"); }
+            elif name == "cron_tick" { payload["data"] = cron_tick(); }
+            elif name == "cron_list" { payload["data"] = cron_list(); }
+            elif name == "inbound" {
+                payload["data"] = inbound(str(a.get("channel", "webhook")), str(a.get("peer", "anon")),
+                                          str(a.get("text", "")), str(a.get("thread_id", "")));
+            }
+            else { payload["ok"] = False; payload["error"] = "unknown api '" + str(name) + "'"; }
+        } except Exception as _e {
+            payload["ok"] = False;
+            payload["error"] = str(_e)[:600];
+        }
+        print("<<<SIGIL_JSON>>>");
+        print(json.dumps(payload, default=str));
+    } elif (cmd == "compile") or (cmd == "learn") or (cmd == "register-skill") {
+        print("xx " + AGENT_NAME + " was ejected without the compiler: it runs the skills it",
+              file=sys.stderr);
+        print("   shipped with and cannot author new ones. `./" + AGENT_NAME
+              + " skills` lists them.", file=sys.stderr);
+        sys.exit(1);
+    } else {
+        print(AGENT_NAME + " — an agent ejected from Sigil");
+        print("");
+        print("  solve \"<task>\"            run a skill this agent ships with");
+        print("  skills | soul | where     what it is and what it can do");
+        print("  teach \"<fact>\" | recall \"<q>\"");
+        print("  chat                      interactive");
+        print("");
+        print("  daemon start|stop|status|logs|install    keep working, terminal closed");
+        print("  cron add|list|run|rm ...                 schedule work");
+        print("  channel connect|list|send ...            be reachable");
+        print("  hook | approvals | tasks | secret | session");
+    }
+}

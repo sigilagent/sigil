@@ -19,7 +19,7 @@ hot path over timestamps, the kind of thing the native codespace is for.
 
 import time;
 import subprocess;
-import from .sigil { awaken, Soul }
+import from .sigil_core { awaken, Soul }
 import from .agent { run_task }
 import from .hooks { fire_hooks }
 import from .channels { message_send }

@@ -8,7 +8,7 @@ run-time context (bounded), and `channels.inbound` records each turn.
 """
 
 import time;
-import from .sigil { awaken, Soul }
+import from .sigil_core { awaken, Soul }
 import from .hooks { fire_hooks }
 import from datetime { date }
 
