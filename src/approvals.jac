@@ -105,10 +105,50 @@ def _matches(cmd: str, patterns: list) -> bool {
     return False;
 }
 
+glob PENDING_CAP: int = 100;   # most pending approvals kept before the oldest are dropped
+
 def _pend(p: ExecPolicy, cmd: str) -> dict {
-    a = Approval(cmd=cmd, status="pending", ts=_ts());
-    p +>:Pending:+> a;
+    # Deduplicate. Headless — a daemon-fired job, an agent retrying — nobody is
+    # at a prompt to answer, so the same blocked command comes back around every
+    # run and used to mint a fresh Approval node each time. The queue grew until
+    # `sigil approvals` was unreadable and the graph carried thousands of copies
+    # of one question. One question, asked once, with the time it was last asked.
+    pending = [a for a in [p -->[?:Approval]] if a.status == "pending"];
+    for a in pending {
+        if a.cmd == cmd {
+            a.ts = _ts();
+            return {"decision": "approval-pending", "cmd": cmd,
+                    "reason": "awaiting operator approval (asked before)"};
+        }
+    }
+    if len(pending) >= PENDING_CAP {
+        ranked = sorted(pending, key=_by_ts);
+        for old in ranked[:(len(pending) - PENDING_CAP) + 1] { del old; }
+    }
+    p +>:Pending:+> Approval(cmd=cmd, status="pending", ts=_ts());
     return {"decision": "approval-pending", "cmd": cmd, "reason": "awaiting operator approval"};
+}
+
+def _by_ts(a: Approval) -> float {
+    return float(a.ts);
+}
+
+def approvals_pending() -> list {
+    # The queue an operator actually has to work through. Headless runs answer
+    # nothing themselves, so this is where a blocked daemon job shows up.
+    p = _policy();
+    rows = [a for a in [p -->[?:Approval]] if a.status == "pending"];
+    return [{"cmd": a.cmd, "ts": a.ts, "age_s": int(_ts() - a.ts)}
+            for a in sorted(rows, key=_by_ts, reverse=True)];
+}
+
+def approvals_clear() -> str {
+    p = _policy();
+    n = 0;
+    for a in [p -->[?:Approval]] {
+        if a.status == "pending" { del a; n += 1; }
+    }
+    return "cleared " + str(n) + " pending approval(s)";
 }
 
 def check_exec(cmd: str) -> dict {

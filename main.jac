@@ -30,20 +30,25 @@ import from src.sigil {
 }
 import from src.cron {
     cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick,
-    cron_run_now, cron_daemon, cron_daemon_running, next_due_ms
+    cron_run_now, cron_daemon, next_due_ms
 }
-import from src.sigil_cron { fmt_when }
+import from src.sigil_cron { fmt_when, human_secs }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.sigil_docs { list_docs, read_doc }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit }
+import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit, approvals_pending, approvals_clear }
 import from src.agent { run_task }
 import from src.sigil_tasks { tasks_list, tasks_show }
 import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
-import from src.sigil_runtime { _jac_bin, read_pid }
+import from src.sigil_runtime { _jac_bin, read_pid, project_root }
+import from src.sigil_daemon {
+    daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
+    scheduler_running,
+    service_install, service_uninstall, log_path, graph_path
+}
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
@@ -201,6 +206,40 @@ def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
+# ---------------------------------------------------------------------------
+# One agent, wherever you invoke it.
+#
+# jac resolves the graph store relative to the WORKING DIRECTORY, so `sigil` run
+# from two directories was two different agents with two different memories,
+# skills and schedules — and the daemon, which has to pick one, would have been
+# a third. Every entry pins cwd to the project.
+#
+# That would break the paths a person typed, so the invocation directory is kept
+# (the `sigil` wrapper passes it as SIGIL_PWD before it cds) and every
+# user-supplied path resolves against it. The installed launcher already cd'd to
+# ~/.sigil/app, which is why `sigil compile ./SKILL.md` from anywhere else could
+# never find the file.
+# ---------------------------------------------------------------------------
+glob _PWD0: str = "";
+
+def _pin_project_dir() -> None {
+    _PWD0 = os.environ.get("SIGIL_PWD") or os.getcwd();
+    try {
+        os.chdir(project_root());
+    } except Exception {
+        return None;
+    }
+    return None;
+}
+
+def user_path(p: str) -> str {
+    s = str(p or "");
+    if not s { return s; }
+    s = os.path.expanduser(s);
+    if os.path.isabs(s) { return s; }
+    return os.path.abspath(os.path.join(_PWD0 or os.getcwd(), s));
+}
+
 def _to_int(s: str, dflt: int) -> int {
     try { return int(str(s).strip()); } except Exception { return dflt; }
 }
@@ -208,11 +247,12 @@ def _to_int(s: str, dflt: int) -> int {
 def _warn_no_ticker() -> None {
     # A schedule with nothing ticking it is the failure mode this release exists
     # to end. Say so at the moment the job is written, not after a week of runs=0.
-    if cron_daemon_running() { return None; }
+    if scheduler_running() { return None; }
     dim = chr(27) + "[2m";
     rst = chr(27) + "[0m";
-    print(dim + "   nothing is ticking the schedule right now — run `sigil cron daemon`"
-          + " (or point an external cron at `sigil cron tick`), or these jobs never fire." + rst);
+    print(dim + "   nothing is ticking the schedule right now — start it with "
+          + "`sigil daemon start` (background) or `sigil cron daemon` (foreground),"
+          + " or these jobs never fire." + rst);
     return None;
 }
 
@@ -288,6 +328,9 @@ def serve_observatory(port: str) {
 }
 
 with entry:__main__ {
+    # Before anything reads the graph: pin cwd to the project so every entry —
+    # CLI, TUI, daemon, a job the daemon fires — is the SAME agent.
+    _pin_project_dir();
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
@@ -495,13 +538,71 @@ with entry:__main__ {
             }
         } elif sub == "daemon" {
             iv = _to_int(_arg(argv, 2), 30);
-            if cron_daemon_running() {
+            if scheduler_running() {
                 print("xx a cron daemon is already running (pid "
                       + str(read_pid("cron")) + ")", file=sys.stderr);
                 sys.exit(1);
             }
             cron_daemon(iv);
         } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick|run|daemon ..."); }
+    } elif cmd == "daemon" {
+        # daemon start [interval] | stop | restart [interval] | status | logs [n]
+        #        | run [interval]  (foreground supervisor — what start spawns)
+        #        | install [interval] | uninstall   (launchd / systemd)
+        sub = _arg(argv, 1);
+        if sub == "run" {
+            daemon_run(_to_int(_arg(argv, 2), 30));
+        } elif (sub == "start") or (sub == "restart") {
+            if sub == "restart" and daemon_running() { daemon_stop(); }
+            iv = _to_int(_arg(argv, 2), 30);
+            r = daemon_start(iv);
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("sigil daemon started — pid " + str(r["pid"]) + ", ticking every "
+                  + str(iv) + "s");
+            print("  graph : " + str(r["graph"]));
+            print("  log   : " + str(r["log"]) + "   (sigil daemon logs)");
+        } elif sub == "stop" {
+            r = daemon_stop();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("sigil daemon stopped (pid " + str(r["pid"]) + ")");
+        } elif (sub == "status") or (not sub) {
+            s = daemon_status();
+            if s["running"] {
+                print("sigil daemon: running — pid " + str(s["pid"])
+                      + ", up " + human_secs(int(s["uptime_s"]))
+                      + ", tick " + str(s["interval_s"]) + "s");
+            } else {
+                print("sigil daemon: NOT running   (sigil daemon start)");
+            }
+            print("  graph   : " + str(s["graph"]));
+            print("  log     : " + str(s["log"]));
+            print("  jobs    : " + str(s["jobs"]) + " scheduled, " + str(s["armed"]) + " armed");
+            print("  next due: " + fmt_when(int(s["next_due_ms"])));
+            print("  at login: " + str(s["service"]) + "   (sigil daemon install)");
+        } elif sub == "logs" {
+            print(daemon_logs(_to_int(_arg(argv, 2), 40)));
+        } elif sub == "install" {
+            r = service_install(_to_int(_arg(argv, 2), 30));
+            if not r["ok"] {
+                print("xx could not install the service: " + str(r["error"]), file=sys.stderr);
+                print("   unit file written to " + str(r["path"]), file=sys.stderr);
+                sys.exit(1);
+            }
+            print("installed the " + str(r["manager"]) + " service — Sigil now starts at login");
+            print("  unit: " + str(r["path"]));
+        } elif sub == "uninstall" {
+            r = service_uninstall();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            print("removed " + str(r["path"]) + " — Sigil no longer starts at login");
+        } else {
+            print("usage: daemon start|stop|restart|status|logs|run|install|uninstall");
+        }
+    } elif cmd == "where" {
+        # Which agent am I talking to? One question, one answer — the graph path.
+        print("graph     : " + graph_path());
+        print("project   : " + project_root());
+        print("invoked in: " + (_PWD0 or os.getcwd()));
+        print("daemon    : " + ("running" if daemon_running() else "not running"));
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);
@@ -513,6 +614,7 @@ with entry:__main__ {
                 elif low.endswith(".ir") or low.endswith(".agir") or low.endswith(".yaml") or low.endswith(".yml") { kind = "agir"; }
                 else { kind = "md"; }
             }
+            path = user_path(path);
             src = path if kind == "osp" else open(path).read();
             r = register_skill(src, kind);
             print("registered skill: " + str(r["signature"]) + "  [" + str(r["origin"]) + "]  -> " + str(r["module"]));
@@ -542,6 +644,10 @@ with entry:__main__ {
                 }
                 i += 1;
             }
+            # resolve both against the directory the user typed them in, not the
+            # project dir this process pinned itself to
+            path = user_path(path);
+            if eject_path { eject_path = user_path(eject_path); }
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             # --clarify asks inline; only meaningful with an interactive stdin.
@@ -604,7 +710,7 @@ with entry:__main__ {
             print("usage: gate <file.agir> [name]");
         } else {
             import from src.compiler.ai.gates { compile_gate, gate_type_unification }
-            with open(irp) as f { ir_src = f.read(); }
+            with open(user_path(irp)) as f { ir_src = f.read(); }
             gname = _arg(argv, 2) if len(argv) > 2 else os.path.splitext(os.path.basename(irp))[0];
             gv = compile_gate(ir_src, gname);
             if not gv.ok {
@@ -630,7 +736,7 @@ with entry:__main__ {
             print("usage: replay <agent.jac> <observability.jsonl> \"<task>\" [workdir]");
         } else {
             import from src.compiler.ai.replay { replay_run }
-            rr = replay_run(modp, obsp, rtask, rwd);
+            rr = replay_run(user_path(modp), user_path(obsp), rtask, user_path(rwd));
             print("replay: " + str(rr["calls_used"]) + "/" + str(rr["calls_recorded"])
                   + " recorded calls, " + str(rr["nodes"]) + " nodes visited");
             if rr["error"] { print("  error: " + str(rr["error"])); }
@@ -692,7 +798,24 @@ with entry:__main__ {
         elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
         elif sub == "deescalate" { print(approvals_deescalate()); }
         elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
-        else { print("usage: approvals get|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
+        elif sub == "pending" {
+            pend = approvals_pending();
+            if not pend { print("(nothing waiting on you)"); }
+            for a in pend {
+                print("  " + human_secs(int(a["age_s"])) + " ago  " + str(a["cmd"])[:100]);
+            }
+            if pend {
+                print("   approve one with: sigil approvals approve \"<cmd-prefix>\" allow-always");
+                if daemon_running() {
+                    # A blocked command in a background run is not a hang — it
+                    # ran, was refused, and said so. Point at the reason.
+                    print("   (the daemon is running: nothing headless can answer these, so a"
+                          + " blocked command is reported as BLOCKED and the job moves on)");
+                }
+            }
+        }
+        elif sub == "clear" { print(approvals_clear()); }
+        else { print("usage: approvals get|pending|clear|set <sec> <ask>|allow <pattern>|check <cmd>|approve <cmd> <decision>|elevate <min>|deescalate|audit"); }
     } elif cmd == "tasks" {
         # tasks list [n] | show <n>  — unified ledger over solve Attempts + cron runs
         sub = _arg(argv, 1);
@@ -736,7 +859,7 @@ with entry:__main__ {
         sub = _arg(argv, 1);
         if sub == "install" {
             if not _arg(argv, 2) { print("usage: plugin install <openclaw.plugin.json>"); }
-            else { r = plugin_install(_arg(argv, 2)); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
+            else { r = plugin_install(user_path(_arg(argv, 2))); print("installed '" + str(r["name"]) + "'  servers=" + str(len(list(r["servers"]))) + " skills=" + str(len(list(r["skills"])))); }
         }
         elif sub == "rm" { print(plugin_remove(_arg(argv, 2))); }
         elif (sub == "list") or (not sub) {
@@ -749,7 +872,7 @@ with entry:__main__ {
         # migrate openclaw <dir>  — fold an OpenClaw export (SOUL.md + config + skills) onto the graph
         sub = _arg(argv, 1); path = _arg(argv, 2);
         if (sub == "openclaw") and path {
-            r = migrate_openclaw(path);
+            r = migrate_openclaw(user_path(path));
             print("migrated: persona=" + str(r["persona"]) + "  ethos+=" + str(r["ethos"])
                   + "  channels+=" + str(r["channels"]) + "  models=" + str(r["models"]) + "  skills+=" + str(r["skills"]));
         }

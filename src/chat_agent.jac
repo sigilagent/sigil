@@ -22,7 +22,8 @@ import from .sigil {
     cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
 }
 import from .agent { run_task }
-import from .cron { cron_add, cron_list, cron_remove, cron_run_now, cron_daemon_running }
+import from .cron { cron_add, cron_list, cron_remove, cron_run_now }
+import from .sigil_daemon { scheduler_running }
 import from .sigil_cron { fmt_when }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
@@ -61,11 +62,11 @@ def schedule_task(name: str, kind: str, spec: str, task: str) -> str {
     }
     out = "scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] first fire "
           + fmt_when(int(r["next_run_ms"]));
-    if not cron_daemon_running() {
+    if not scheduler_running() {
         # The model has to be able to say this out loud. Answering "scheduled!"
         # while nothing ticks is how a job sat at runs=0 for a week.
         out += ". WARNING: no scheduler is running, so this job will NOT fire yet — "
-               + "the user needs to start one with `sigil cron daemon`.";
+               + "the user needs to start one with `sigil daemon start`.";
     }
     return out;
 }
@@ -82,8 +83,8 @@ def list_scheduled() -> str {
                    + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
                    + "  next=" + fmt_when(int(j["next_run_ms"])) + "  " + str(j["task"]));
     }
-    if cron_daemon_running() { out.append("scheduler: running"); }
-    else { out.append("scheduler: NOT RUNNING — nothing will fire until `sigil cron daemon` is started"); }
+    if scheduler_running() { out.append("scheduler: running"); }
+    else { out.append("scheduler: NOT RUNNING — nothing will fire until `sigil daemon start` is run"); }
     return "\n".join(out);
 }
 
@@ -259,8 +260,8 @@ Guidance:
   "on a cron" all map to it. Use list_scheduled / cancel_scheduled to manage jobs, and
   run_scheduled_now to fire one immediately. Scheduled jobs only fire while a scheduler
   process is running; list_scheduled tells you whether one is. If it is not, a job at
-  runs=0 has not failed — it has never been tried, and the fix is for the user to start
-  `sigil cron daemon`. Say that plainly instead of speculating about timers.
+  runs=0 has not failed — it has never been tried, and the fix is for the user to run
+  `sigil daemon start`. Say that plainly instead of speculating about timers.
 - Memory: remember_fact for durable facts the user will want later; recall_memory to
   look them up.
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
