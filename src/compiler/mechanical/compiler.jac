@@ -1696,12 +1696,20 @@ def _emit_walker(ir: any) -> list {
             if default_target {
                 if branches { body.append(f"        else {{ visit [-->][?:{default_target}]; }}"); }
                 else { body.append(f"        visit [-->][?:{default_target}];"); }
-            } elif branches {
-                # ALL out-edges guarded and none matched -> the walk used to END
-                # SILENTLY with ok=True (caught live: xlsx's tool_choice slot
-                # answered outside the guard set and 8/9 cells no-opped). A
-                # route dead-end is a fault — abort loudly, naming the node.
+            } elif len(list(branches)) > 1 {
+                # a MULTI-branch route whose discriminator matched none of its
+                # guards is a real dead-end -> the walk used to END SILENTLY with
+                # ok=True (caught live: xlsx's tool_choice slot answered outside
+                # the guard set, 8/9 cells no-opped). Abort loudly, naming the node.
                 body.append(f"        else {{ raise RuntimeError(\"route dead-end at {nid}: no guard matched — discriminator value outside the route's guard set\"); }}");
+            } elif branches {
+                # a SINGLE guarded edge that is MANDATORY: the guard is a
+                # precondition on a transition that must happen anyway (caught
+                # live: canvas-design's `begin_aspects == true` on a mandatory
+                # edge, where begin_aspects is never produced). Raising here
+                # killed the whole aspect sequence; take the edge instead.
+                only_target = str(branches[0][1]);
+                body.append(f"        else {{ visit [-->][?:{only_target}]; }}");
             }
             if (not branches) and (not default_target) { body.append("        visit [-->];"); }
         } elif (ntype == "ROUTE") and (owner == "model") {

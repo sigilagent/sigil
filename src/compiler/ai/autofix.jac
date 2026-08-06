@@ -105,7 +105,12 @@ def _fix_lanes(ir: any, skill_dir: str) -> list {
                 # to a valid identifier and REWRITE the node's read to match, so
                 # the lane, the read, and every lowering site all agree.
                 cn = re.sub(r"[^0-9a-zA-Z_]", "_", r);
-                if re.match(r"^[0-9]", cn) { cn = "_" + cn; }
+                # collapse leading underscores: a carry named '__x' (from
+                # './x' -> '__x') is Python name-mangled inside the walker
+                # class, so the spawn kwarg __x=task is rejected by __init__
+                # (caught live: canvas-design's './canvas-fonts' -> '__canvas_fonts').
+                cn = re.sub(r"^_+", "", cn);
+                if re.match(r"^[0-9]", cn) { cn = "c_" + cn; }
                 if not cn { cn = "minted_input"; }
                 if cn != r {
                     nd["reads"] = [(cn if str(x) == r else x) for x in list(nd.get("reads") or [])];
