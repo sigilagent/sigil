@@ -22,7 +22,8 @@ import from .sigil {
     cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
 }
 import from .agent { run_task }
-import from .cron { cron_add, cron_list, cron_remove }
+import from .cron { cron_add, cron_list, cron_remove, cron_run_now, cron_daemon_running }
+import from .sigil_cron { fmt_when }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from .sigil_docs { list_docs, read_doc }
@@ -55,16 +56,47 @@ sem schedule_task.task = "The instruction to execute when the job fires.";
 def schedule_task(name: str, kind: str, spec: str, task: str) -> str {
     _trace("schedule", name + " [" + kind + " " + spec + "]");
     r = cron_add(name, kind, spec, task, "UTC", "", False);
-    return "scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next_run_ms=" + str(r["next_run_ms"]);
+    if not r.get("ok", True) {
+        return "could not schedule '" + str(name) + "': " + str(r["error"]);
+    }
+    out = "scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] first fire "
+          + fmt_when(int(r["next_run_ms"]));
+    if not cron_daemon_running() {
+        # The model has to be able to say this out loud. Answering "scheduled!"
+        # while nothing ticks is how a job sat at runs=0 for a week.
+        out += ". WARNING: no scheduler is running, so this job will NOT fire yet — "
+               + "the user needs to start one with `sigil cron daemon`.";
+    }
+    return out;
 }
 
-sem list_scheduled = "List the currently scheduled cron jobs (name, kind, schedule, run counts).";
+sem list_scheduled = """List the currently scheduled cron jobs (name, kind, schedule,
+next fire time, run counts) and whether a scheduler is actually running. If it is not,
+say so — a job with runs=0 and no scheduler has not failed, it has never been tried.""";
 def list_scheduled() -> str {
     js = cron_list();
     if not js { return "(no scheduled jobs)"; }
     out: list = [];
-    for j in js { out.append(str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  " + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"]) + "  " + str(j["task"])); }
+    for j in js {
+        out.append(str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
+                   + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
+                   + "  next=" + fmt_when(int(j["next_run_ms"])) + "  " + str(j["task"]));
+    }
+    if cron_daemon_running() { out.append("scheduler: running"); }
+    else { out.append("scheduler: NOT RUNNING — nothing will fire until `sigil cron daemon` is started"); }
     return "\n".join(out);
+}
+
+sem run_scheduled_now = """Run a scheduled job RIGHT NOW, once, without waiting for its
+next fire and without changing its schedule. Use this when the user wants to test a job
+or wants its result immediately.""";
+sem run_scheduled_now.name = "The job name to run now.";
+def run_scheduled_now(name: str) -> str {
+    _trace("run-job", name);
+    r = cron_run_now(name);
+    if not r["ok"] { return str(r["error"]); }
+    ran = dict(r["ran"]);
+    return ("ok" if ran["ok"] else "failed") + ": " + str(ran["summary"])[:600];
 }
 
 sem cancel_scheduled = "Cancel (remove) a scheduled cron job by name.";
@@ -224,7 +256,11 @@ Guidance:
   "new PRs/issues in a repo" fetch GitHub's API directly, e.g.
   web_fetch("https://api.github.com/repos/<org>/<repo>/pulls?state=open"), no key needed.
 - Recurring or future work: use schedule_task (cron). "every morning", "in 2 hours",
-  "on a cron" all map to it. Use list_scheduled / cancel_scheduled to manage jobs.
+  "on a cron" all map to it. Use list_scheduled / cancel_scheduled to manage jobs, and
+  run_scheduled_now to fire one immediately. Scheduled jobs only fire while a scheduler
+  process is running; list_scheduled tells you whether one is. If it is not, a job at
+  runs=0 has not failed — it has never been tried, and the fix is for the user to start
+  `sigil cron daemon`. Say that plainly instead of speculating about timers.
 - Memory: remember_fact for durable facts the user will want later; recall_memory to
   look them up.
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
@@ -243,7 +279,7 @@ def chat_agent(message: str) -> str by chat_llm(
     tools=[
         ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
         ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search,
-        schedule_task, list_scheduled, cancel_scheduled,
+        schedule_task, list_scheduled, cancel_scheduled, run_scheduled_now,
         remember_fact, recall_memory, sigil_compile, learn_skill, list_skills,
         mcp_call, send_message, connect_channel, setup_channel,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,

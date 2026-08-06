@@ -29,8 +29,10 @@ import from src.sigil {
     compile_stage_label, compile_stage_line, compile_stage_secs, verbose_mode
 }
 import from src.cron {
-    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick
+    cron_add, cron_list, cron_show, cron_runs, cron_remove, cron_enable, cron_tick,
+    cron_run_now, cron_daemon, cron_daemon_running, next_due_ms
 }
+import from src.sigil_cron { fmt_when }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.sigil_docs { list_docs, read_doc }
@@ -41,7 +43,7 @@ import from src.sigil_tasks { tasks_list, tasks_show }
 import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
-import from src.sigil_runtime { _jac_bin }
+import from src.sigil_runtime { _jac_bin, read_pid }
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
 glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
@@ -197,6 +199,21 @@ def _compile_ev(ev: dict) -> None {
 
 def _arg(argv: list, i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
+}
+
+def _to_int(s: str, dflt: int) -> int {
+    try { return int(str(s).strip()); } except Exception { return dflt; }
+}
+
+def _warn_no_ticker() -> None {
+    # A schedule with nothing ticking it is the failure mode this release exists
+    # to end. Say so at the moment the job is written, not after a week of runs=0.
+    if cron_daemon_running() { return None; }
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    print(dim + "   nothing is ticking the schedule right now — run `sigil cron daemon`"
+          + " (or point an external cron at `sigil cron tick`), or these jobs never fire." + rst);
+    return None;
 }
 
 # Compile-time clarification, rendered in the compile TUI's own aesthetic: an amber
@@ -431,20 +448,28 @@ with entry:__main__ {
             }
         }
     } elif cmd == "cron" {
-        # cron add <name> <at|every|cron> <spec> "<task>" [tz] [channel] | list | show <name> | runs <name> | rm <name> | enable/disable <name> | tick
+        # cron add <name> <at|every|cron> <spec> "<task>" [tz] [channel] | list | show <name> | runs <name> | rm <name> | enable/disable <name> | tick | run <name> | daemon [interval]
         sub = _arg(argv, 1);
         if sub == "add" {
             r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
                          _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
-            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next=" + str(r["next_run_ms"]));
+            if not r.get("ok", True) {
+                print("xx " + str(r["error"]), file=sys.stderr);
+                sys.exit(1);
+            }
+            print("scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] next="
+                  + fmt_when(int(r["next_run_ms"])));
+            _warn_no_ticker();
         } elif sub == "list" {
             js = cron_list();
             if not js { print("(no cron jobs)"); }
             for j in js {
                 print("  " + str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
                       + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
-                      + " err=" + str(j["errors"]) + "  " + str(j["last_status"]));
+                      + " err=" + str(j["errors"]) + "  " + str(j["last_status"])
+                      + "  next=" + fmt_when(int(j["next_run_ms"])));
             }
+            if js { _warn_no_ticker(); }
         } elif sub == "show" { print(cron_show(_arg(argv, 2))); }
         elif sub == "runs" {
             for r in cron_runs(_arg(argv, 2)) { print("  " + ("ok " if r["ok"] else "err") + "  " + str(r["summary"])); }
@@ -455,7 +480,25 @@ with entry:__main__ {
             t = cron_tick();
             print("tick: fired " + str(t["count"]) + " job(s)");
             for f in list(t["fired"]) { print("  " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err")); }
-        } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick ..."); }
+        } elif sub == "run" {
+            nm = _arg(argv, 2);
+            if not nm { print("usage: cron run <name>"); }
+            else {
+                out = cron_run_now(nm);
+                if not out["ok"] { print("xx " + str(out["error"]), file=sys.stderr); sys.exit(1); }
+                ran = dict(out["ran"]);
+                print(("ok  " if ran["ok"] else "err ") + str(ran["name"]));
+                print(redact_secrets(str(ran["summary"])));
+            }
+        } elif sub == "daemon" {
+            iv = _to_int(_arg(argv, 2), 30);
+            if cron_daemon_running() {
+                print("xx a cron daemon is already running (pid "
+                      + str(read_pid("cron")) + ")", file=sys.stderr);
+                sys.exit(1);
+            }
+            cron_daemon(iv);
+        } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick|run|daemon ..."); }
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);

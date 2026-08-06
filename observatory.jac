@@ -12,6 +12,7 @@ import from src.sigil {
     api_eval, api_relearn, api_forget
 }
 import from src.agent { api_chat_completions, api_models, api_tools_invoke }
+import from src.cron { api_cron_tick }
 
 cl {
     import from web.app { App }

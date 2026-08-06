@@ -83,6 +83,100 @@ def repo_root() -> str {
     return str(_here());
 }
 
+# ---------------------------------------------------------------------------
+# Process bookkeeping. Anything that runs longer than one command — the cron
+# loop today, the full daemon next — leaves a pidfile under `$SIGIL_HOME/run`,
+# so a second copy can tell whether the first is still alive and the CLI can
+# answer "is anything actually ticking?" without guessing.
+# ---------------------------------------------------------------------------
+def sigil_home() -> str {
+    d = os.getenv("SIGIL_HOME") or os.path.expanduser("~/.sigil");
+    try {
+        Path(d).mkdir(parents=True, exist_ok=True);
+    } except Exception as e {
+        return d;
+    }
+    return d;
+}
+
+def run_dir() -> str {
+    d = os.path.join(sigil_home(), "run");
+    try {
+        Path(d).mkdir(parents=True, exist_ok=True);
+    } except Exception as e {
+        return d;
+    }
+    return d;
+}
+
+def pid_path(name: str) -> str {
+    return os.path.join(run_dir(), name + ".pid");
+}
+
+def pid_alive(pid: int) -> bool {
+    if pid <= 0 {
+        return False;
+    }
+    try {
+        os.kill(pid, 0);
+    } except ProcessLookupError as e {
+        return False;
+    } except PermissionError as e {
+        return True;      # it exists, it just isn't ours to signal
+    } except Exception as e {
+        return False;
+    }
+    return True;
+}
+
+def read_pid(name: str) -> int {
+    p = Path(pid_path(name));
+    if not p.exists() {
+        return 0;
+    }
+    try {
+        return int((p.read_text() or "0").strip() or "0");
+    } except Exception as e {
+        return 0;
+    }
+}
+
+def clear_pidfile(name: str) -> None {
+    p = Path(pid_path(name));
+    try {
+        if p.exists() {
+            p.unlink();
+        }
+    } except Exception as e {
+        return None;
+    }
+    return None;
+}
+
+def write_pidfile(name: str, pid: int = 0) -> str {
+    path = pid_path(name);
+    try {
+        Path(path).write_text(str(pid or os.getpid()));
+    } except Exception as e {
+        return "";
+    }
+    return path;
+}
+
+def process_running(name: str) -> bool {
+    # A pidfile pointing at a dead process is worse than no pidfile — it makes
+    # `daemon status` lie. Clear it on the way past.
+    pid = read_pid(name);
+    if pid <= 0 {
+        return False;
+    }
+    if pid_alive(pid) {
+        return True;
+    }
+    clear_pidfile(name);
+    return False;
+}
+
 # The AG-IR authoring contract handed to the frontier compiler. Prefer the
 # compiler-exact template (a concrete working AG-IR to mimic) over the abstract
 # primitive-standard — zero-shot authoring needs the exact schema.
