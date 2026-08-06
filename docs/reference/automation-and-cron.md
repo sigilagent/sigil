@@ -15,8 +15,14 @@ sigil cron daemon          # the scheduler: ticks every 30s until stopped
 sigil cron daemon 5        # tick every 5 seconds instead
 ```
 
-It runs in the foreground, logs each fire, and stops cleanly on ctrl-c or `SIGTERM`,
+It runs in the foreground, logs every tick, and stops cleanly on ctrl-c or `SIGTERM`,
 clearing its pidfile at `$SIGIL_HOME/run/cron.pid` (default `~/.sigil/run/cron.pid`).
+
+Each tick line is a heartbeat — `tick: fired 0 job(s), 3 armed` says the scheduler is
+alive *and* can see three jobs. Every tick runs in a fresh process on purpose: a
+long-lived jac process serves the graph it loaded at startup, so an in-process loop
+would never see a job added after it started. One job runs at a time; a long solve
+delays the next tick rather than stacking runs on top of it.
 
 Prefer not to hold a process open? Drive the tick from outside:
 

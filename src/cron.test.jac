@@ -108,10 +108,13 @@ test "cron round-trip: add, list, next-due, tick-not-due, remove" {
 
     assert next_due_ms() > 0;
 
-    # nothing is due, so a tick must not fire anything (and must not raise)
+    # nothing is due, so a tick must not fire anything (and must not raise) —
+    # but it must COUNT the job as armed. That count is the daemon's heartbeat:
+    # "fired 0, 0 armed" and "fired 0, 1 armed" are very different diagnoses.
     t = cron_tick();
     fired = [f["name"] for f in list(t["fired"])];
     assert "_t_roundtrip" not in fired;
+    assert int(t["armed"]) >= 1;
 
     assert "removed" in cron_remove("_t_roundtrip");
     assert "_t_roundtrip" not in [j["name"] for j in cron_list()];

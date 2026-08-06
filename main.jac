@@ -478,7 +478,10 @@ with entry:__main__ {
         elif sub == "disable" { print(cron_enable(_arg(argv, 2), False)); }
         elif sub == "tick" {
             t = cron_tick();
-            print("tick: fired " + str(t["count"]) + " job(s)");
+            # the armed count is the daemon's heartbeat: it proves the tick can
+            # see the jobs on the graph, which is the whole question when a job
+            # sits at runs=0.
+            print("tick: fired " + str(t["count"]) + " job(s), " + str(t["armed"]) + " armed");
             for f in list(t["fired"]) { print("  " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err")); }
         } elif sub == "run" {
             nm = _arg(argv, 2);

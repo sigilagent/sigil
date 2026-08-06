@@ -18,12 +18,15 @@ hot path over timestamps, the kind of thing the native codespace is for.
 """
 
 import time;
+import subprocess;
 import from .sigil { awaken, Soul }
 import from .agent { run_task }
 import from .hooks { fire_hooks }
 import from .channels { message_send }
 import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid }
-import from .sigil_runtime { write_pidfile, clear_pidfile, process_running }
+import from .sigil_runtime {
+    write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
+}
 
 edge Schedules {}   # Soul -> CronJob
 edge Fired {}       # CronJob -> CronRun
@@ -260,13 +263,16 @@ def cron_tick() -> dict {
     soul = awaken();
     t = now_ms();
     fired: list = [];
+    armed = 0;
     for j in _jobs(soul) {
-        if (not j.enabled) or (j.next_run_ms <= 0) or (j.next_run_ms > t) { continue; }
+        if (not j.enabled) or (j.next_run_ms <= 0) { continue; }
+        armed += 1;
+        if j.next_run_ms > t { continue; }
         out = _fire(j, t);
         fired.append({"name": out["name"], "ok": out["ok"]});
         _rearm(j, t);
     }
-    return {"now_ms": t, "fired": fired, "count": len(fired)};
+    return {"now_ms": t, "fired": fired, "count": len(fired), "armed": armed};
 }
 
 def cron_run_now(name: str) -> dict {
@@ -332,12 +338,52 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
-def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False) -> dict {
+def tick_isolated(timeout_s: int = 1800) -> dict {
+    # Run one tick in a FRESH process, and not as an optimization.
+    #
+    # A long-lived jac process serves the graph it loaded at startup: a daemon
+    # that called cron_tick() in-process would never see a job added afterwards
+    # by `sigil cron add`. That is the same "runs=0 forever" this module exists
+    # to end, one level up — the daemon would be running, and still nothing would
+    # fire. A subprocess opens the store fresh, so every tick sees every job.
+    #
+    # The tick blocks until the fired job finishes: one job runs at a time, and a
+    # long solve delays the next tick rather than stacking runs on top of it.
+    argv = [_jac_bin(), "run", entry_script(), "--", "cron", "tick"];
+    try {
+        p = subprocess.run(argv, cwd=project_root(), capture_output=True,
+                           text=True, timeout=timeout_s);
+    } except subprocess.TimeoutExpired as e {
+        return {"ok": False, "out": "", "err": "tick exceeded " + str(timeout_s) + "s"};
+    } except Exception as ex {
+        return {"ok": False, "out": "", "err": str(ex)[:300]};
+    }
+    return {"ok": p.returncode == 0, "out": str(p.stdout or ""),
+            "err": str(p.stderr or "")[-600:]};
+}
+
+def _report_tick(res: dict, quiet: bool) -> None {
+    if quiet { return None; }
+    if not res["ok"] {
+        print("cron daemon: tick failed: " + str(res["err"])[:300], flush=True);
+        return None;
+    }
+    for line in str(res["out"]).splitlines() {
+        s = line.strip();
+        # relay the tick's own report, not jac's startup chatter. The quiet
+        # "fired 0, N armed" line stays: it is the heartbeat that says the
+        # scheduler is alive AND can see the schedule.
+        if s.startswith("tick: ") or s.startswith("  ") { print(s, flush=True); }
+    }
+    return None;
+}
+
+def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False,
+                job_timeout_s: int = 1800) -> dict {
     # The blocking scheduler loop. `max_ticks` bounds it for tests; 0 runs until
     # stopped. Every tick is wrapped: a scheduler that dies on one bad job is the
     # failure this whole change exists to end.
     ticks = 0;
-    total = 0;
     _STOP["now"] = False;
     _install_stop_handlers();
     write_pidfile(CRON_PID);
@@ -347,14 +393,7 @@ def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False) -
     try {
         while not _STOP["now"] {
             try {
-                t = cron_tick();
-                total += int(t["count"]);
-                if (not quiet) and int(t["count"]) > 0 {
-                    for f in list(t["fired"]) {
-                        print("  fired " + str(f["name"]) + " -> " + ("ok" if f["ok"] else "err"),
-                              flush=True);
-                    }
-                }
+                _report_tick(tick_isolated(job_timeout_s), quiet);
             } except Exception as e {
                 print("cron daemon: tick failed: " + str(e)[:200], flush=True);
             }
@@ -368,7 +407,7 @@ def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False) -
         clear_pidfile(CRON_PID);
         if not quiet { print("cron daemon: stopped", flush=True); }
     }
-    return {"ticks": ticks, "fired": total};
+    return {"ticks": ticks};
 }
 
 # ---------------------------------------------------------------------------
