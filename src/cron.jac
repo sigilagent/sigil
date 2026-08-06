@@ -24,6 +24,7 @@ import from .agent { run_task }
 import from .hooks { fire_hooks }
 import from .channels { message_send }
 import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid }
+import from .sigil_api { report_for }
 import from .sigil_runtime {
     write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
 }
@@ -417,6 +418,6 @@ def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False,
 # ---------------------------------------------------------------------------
 walker:pub api_cron_tick {
     can run with Root entry {
-        report cron_tick();
+        report report_for("cron_tick", {});
     }
 }

@@ -45,6 +45,7 @@ import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_t
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
 import from src.sigil_runtime { _jac_bin, read_pid, project_root }
+import from src.sigil_api { JSON_MARKER }
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
     scheduler_running,
@@ -243,6 +244,19 @@ def user_path(p: str) -> str {
 
 def _to_int(s: str, dflt: int) -> int {
     try { return int(str(s).strip()); } except Exception { return dflt; }
+}
+
+def _json_text(payload: dict) -> str {
+    # One JSON line for the `api` command. Anything the encoder cannot represent
+    # becomes its string form rather than an exception — an endpoint returning a
+    # slightly lossy answer beats one returning a 500 because a value was a node.
+    import json;
+    try { return str(json.dumps(payload, default=_stringify)); }
+    except Exception { return "{\"ok\": false, \"data\": null, \"error\": \"unencodable result\"}"; }
+}
+
+def _stringify(o: any) -> str {
+    return str(o);
 }
 
 def _warn_no_ticker() -> None {
@@ -620,6 +634,91 @@ with entry:__main__ {
         print("project   : " + project_root());
         print("invoked in: " + (_PWD0 or os.getcwd()));
         print("daemon    : " + ("running" if daemon_running() else "not running"));
+    } elif cmd == "api" {
+        # api <name> <json-args> — the machine-readable face of the CLI, and the
+        # ONLY thing the HTTP endpoints run. Prints one JSON object behind a
+        # marker so a caller can find it past jac's startup chatter. Every
+        # endpoint therefore answers from this graph, in this process, which is
+        # the whole reason the Observatory can now see the agent.
+        import json;
+        name = _arg(argv, 1);
+        raw = _arg(argv, 2) if len(argv) > 2 else "{}";
+        a: dict = {};
+        try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
+        payload: dict = {"ok": True, "data": None, "error": ""};
+        try {
+            if name == "soul" { payload["data"] = describe_soul(); }
+            elif name == "graph" {
+                import from src.sigil { graph_snapshot }
+                payload["data"] = graph_snapshot();
+            }
+            elif name == "library" { payload["data"] = library(); }
+            elif name == "mcp" { payload["data"] = mcp_status(); }
+            elif name == "observability" {
+                import from src.sigil { observability_tail }
+                payload["data"] = observability_tail(int(a.get("n", 120)));
+            }
+            elif name == "recall" { payload["data"] = recollect(str(a.get("query", "")), int(a.get("k", 8))); }
+            elif name == "teach" { payload["data"] = teach(str(a.get("fact", "")), str(a.get("kind", "fact"))); }
+            elif name == "configure" { payload["data"] = configure(str(a.get("key", "")), str(a.get("value", ""))); }
+            elif name == "solve" { payload["data"] = run_task(str(a.get("task", "")), str(a.get("skill", ""))); }
+            elif name == "register_skill" { payload["data"] = register_skill(str(a.get("source", "")), str(a.get("kind", "md"))); }
+            elif name == "add_mcp" {
+                payload["data"] = add_mcp(str(a.get("name", "")), str(a.get("transport", "stdio")),
+                                          str(a.get("target", "")), list(a.get("args") or []));
+            }
+            elif name == "eval" { payload["data"] = eval_skill(str(a.get("signature", "")), str(a.get("probe", ""))); }
+            elif name == "relearn" { payload["data"] = relearn(str(a.get("signature", "")), str(a.get("hint", ""))); }
+            elif name == "forget" { payload["data"] = forget(str(a.get("signature", ""))); }
+            elif name == "chat" {
+                _r = run_task(str(a.get("text", "")), "");
+                payload["data"] = {
+                    "id": "sigil-chatcmpl", "object": "chat.completion",
+                    "model": str(a.get("model", "sigil")),
+                    "choices": [{"index": 0, "finish_reason": "stop",
+                                 "message": {"role": "assistant", "content": str(_r["result"])}}]
+                };
+            }
+            elif name == "models" {
+                _data: list = [];
+                for tier in ["frontier", "small", "router"] {
+                    _data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
+                }
+                for e in list(library()) {
+                    _sk = dict(e);
+                    _data.append({"id": "sigil-skill/" + str(_sk["signature"]),
+                                  "object": "model", "owned_by": "sigil"});
+                }
+                payload["data"] = {"object": "list", "data": _data};
+            }
+            elif name == "tools_invoke" {
+                import from src.sigil_mcp { dispatch }
+                _res = dispatch(str(a.get("name", "")), [dict(a.get("arguments") or {})]);
+                if _res is None {
+                    payload["ok"] = False;
+                    payload["error"] = "no registered tool '" + str(a.get("name", "")) + "'";
+                } else { payload["data"] = _res; }
+            }
+            elif name == "inbound" {
+                payload["data"] = inbound(str(a.get("channel", "webhook")), str(a.get("peer", "anon")),
+                                          str(a.get("text", "")), str(a.get("thread_id", "")));
+            }
+            elif name == "cron_tick" { payload["data"] = cron_tick(); }
+            elif name == "cron_list" { payload["data"] = cron_list(); }
+            elif name == "tasks" { payload["data"] = tasks_list(int(a.get("n", 20))); }
+            elif name == "hooks" { payload["data"] = hook_list(); }
+            elif name == "channels" { payload["data"] = channel_list(); }
+            elif name == "approvals" { payload["data"] = approvals_get(); }
+            else {
+                payload["ok"] = False;
+                payload["error"] = "unknown api '" + str(name) + "'";
+            }
+        } except Exception as _apierr {
+            payload["ok"] = False;
+            payload["error"] = str(_apierr)[:600];
+        }
+        print(JSON_MARKER);
+        print(_json_text(payload));
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);

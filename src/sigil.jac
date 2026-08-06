@@ -22,6 +22,7 @@ import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
     skill_description
 }
+import from .sigil_api { report_for }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
 
@@ -1273,10 +1274,20 @@ def observability_tail(n: int = 120) -> VObs {
 # isolated root graph (their own soul, skills, MCP servers) with JWT auth, for
 # free. `has` fields are the request body; `report` is the response.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# HTTP endpoints.
+#
+# Every one of these resolves through `report_for`, which runs the request in a
+# fresh `jac run` process against the agent's real graph — it does NOT touch the
+# server's own root. That is not indirection for its own sake: measured, a server
+# reports `skills: 0` while the CLI reports 9, and a `teach` through the server
+# returned "remembered" while the fact landed in no anchor in the store. The
+# Observatory was a window onto an empty, unsaved agent.
+# ---------------------------------------------------------------------------
 walker:pub api_solve {
     has task: str;
     has skill: str = "";
-    can run with Root entry { report solve_task(self.task, self.skill); }
+    can run with Root entry { report report_for("solve", {"task": self.task, "skill": self.skill}); }
 }
 
 walker:pub api_add_mcp {
@@ -1284,67 +1295,70 @@ walker:pub api_add_mcp {
     has target: str;
     has transport: str = "stdio";
     has args: list[str] = [];
-    can run with Root entry { report add_mcp(self.name, self.transport, self.target, self.args); }
+    can run with Root entry {
+        report report_for("add_mcp", {"name": self.name, "transport": self.transport,
+                                      "target": self.target, "args": self.args});
+    }
 }
 
 walker:pub api_register_skill {
     has source: str;          # SKILL.md text / AG-IR text / OSP module path
     has kind: str = "md";     # md | agir | osp
-    can run with Root entry { report register_skill(self.source, self.kind); }
+    can run with Root entry { report report_for("register_skill", {"source": self.source, "kind": self.kind}); }
 }
 
 walker:pub api_teach {
     has fact: str;
     has kind: str = "fact";
-    can run with Root entry { report teach(self.fact, self.kind); }
+    can run with Root entry { report report_for("teach", {"fact": self.fact, "kind": self.kind}); }
 }
 
 walker:pub api_soul {
-    can run with Root entry { report describe_soul(); }
+    can run with Root entry { report report_for("soul", {}); }
 }
 
 walker:pub api_configure {
     has key: str;
     has value: str;
-    can run with Root entry { report configure(self.key, self.value); }
+    can run with Root entry { report report_for("configure", {"key": self.key, "value": self.value}); }
 }
 
 walker:pub api_recall {
     has query: str;
     has k: int = 8;
-    can run with Root entry { report recollect(self.query, self.k); }
+    can run with Root entry { report report_for("recall", {"query": self.query, "k": self.k}); }
 }
 
 walker:pub api_library {
-    can run with Root entry { report library(); }
+    can run with Root entry { report report_for("library", {}); }
 }
 
 walker:pub api_eval {
     has signature: str;
     has probe: str = "";
-    can run with Root entry { report eval_skill(self.signature, self.probe); }
+    can run with Root entry { report report_for("eval", {"signature": self.signature, "probe": self.probe}); }
 }
 
 walker:pub api_relearn {
     has signature: str;
     has hint: str = "";
-    can run with Root entry { report relearn(self.signature, self.hint); }
+    can run with Root entry { report report_for("relearn", {"signature": self.signature, "hint": self.hint}); }
 }
 
 walker:pub api_forget {
     has signature: str;
-    can run with Root entry { report forget(self.signature); }
+    can run with Root entry { report report_for("forget", {"signature": self.signature}); }
 }
 
 walker:pub api_mcp {
-    can run with Root entry { report mcp_status(); }
+    can run with Root entry { report report_for("mcp", {}); }
 }
 
 walker:pub api_graph {
-    can run with Root entry { report graph_snapshot(); }
+    can run with Root entry { report report_for("graph", {}); }
 }
 
 walker:pub api_observability {
     has n: int = 120;
-    can run with Root entry { report observability_tail(self.n); }
+    can run with Root entry { report report_for("observability", {"n": self.n}); }
 }

@@ -9,6 +9,7 @@ run-time context (bounded), and `channels.inbound` records each turn.
 
 import time;
 import from .sigil { awaken, Soul }
+import from .hooks { fire_hooks }
 import from datetime { date }
 
 edge Sessioned {}   # Soul -> Session
@@ -31,17 +32,34 @@ def _scope_key(peer: str, dm_scope: str, channel: str) -> str {
 
 def _sessions(soul: Soul) -> list[Session] { return [soul -->[?:Session]]; }
 
+def _fire_session_start(key: str, why: str) -> None {
+    # `session_start` has been a declared hook event with no call site since
+    # hooks shipped. A transcript beginning — a new peer, or the daily reset —
+    # is the event. A hook that raises must not break the conversation.
+    try {
+        fire_hooks("session_start", str(key) + " (" + str(why) + ")");
+    } except Exception as e {
+        return None;
+    }
+    return None;
+}
+
 def _get(channel: str, peer: str, dm_scope: str) -> Session {
     soul = awaken();
     key = channel + ":" + _scope_key(peer, dm_scope, channel);
     for s in _sessions(soul) {
         if s.key == key {
-            if s.day != _today() { s.turns = []; s.day = _today(); }   # daily reset
+            if s.day != _today() {
+                s.turns = [];
+                s.day = _today();                # daily reset
+                _fire_session_start(key, "day rolled over");
+            }
             return s;
         }
     }
     s = Session(key=key, channel=channel, scope=_scope_key(peer, dm_scope, channel), day=_today(), turns=[]);
     soul +>:Sessioned:+> s;
+    _fire_session_start(key, "new transcript");
     return s;
 }
 

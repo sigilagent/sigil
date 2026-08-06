@@ -39,6 +39,8 @@ import from .sigil {
     compile_stage_label, compile_stage_line, compile_stage_secs
 }
 import from .approvals { check_exec, allowlist_add }
+import from .hooks { fire_hooks }
+import from .sigil_runtime { run_dir, pid_alive }
 import from .sigil_secrets { resolve_refs, redact_secrets }
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,20 @@ def _trace(tool: str, detail: str, ok: bool = True) -> None {
     if _SINK is not None {
         try { _SINK(tool, detail, ok); } except Exception as e {}
     }
+    # `after_tool` was a declared hook event with no call site since hooks
+    # shipped — 34 documented events, four of them wired. Every tool call passes
+    # through here, so this is where it belongs. A hook that raises must not take
+    # the tool's result down with it.
+    try { fire_hooks("after_tool" if ok else "tool_failed", str(tool) + ": " + str(detail)[:200]); }
+    except Exception as e2 {  }
+}
+
+def _trace_start(tool: str, detail: str) -> None {
+    # `before_tool` — fired ahead of the work, so a hook can observe (and, once
+    # decision hooks land, veto) rather than only witness the aftermath.
+    try { fire_hooks("before_tool", str(tool) + ": " + str(detail)[:200]); }
+    except Exception as e {  }
+    return None;
 }
 
 # ---------------------------------------------------------------------------
@@ -311,6 +327,83 @@ def _docker_argv(command: str) -> list {
             "-v", ws_root() + ":/work", "-w", "/work", img, "sh", "-c", resolve_refs(command)];
 }
 
+# ---------------------------------------------------------------------------
+# Jobs outlive the process that started them — and used to become invisible the
+# moment it exited. `_JOBS` is in-memory, so a shell job started in one turn was
+# unreachable from the next CLI invocation, from the daemon, and from the TUI
+# after a restart: still running, still spooling, with no way to watch or stop
+# it. A small record on disk keeps the handle.
+# ---------------------------------------------------------------------------
+def _jobs_dir() -> str {
+    d = os.path.join(run_dir(), "jobs");
+    try {
+        os.makedirs(d, exist_ok=True);
+    } except Exception as e {
+        return d;
+    }
+    return d;
+}
+
+def _job_record(job: ShellJob) -> None {
+    rec = {"id": job.id, "pid": int(job.proc.pid), "spool": job.spool,
+           "cmd": job.cmd, "started": float(job.started)};
+    try {
+        with open(os.path.join(_jobs_dir(), str(job.id) + ".json"), "w") as fh {
+            fh.write(json.dumps(rec));
+        }
+    } except Exception as e {
+        return None;
+    }
+    return None;
+}
+
+def _job_forget(jid: str) -> None {
+    try {
+        path = os.path.join(_jobs_dir(), str(jid) + ".json");
+        if os.path.exists(path) { os.remove(path); }
+    } except Exception as e {
+        return None;
+    }
+    return None;
+}
+
+def _disk_jobs() -> list {
+    # Every recorded job, with whether its process is still alive. Records for
+    # jobs that finished long ago are pruned as they are noticed.
+    out: list = [];
+    try {
+        names = sorted(os.listdir(_jobs_dir()));
+    } except Exception as e {
+        return out;
+    }
+    for f in names {
+        if not str(f).endswith(".json") { continue; }
+        try {
+            blob = str(open(os.path.join(_jobs_dir(), str(f)), "r").read());
+            rec = dict(json.loads(blob if blob else "{}"));
+        } except Exception as e2 { continue; }
+        if not rec.get("id") { continue; }
+        alive = pid_alive(int(rec.get("pid", 0)));
+        rec["running"] = alive;
+        out.append(rec);
+    }
+    return out;
+}
+
+def _find_disk_job(jid: str) -> dict {
+    for r in _disk_jobs() { if str(r["id"]) == str(jid) { return dict(r); } }
+    return {};
+}
+
+def _spool_tail(path: str, n: int = 4000) -> str {
+    try {
+        text = str(open(str(path), "r").read());
+    } except Exception as e {
+        return "(the job's output file is gone)";
+    }
+    return text[-n:];
+}
+
 def _job_start(command: str) -> ShellJob {
     # Spool to a file rather than a pipe: a pipe fills at ~64KB and then blocks the
     # very long-running process we are trying to keep alive, with nobody draining it.
@@ -327,6 +420,7 @@ def _job_start(command: str) -> ShellJob {
     }
     job = ShellJob(id=jid, proc=p, spool=spool, cmd=command, started=time.time());
     _JOBS[jid] = job;
+    _job_record(job);
     return job;
 }
 
@@ -383,6 +477,7 @@ def ws_exec(command: str, wait_seconds: int = 30) -> str {
         return "sandbox=docker is set but docker isn't available — install it, or `configure sandbox off`.";
     }
     # exec-approval gate — the same policy the whole agent shares
+    _trace_start("exec", command);
     gate = check_exec(command);
     dec = str(gate["decision"]);
     if dec == "approval-pending" {
@@ -412,7 +507,17 @@ sem ws_watch.wait_seconds = "How long to wait for more output before reporting b
 def ws_watch(job_id: str, wait_seconds: int = 30) -> str {
     jid = str(job_id).strip();
     job = _JOBS.get(jid);
-    if job is None { return "no such job '" + jid + "' — ws_jobs() lists this session's jobs"; }
+    if job is None {
+        # Started by a previous run — the process is still out there, and its
+        # output is still spooling. Report from the record rather than pretending
+        # the job does not exist.
+        rec = _find_disk_job(jid);
+        if not rec { return "no such job '" + jid + "' — ws_jobs() lists them"; }
+        _trace("watch", jid);
+        state = "still running" if rec["running"] else "finished";
+        return ("job " + jid + " (" + state + ", started by an earlier run)\n"
+                + "$ " + str(rec["cmd"])[:200] + chr(10) + _spool_tail(str(rec["spool"])));
+    }
     _trace("watch", jid);
     _job_wait(job, float(wait_seconds if wait_seconds > 0 else 30));
     return _job_report(job, _job_new_output(job));
@@ -423,7 +528,18 @@ sem ws_kill.job_id = "The job id to stop, e.g. 'j1'.";
 def ws_kill(job_id: str) -> str {
     jid = str(job_id).strip();
     job = _JOBS.get(jid);
-    if job is None { return "no such job '" + jid + "' — ws_jobs() lists this session's jobs"; }
+    if job is None {
+        rec = _find_disk_job(jid);
+        if not rec { return "no such job '" + jid + "' — ws_jobs() lists them"; }
+        if not rec["running"] {
+            _job_forget(jid);
+            return "job " + jid + " had already finished";
+        }
+        try { os.kill(int(rec["pid"]), 9); } except Exception as e { return "could not stop " + jid + ": " + str(e)[:120]; }
+        _job_forget(jid);
+        _trace("kill", jid, False);
+        return "stopped job " + jid + " (started by an earlier run): " + str(rec["cmd"])[:120];
+    }
     p = job.proc;
     rc = p.poll();
     if rc is not None { return "job " + jid + " had already finished (exit=" + str(rc) + ")"; }
@@ -434,15 +550,28 @@ def ws_kill(job_id: str) -> str {
 
 sem ws_jobs = "List the shell jobs started this session — which are still running, how long each has been going, and its command.";
 def ws_jobs() -> str {
-    if not _JOBS { return "(no shell jobs this session)"; }
     rows: list = [];
+    seen: list = [];
     for jid in sorted(_JOBS.keys()) {
         job = _JOBS[jid];
         rc = job.proc.poll();
         state = "running" if rc is None else ("exit=" + str(rc));
         age = ("%.0f" % (time.time() - job.started)) + "s";
-        rows.append(jid + "  " + state.ljust(10) + age.rjust(6) + "  " + job.cmd[:100]);
+        rows.append(jid + "  " + state.ljust(12) + age.rjust(6) + "  " + job.cmd[:100]);
+        seen.append(jid);
+        if rc is not None { _job_forget(jid); }
     }
+    # Jobs from earlier runs. A shell job outlives the turn that started it, so
+    # the daemon, the next CLI invocation and a restarted TUI all need to see it
+    # — otherwise a long build is running with nobody able to watch or stop it.
+    for rec in _disk_jobs() {
+        jid = str(rec["id"]);
+        if jid in seen { continue; }
+        if not rec["running"] { _job_forget(jid); continue; }
+        age = ("%.0f" % (time.time() - float(str(rec["started"])))) + "s";
+        rows.append(jid + "  " + "running (prior)".ljust(12) + age.rjust(6) + "  " + str(rec["cmd"])[:100]);
+    }
+    if not rows { return "(no shell jobs)"; }
     return chr(10).join(rows);
 }
 

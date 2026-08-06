@@ -117,3 +117,54 @@ State lives under `$SIGIL_HOME` (default `~/.sigil`): `run/daemon.pid`,
 `sigil daemon stop` sends `SIGTERM` and waits up to 30 seconds. A tick that is
 mid-solve can legitimately outlast that; the command says so and hands you the
 pid rather than escalating to `SIGKILL` behind your back.
+
+## The Observatory
+
+`sigil serve` runs the web UI and the HTTP API against **the same graph as
+everything else** — the CLI, the TUI, the daemon, and every job it fires.
+
+That had never been true. Measured three ways: the CLI reported 9 skills while
+`POST /walker/api_soul` on the running server reported `skills: 0`; a `teach`
+through the server answered "remembered" and the fact landed in no anchor in the
+store, so anything done in the web UI was thrown away; and `sigil serve` exec'd
+`jac start` directly, skipping the guest-root alignment `main.jac` performs.
+
+Root alignment alone does not fix it — a server booted with `__guest__` already
+pointing at the superroot still reads an empty Soul. So the endpoints stop owning
+a graph. Each one runs its request in a fresh `jac run` process, the execution
+mode that demonstrably reads and writes the real store, and returns its result.
+The same seam the scheduler and the channel bridges use.
+
+```bash
+sigil serve                   # Observatory + API, on the real graph
+sigil api soul '{}'           # the same seam, from the shell (JSON out)
+```
+
+A request therefore costs one process start. For a local dashboard that is the
+right trade against showing a confident, empty agent.
+
+## Lifecycle hooks
+
+`sigil hook add <name> <event> <action-kind> <action>` — four documented events
+had no call site anywhere in the codebase, so registering for them registered for
+something that never happened. All of them fire now:
+
+| Event | When |
+|---|---|
+| `gateway_start` | the daemon comes up |
+| `session_start` | a transcript begins — a new peer, or the daily reset |
+| `before_tool` | ahead of a tool call (the exec gate included) |
+| `after_tool` / `tool_failed` | after one, split by outcome |
+
+alongside the four that already worked: `before_solve`, `after_solve`,
+`solve_failed`, `message_received`, `cron_fired`. A hook that raises is contained
+— it cannot take down the solve, tool call or reply it was observing.
+
+## Shell jobs outlive the turn that started them
+
+`ws_exec` never kills on a timer, but its job registry used to be in-memory: a
+build started in one turn was invisible from the next CLI invocation, from the
+daemon, and from a restarted TUI — still running, still spooling, with no way to
+watch or stop it. Jobs are recorded under `$SIGIL_HOME/run/jobs/` now, so
+`ws_jobs` lists them, `ws_watch` reads their output, and `ws_kill` stops them
+across process boundaries. Records for finished jobs are pruned as they are seen.

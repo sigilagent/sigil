@@ -9,6 +9,7 @@ sigil + hooks; neither imports this one).
 import from .sigil_mcp { dispatch }
 import from .sigil { solve_task, library, describe_soul }
 import from .hooks { fire_hooks }
+import from .sigil_api { report_for }
 
 def run_task(task: str, skill: str = "") -> dict {
     fire_hooks("before_solve", task);
@@ -30,12 +31,7 @@ walker:pub api_chat_completions {
     can run with Root entry {
         text = "";
         for m in self.messages { if str(m.get("role")) == "user" { text = str(m.get("content")); } }
-        r = run_task(text, "");
-        report {
-            "id": "sigil-chatcmpl", "object": "chat.completion", "model": self.model,
-            "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": str(r["result"])}}]
-        };
+        report report_for("chat", {"text": text, "model": self.model});
     }
 }
 
@@ -43,14 +39,7 @@ walker:pub api_chat_completions {
 # client can discover what Sigil can route to (POST /walker/api_models).
 walker:pub api_models {
     can run with Root entry {
-        data: list = [];
-        for tier in ["frontier", "small", "router"] {
-            data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
-        }
-        for e in list(library()) {
-            data.append({"id": "sigil-skill/" + str(e["signature"]), "object": "model", "owned_by": "sigil"});
-        }
-        report {"object": "list", "data": data};
+        report report_for("models", {});
     }
 }
 
@@ -60,8 +49,6 @@ walker:pub api_tools_invoke {
     has name: str = "";
     has arguments: dict = {};
     can run with Root entry {
-        res = dispatch(self.name, [self.arguments]);
-        if res is None { report {"ok": False, "error": "no registered tool '" + self.name + "'"}; }
-        else { report res; }
+        report report_for("tools_invoke", {"name": self.name, "arguments": self.arguments});
     }
 }

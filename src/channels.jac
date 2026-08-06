@@ -14,6 +14,7 @@ import from .hooks { fire_hooks }
 import from .sigil_sessions { session_note }
 import from .sigil_secrets { resolve_credential }
 import from .sigil_transports { deliver }
+import from .sigil_api { report_for }
 
 edge Connects {}    # Soul -> Channel
 edge Carried {}     # Channel -> Message
@@ -190,7 +191,7 @@ walker:pub api_inbound {
     has text: str = "";
     has thread_id: str = "";
     can run with Root entry {
-        r = inbound(self.channel, self.peer, self.text, self.thread_id);
-        report r;
+        report report_for("inbound", {"channel": self.channel, "peer": self.peer,
+                                      "text": self.text, "thread_id": self.thread_id});
     }
 }

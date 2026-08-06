@@ -43,6 +43,7 @@ import from .channels { channel_list as cron_channel_list }
 import from .sigil_bridge { bridge_running, channel_config, running_bridges, stop_bridge }
 import from .sigil_transports { supports_polling }
 import from .sigil_cron { now_ms, fmt_when, human_secs }
+import from .hooks { fire_hooks }
 
 glob DAEMON_PID: str = "daemon";        # pidfile name under $SIGIL_HOME/run
 glob SERVICE_LABEL: str = "com.sigilagent.sigil";
@@ -207,6 +208,10 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict {
     _write_state(interval_s);
     _log("sigil daemon up — pid " + str(os.getpid()) + ", tick " + str(interval_s)
          + "s, graph " + graph_path());
+    # `gateway_start` has been a declared hook event with no call site since
+    # hooks shipped. The daemon coming up IS the gateway starting.
+    try { fire_hooks("gateway_start", "daemon pid " + str(os.getpid())); }
+    except Exception as _hkerr { _log("gateway_start hooks failed: " + str(_hkerr)[:160]); }
     ticks = 0;
     try {
         while not _STOP["now"] {
