@@ -34,6 +34,7 @@ import from src.cron {
 }
 import from src.sigil_cron { fmt_when, human_secs }
 import from src.channels { channel_add, channel_list, channel_remove, message_send, inbound, react, edit, channel_history }
+import from src.sigil_bridge { bridge_run, bridge_running, REPLY_MARKER }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.sigil_docs { list_docs, read_doc }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
@@ -334,6 +335,13 @@ with entry:__main__ {
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
+    # `--claude` is a per-invocation flag, but the daemon's work happens in
+    # CHILD processes — every tick, every channel message. A flag that stopped at
+    # the process boundary would mean background jobs ran on a provider key the
+    # user does not have, which is exactly how the first end-to-end fire failed.
+    # The environment is what children inherit, so that is where the mode lives.
+    if str(os.environ.get("SIGIL_CLAUDE") or "") == "1" { _CLAUDE_MODE = True; }
+
     # Must precede any awaken() — that is where the tiers bind.
     if _CLAUDE_MODE {
         # `--claude` promises the SUBSCRIPTION. Check before binding a single tier:
@@ -350,6 +358,7 @@ with entry:__main__ {
             sys.exit(1);
         }
         use_claude_code(True);
+        os.environ["SIGIL_CLAUDE"] = "1";   # every subprocess from here inherits it
         # stderr, not stdout: this is a status line, and `mcp-serve` gives stdout
         # to the JSON-RPC wire where a stray line is a protocol violation.
         _who = ("api key" if str(_auth["mode"]) == "api-key"
@@ -578,6 +587,14 @@ with entry:__main__ {
             print("  log     : " + str(s["log"]));
             print("  jobs    : " + str(s["jobs"]) + " scheduled, " + str(s["armed"]) + " armed");
             print("  next due: " + fmt_when(int(s["next_due_ms"])));
+            brs = [str(b) for b in list(s["bridges"])];
+            want = [str(c) for c in list(s["channels"])];
+            if want or brs {
+                missing = [c for c in want if c not in brs];
+                line = ", ".join(brs) if brs else "none";
+                if missing { line += "   (not connected: " + ", ".join(missing) + ")"; }
+                print("  channels: " + line);
+            }
             print("  at login: " + str(s["service"]) + "   (sigil daemon install)");
         } elif sub == "logs" {
             print(daemon_logs(_to_int(_arg(argv, 2), 40)));
@@ -745,10 +762,40 @@ with entry:__main__ {
     } elif cmd == "channel" {
         sub = _arg(argv, 1);
         if sub == "add" { r = channel_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5) if len(argv) > 5 else "per-peer"); print("channel '" + str(r["name"]) + "' [" + str(r["kind"]) + "]"); }
-        elif sub == "list" { for c in channel_list() { print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  " + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])); } }
+        elif sub == "list" {
+            for c in channel_list() {
+                live = "connected" if bridge_running(str(c["name"])) else "no bridge";
+                print("  " + str(c["name"]) + "  [" + str(c["kind"]) + "]  "
+                      + ("on" if c["enabled"] else "off") + "  msgs=" + str(c["messages"])
+                      + "  " + live);
+            }
+        }
         elif sub == "rm" { print(channel_remove(_arg(argv, 2))); }
-        elif sub == "send" { r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])); }
-        elif sub == "inbound" { r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("reply: " + str(r["reply"]) + "  (in=" + str(r["in_mid"]) + " out=" + str(r["out_mid"]) + " thread=" + str(r["thread_id"]) + ")"); }
+        elif sub == "send" {
+            r = message_send(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            state = "delivered" if r.get("delivered") else "recorded but NOT delivered";
+            print("sent to " + str(r["peer"]) + " on " + str(r["channel"]) + "  mid=" + str(r["mid"])
+                  + "  [" + state + "]");
+            if r.get("delivery_error") { print("  " + str(r["delivery_error"])); }
+            if r.get("note") { print("  " + str(r["note"])); }
+        }
+        elif sub == "inbound" {
+            # The seam every bridge uses: one message in, one reply out, in a
+            # FRESH process so the answer comes from the current graph. The
+            # marker is how the bridge finds the reply in the output.
+            r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            print(REPLY_MARKER);
+            print(str(r["reply"]));
+        }
+        elif sub == "run" {
+            # channel run <name> [port] — this channel's transport, foreground
+            nm = _arg(argv, 2);
+            if not nm { print("usage: channel run <name> [port]"); }
+            else {
+                r = bridge_run(nm, _to_int(_arg(argv, 3), 0));
+                if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            }
+        }
         elif sub == "setup" {
             # channel setup <discord|telegram|whatsapp|slack> — print connection guidance
             k = _arg(argv, 2);
@@ -779,7 +826,7 @@ with entry:__main__ {
                 print(line + "  " + str(m["text"]));
             }
         }
-        else { print("usage: channel add|list|rm|send|inbound|setup <kind>|connect <name> <kind>|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
+        else { print("usage: channel add|list|rm|send|inbound|run <name>|setup <kind>|connect <name> <kind>|react <ch> <mid> <emoji>|edit <ch> <mid> <text>|history <ch>"); }
     } elif cmd == "hook" {
         sub = _arg(argv, 1);
         if sub == "add" { r = hook_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5)); print("hook '" + str(r["name"]) + "'"); }

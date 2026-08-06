@@ -39,11 +39,15 @@ import from .sigil_runtime {
     clear_pidfile, process_running, project_root, entry_script, _jac_bin
 }
 import from .cron { tick_isolated, next_due_ms, cron_list, cron_daemon_running }
+import from .channels { channel_list as cron_channel_list }
+import from .sigil_bridge { bridge_running, channel_config, running_bridges, stop_bridge }
+import from .sigil_transports { supports_polling }
 import from .sigil_cron { now_ms, fmt_when, human_secs }
 
 glob DAEMON_PID: str = "daemon";        # pidfile name under $SIGIL_HOME/run
 glob SERVICE_LABEL: str = "com.sigilagent.sigil";
 glob _STOP: dict = {"now": False};
+glob _WARNED: dict[str, bool] = {};   # channels already reported as unconfigured
 
 # ---------------------------------------------------------------------------
 # Where the daemon leaves its traces
@@ -141,9 +145,57 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
+def wanted_bridges() -> list[dict] {
+    # Every enabled channel that has a transport worth holding open. A `cli`
+    # channel has no wire; a channel whose token env is unset would spin on
+    # startup failures, so it is reported rather than launched.
+    out: list[dict] = [];
+    for c in cron_channel_list() {
+        name = str(c["name"]);
+        kind = str(c["kind"]);
+        if not c["enabled"] { continue; }
+        if kind in ["cli", ""] { continue; }
+        cfg = channel_config(name);
+        if supports_polling(kind) and (not cfg["token"]) {
+            out.append({"name": name, "kind": kind, "ready": False,
+                        "why": "its token env var is unset"});
+            continue;
+        }
+        out.append({"name": name, "kind": kind, "ready": True, "why": ""});
+    }
+    return out;
+}
+
+def _spawn_bridge(name: str) -> bool {
+    argv = [_jac_bin(), "run", entry_script(), "--", "channel", "run", name];
+    try {
+        handle = open(log_path(), "a");
+        subprocess.Popen(argv, cwd=project_root(), stdout=handle, stderr=handle,
+                         stdin=subprocess.DEVNULL, start_new_session=True);
+    } except Exception as e {
+        _log("could not start bridge for '" + name + "': " + str(e)[:200]);
+        return False;
+    }
+    return True;
+}
+
 def _supervise_children() -> None {
-    # Seam for the channel bridges: the daemon restarts any that have died.
-    # Nothing to supervise until transports land.
+    # Keep a bridge running for every channel that wants one. A bridge that died
+    # — provider outage, a crash, a kill — comes back on the next tick, which is
+    # the difference between "connected" and "connected until something happened".
+    for b in wanted_bridges() {
+        name = str(b["name"]);
+        if not b["ready"] {
+            if not _WARNED.get(name) {
+                _log("channel '" + name + "' has no bridge: " + str(b["why"]));
+                _WARNED[name] = True;   # once, not every tick
+            }
+            continue;
+        }
+        _WARNED[name] = False;
+        if bridge_running(name) { continue; }
+        if _spawn_bridge(name) { _log("started bridge for channel '" + name + "'"); }
+    }
     return None;
 }
 
@@ -179,6 +231,12 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict {
     } except KeyboardInterrupt as e {
         _STOP["now"] = True;
     } finally {
+        # Take the bridges with it. A supervisor that exits and leaves its
+        # children holding provider connections is how you get two bots
+        # answering the same message after a restart.
+        for chan in running_bridges() {
+            if stop_bridge(chan) { _log("stopped bridge for channel '" + chan + "'"); }
+        }
         clear_pidfile(DAEMON_PID);
         _clear_state();
         _log("sigil daemon stopped");
@@ -279,7 +337,9 @@ def daemon_status() -> dict {
         "next_due_ms": next_due_ms(),
         "interval_s": int(st.get("interval_s", 0)) if st else 0,
         "uptime_s": 0,
-        "service": service_status()
+        "service": service_status(),
+        "bridges": running_bridges(),
+        "channels": [b["name"] for b in wanted_bridges() if b["ready"]]
     };
     if running and st.get("started_ms") {
         out["uptime_s"] = int((now_ms() - int(st["started_ms"])) / 1000);

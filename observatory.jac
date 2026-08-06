@@ -13,6 +13,7 @@ import from src.sigil {
 }
 import from src.agent { api_chat_completions, api_models, api_tools_invoke }
 import from src.cron { api_cron_tick }
+import from src.channels { api_inbound }
 
 cl {
     import from web.app { App }
