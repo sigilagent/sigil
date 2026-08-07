@@ -390,7 +390,10 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
             }
         }
     }
-    for nm in ["artifact", "deliverable", "result", "comm", "eval_xml", "package_path", "showcase", "valid"] {
+    # "summary" earns its slot the hard way: it is what LIFT names the final
+    # digest/answer carry when nothing is literally called "result" (caught live:
+    # hackernews' summary was built one node before TERMINAL and never reported).
+    for nm in ["artifact", "deliverable", "result", "summary", "comm", "eval_xml", "package_path", "showcase", "valid"] {
         if (nm in ck) and (nm not in deliv) { deliv.append(nm); }
     }
     head = str(name) + (("[{self." + _safe(enumc) + "}]") if enumc else "");
@@ -402,14 +405,43 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
         # NEVER a bare constant (standard 3T): serialize the produced carries so
         # the report carries evidence of what the run actually made. Empty-handed
         # runs then LOOK empty-handed instead of reporting "done".
-        prod: list = [];
+        #
+        # WHICH produced carries is the trap. prod[:5] took the FIRST five in
+        # carry-table order — pipeline order — so the report was all early
+        # plumbing (ledger paths, fetch URLs) and never the answer, which a
+        # pipeline produces LAST (caught live: hackernews' n_done reported
+        # ledger_path/seen_ids while self.summary sat unread one field away;
+        # the grounded eval graded that report 15/100, correctly). The
+        # deliverables are the carries the pipeline does NOT consume: produced,
+        # read by no node — sinks. Report sinks, latest producer first; only if
+        # every produced carry is re-read, fall back to ALL produced, still
+        # latest first — the terminal answer leads either way.
+        reads_all: dict = {};
+        prod_at: dict = {};   # node id -> position, to order carries by producer
+        pos = 0;
+        for nn2 in _list(ir.get("nodes")) {
+            if not isinstance(nn2, dict) { continue; }
+            for rd in _list(nn2.get("reads")) { reads_all[str(rd)] = True; }
+            prod_at[str(nn2.get("id", ""))] = pos;
+            pos += 1;
+        }
+        prod: list = [];   # [order-key, tie-break, carry] — sortable without a lambda
+        tie = 0;
         for kv2 in _items(carries) {
             c2 = kv2[1];
-            if isinstance(c2, dict) and c2.get("produced_by") and (str(kv2[0]) != "report") { prod.append(str(kv2[0])); }
+            if not (isinstance(c2, dict) and c2.get("produced_by") and (str(kv2[0]) != "report")) { continue; }
+            pb = c2.get("produced_by");
+            pbl = pb if isinstance(pb, list) else [pb];
+            at = 0;
+            for p1 in pbl { at = max(at, int(prod_at.get(str(p1), 0))); }
+            prod.append([-at, tie, str(kv2[0])]);
+            tie += 1;
         }
         if not prod { return "f\"" + str(name) + " done\""; }
+        sinks: list = [p for p in prod if str(p[2]) not in reads_all];
+        pick: list = sorted(sinks if sinks else prod);
         parts2: list = [str(name)];
-        for d2 in prod[:5] { parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:300]}"); }
+        for d2 in [str(p[2]) for p in pick][:5] { parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:300]}"); }
         return "f\"" + _j(" | ", parts2) + "\"";
     }
     return "f\"" + _j(" ", parts) + "\"";
