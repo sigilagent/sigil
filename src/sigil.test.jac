@@ -40,6 +40,16 @@ test "describe_soul reports the EFFECTIVE tiers the chat banner shows" {
     assert describe_soul()["chat_model"] == plain["chat_model"];
 }
 
+test "runtime INFO chatter is muted unless SIGIL_VERBOSE asks for it" {
+    import os;
+    import logging;
+    # sigil_core's import-time entry gates the jac runtime loggers: unless this
+    # run opted into SIGIL_VERBOSE, serializer/memory INFO narration is filtered.
+    if not (os.getenv("SIGIL_VERBOSE") or "").strip() {
+        assert logging.getLogger("jaclang.runtimelib").getEffectiveLevel() >= int(logging.WARNING);
+    }
+}
+
 test "verbose: off by default, togglable, and SIGIL_VERBOSE wins for one run" {
     import os;
     os.environ.pop("SIGIL_VERBOSE", None);
