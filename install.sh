@@ -114,6 +114,10 @@ mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/sigil" <<EOF
 #!/usr/bin/env bash
 # Sigil launcher shim — installed by install.sh
+# Capture the invocation directory BEFORE cd-ing, or the wrapper's
+# SIGIL_PWD default records the app dir and every relative path the
+# user typed (e.g. \`sigil compile ./SKILL.md\`) resolves wrong.
+export SIGIL_PWD="\${SIGIL_PWD:-\$PWD}"
 cd "$SIGIL_HOME" && exec ./sigil "\$@"
 EOF
 chmod +x "$BIN_DIR/sigil"
