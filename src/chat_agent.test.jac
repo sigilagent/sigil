@@ -43,3 +43,33 @@ test "chat_turn: streams to the token sink and returns the full reply" {
     assert "".join([str(x) for x in collected]) == got, str(collected);
     set_token_sink(None);
 }
+
+test "use_skill: an unknown signature is a normal answer, not a crash" {
+    # a fresh test graph has no Registry -> empty library; the tool must answer
+    # (the model acts on it) instead of raising through byLLM's tool runtime.
+    out = use_skill("not_a_skill", "do something");
+    assert "no compiled skill" in out, out;
+    assert "Nothing was run" in out, out;
+}
+
+test "use_skill: no target and no library still answers with the next step" {
+    out = use_skill("", "");
+    assert ("sigil_compile" in out) or ("no compiled skill" in out), out;
+}
+
+test "use_skill's progress tail turns node events into skill trace lines" {
+    # the compiled module appends one JSON line per node entry; the tail must
+    # surface each as a live `skill` trace event. flag.done pre-set = one final
+    # drain then exit, so this exercises parse+emit without the thread.
+    d = tempfile.mkdtemp();
+    p = os.path.join(d, "agir.progress");
+    with open(p, "w") as f {
+        f.write('{"node": "fetch_top_ids", "t": 1}' + chr(10) + '{"node": "judge_relevance", "t": 2}' + chr(10));
+    }
+    drain_trace();
+    _tail_progress(p, {"done": True});
+    tr = drain_trace();
+    joined = " | ".join([str(t["detail"]) for t in tr if str(t["tool"]) == "skill"]);
+    assert "fetch_top_ids" in joined, joined;
+    assert "judge_relevance" in joined, joined;
+}
