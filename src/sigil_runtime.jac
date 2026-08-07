@@ -233,18 +233,47 @@ def agir_name(text: str) -> str {
 def skill_description(text: str) -> str {
     lines = (text or "").splitlines();
     started = False;
-    for line in lines {
+    i = 0;
+    n = len(lines);
+    while i < n {
+        line = lines[i];
         s = line.strip();
         if not started {
-            if not s { continue; }
+            if not s { i += 1; continue; }
             if s != "---" { return ""; }   # no frontmatter at all
             started = True;
+            i += 1;
             continue;
         }
         if s == "---" { break; }           # end of frontmatter
         if s.lower().startswith("description:") {
-            return s.split(":", 1)[1].strip().strip('"').strip("'");
+            inline = s.split(":", 1)[1].strip();
+            # A YAML block/folded scalar (`>`, `|`, with optional chomp/indent
+            # like `>-`, `|-`, `>+`, `|2`) puts NO content on the key line —
+            # the value is the indented lines that follow. Returning the raw
+            # `>-` marker (the old behavior) made it the skill's intent, which
+            # eval_skill then used as the probe task: the auto-eval judged a
+            # real run against an empty/meaningless task and forced a needless
+            # relearn. Gather the block body instead.
+            if inline and (inline[0] in "|>") {
+                body: list = [];
+                j = i + 1;
+                while j < n {
+                    bl = lines[j];
+                    bs = bl.strip();
+                    if bs == "---" { break; }                 # frontmatter end
+                    # a dedented, non-empty `key:` line ends the block
+                    if bs and (not bl.startswith((" ", "\t"))) { break; }
+                    body.append(bs);
+                    j += 1;
+                }
+                # folded scalar semantics: join non-empty lines with spaces
+                folded = " ".join([b for b in body if b]);
+                return folded.strip().strip('"').strip("'");
+            }
+            return inline.strip('"').strip("'");
         }
+        i += 1;
     }
     return "";
 }
