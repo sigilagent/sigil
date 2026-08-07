@@ -18,6 +18,7 @@ is a test asserting it.
 
 import os;
 import json;
+import logging;
 import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
 import from jaclang.byllm.lib { Model, ModelPool }
@@ -27,6 +28,16 @@ import from .sigil_runtime {
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
+
+with entry {
+    # The jac runtime boots the root logger at INFO, so every graph load narrates
+    # serializer aliasing and schema-drift recovery onto the user's terminal —
+    # debugging detail, not conversation. Warnings and errors still pass;
+    # SIGIL_VERBOSE=1 restores the full runtime narration.
+    if (os.getenv("SIGIL_VERBOSE") or "").strip().lower() not in ["1", "true", "yes", "on"] {
+        logging.getLogger("jaclang.runtimelib").setLevel(int(logging.WARNING));
+    }
+}
 
 glob FRONTIER_NAME: str = os.getenv("SIGIL_FRONTIER", "gpt-5");
 glob SMALL_NAME: str    = os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b");
