@@ -1197,3 +1197,108 @@ test "every builtin body is self-contained: no sigil import at run time" {
         assert "return" in b, n + " never returns anything";
     }
 }
+
+# ---------------------------------------------------------------------------
+# TERMINAL report — the fallback must serialize the DELIVERABLE, not plumbing.
+# prod[:5] took the first five produced carries in carry-table (= pipeline)
+# order, so a long pipeline reported its setup and never its answer (caught
+# live: hackernews' n_done emitted ledger_path/seen_ids while self.summary sat
+# unread one field away; the grounded eval scored that report 15/100).
+# ---------------------------------------------------------------------------
+glob PIPE_REPORT_IR: str = """---
+name: digest-pipeline
+description: Fetch, refine, deliver a digest.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  emit_ledger_path:
+    sig: "() -> str"
+    surface: SENSE
+    doc: "Where the ledger lives."
+    body: |
+      def emit_ledger_path():
+          return "ledger.json"
+  fetch_raw:
+    sig: "(ledger_path: str) -> str"
+    surface: SENSE
+    doc: "Fetch raw items."
+    body: |
+      def fetch_raw(ledger_path):
+          return "raw:" + (ledger_path or "")
+  build_digest:
+    sig: "(raw: str) -> str"
+    surface: ACT
+    doc: "Fold raw items into the digest."
+    body: |
+      def build_digest(raw):
+          return "digest of " + (raw or "")
+walker:
+  name: DigestPipeline
+  carries:
+    task:
+      type: str
+      role: input
+    ledger_path:
+      type: str
+      produced_by: prep
+    raw:
+      type: str
+      produced_by: fetch
+    digest_out:
+      type: str
+      produced_by: refine
+nodes:
+  - id: prep
+    type: SENSE
+    owner: code
+    op: emit_ledger_path
+    tool: emit_ledger_path
+    reads: []
+    writes: [ledger_path]
+  - id: fetch
+    type: SENSE
+    owner: code
+    op: fetch_raw
+    tool: fetch_raw
+    reads: [ledger_path]
+    writes: [raw]
+  - id: refine
+    type: ACT
+    owner: code
+    op: build_digest
+    tool: build_digest
+    reads: [raw]
+    writes: [digest_out]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: prep, to: fetch, modality: mandatory}
+  - {from: fetch, to: refine, modality: mandatory}
+  - {from: refine, to: done, modality: mandatory}
+""";
+
+test "the TERMINAL report leads with the sink carry, not pipeline plumbing" {
+    src = transpile_ir(PIPE_REPORT_IR, "digester");
+    # digest_out is produced and read by no node — the deliverable
+    assert 'f"DigestPipeline | digest_out={str(self.digest_out)[:300]}"' in src, src[-1500:];
+    # consumed plumbing must NOT ride the report
+    assert "ledger_path={str(self.ledger_path)" not in src;
+    assert "raw={str(self.raw)" not in src;
+}
+
+test "with no sinks the report runs latest-produced first, never head-truncated" {
+    # every produced carry re-read somewhere -> fall back to ALL produced,
+    # ordered by producer position, terminal answer first
+    ir = PIPE_REPORT_IR.replace("reads: [raw]", "reads: [raw, digest_out]");
+    src = transpile_ir(ir, "digester2");
+    assert 'digest_out={str(self.digest_out)[:300]} | raw={str(self.raw)[:300]} | ledger_path=' in src, src[-1500:];
+}
+
+test "a carry named summary is a recognized deliverable" {
+    ir = PIPE_REPORT_IR.replace("digest_out", "summary");
+    src = transpile_ir(ir, "digester3");
+    assert 'summary={_artifact_text(self.summary)}' in src, src[-1500:];
+}
