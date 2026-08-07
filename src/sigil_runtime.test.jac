@@ -28,6 +28,22 @@ test "skill_description reads the SKILL.md frontmatter trigger line" {
     assert skill_description("---\ndescription: \"Use when: a thing\"\n---\n") == "Use when: a thing";
 }
 
+test "skill_description folds a YAML block/folded scalar, not the >- marker" {
+    # `description: >-` puts the value on the following indented lines. The old
+    # parser returned the literal ">-" marker, which became the skill's intent
+    # and poisoned eval_skill's default probe (a real run judged against an
+    # empty task -> false-negative 15/100 -> needless relearn).
+    folded = "---\nname: hn\ndescription: >-\n  Scan the latest popular Hacker News\n  stories relevant to agentic AI.\ntags: [x]\n---\n";
+    assert skill_description(folded) == "Scan the latest popular Hacker News stories relevant to agentic AI.";
+    # literal block scalar `|` and a chomp indicator `|-`
+    literal = "---\ndescription: |-\n  First line.\n  Second line.\n---\n";
+    assert skill_description(literal) == "First line. Second line.";
+    # a bare `>` with no chomp char still folds
+    assert "one two" == skill_description("---\ndescription: >\n  one\n  two\n---\n");
+    # inline value on the key line is unchanged (regression guard)
+    assert skill_description("---\ndescription: Plain inline value.\n---\n") == "Plain inline value.";
+}
+
 test "skill_description returns empty when there is nothing to read" {
     assert skill_description("# Just a heading\n\nno frontmatter here") == "";
     assert skill_description("---\nname: x\n---\n") == "";
