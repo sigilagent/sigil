@@ -106,6 +106,17 @@ test "exec: ws_kill stops a job, ws_jobs lists it" {
     assert "already finished" in ws_kill(jid);
 }
 
+test "exec: `sigil solve` is intercepted, never shelled out" {
+    configure("workspace", tempfile.mkdtemp());
+    configure("sandbox", "off");
+    approvals_set("full", "off");
+    # a shelled-out solve would boot a second agent against the same database;
+    # the redirect names the tool that runs skills in THIS process.
+    out = ws_exec("sigil solve \"fetch the news\" hackernews_relevant_posts");
+    assert "use_skill" in out, out;
+    assert "[job " not in out, out;
+}
+
 test "exec: `sigil compile` is routed in-process, never shelled out" {
     configure("workspace", tempfile.mkdtemp());
     configure("sandbox", "off");

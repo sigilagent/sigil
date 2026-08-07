@@ -696,6 +696,16 @@ def _route_sigil(command: str) -> any {
     if len(toks) < 2 { return None; }
     head = toks[0];
     if not ((head == "sigil") or head.endswith("/sigil")) { return None; }
+    if toks[1] == "solve" {
+        # `sigil solve` in a shell boots a SECOND copy of this agent against the
+        # same database (caught live: a 13-minute detour that re-read compiled
+        # source, ran unstreamed, and tripped schema-drift warnings). The runner
+        # lives in this process — redirect instead of executing.
+        return ("`sigil solve` IS this agent — a shell run would boot a second copy of it "
+                + "against the same database. Run a compiled skill with the use_skill tool "
+                + "(list_skills shows what exists); for new one-off work just do it with the "
+                + "other tools, or learn_skill for a durable procedure.");
+    }
     if toks[1] != "compile" { return None; }
     path = "";
     eject = False;

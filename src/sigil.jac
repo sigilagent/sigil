@@ -403,8 +403,17 @@ walker solve {
         # --- route through the procedural library ---------------------------
         compiled_lib: list[TaskGraph] = latest_by_sig([reg -->][?:TaskGraph]);
         known = [c.signature for c in compiled_lib];
-        verdict = classify(self.task, known) if known else "NONE";
-        self.trace += "route -> " + verdict + "\n";
+        # An explicitly NAMED skill is the route: `solve <task> <skill>` (the CLI's
+        # second positional, the chat runner's use_skill) means THAT procedure.
+        # Consulting the router anyway made the named skill a suggestion the
+        # router could overrule — a deterministic pick, spelled out in the trace.
+        if self.skill and (self.skill in known) {
+            verdict = str(self.skill);
+            self.trace += "route -> " + verdict + " (forced)\n";
+        } else {
+            verdict = classify(self.task, known) if known else "NONE";
+            self.trace += "route -> " + verdict + "\n";
+        }
 
         tg: TaskGraph = select_target(reg, compiled_lib, verdict, self.task);
         self.trace += route_note(verdict, tg);
