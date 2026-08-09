@@ -1083,7 +1083,9 @@ with entry:__main__ {
         else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
     } elif cmd == "chat" {
         import from src.sigil_chat { chat_repl }
-        chat_repl();
+        # ^C between turns (banner, prompt teardown) exits quietly, never a traceback
+        try { chat_repl(); }
+        except KeyboardInterrupt { print(); }
     } elif cmd == "setup" {
         import from src.sigil_chat { setup_wizard }
         setup_wizard();

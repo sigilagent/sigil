@@ -428,18 +428,24 @@ def chat_turn(message: str) -> dict {
     _refresh_info(message);
     drain_trace();   # clear any stale trace
     reply = "";
+    interrupted = False;
     try {
         for tok in chat_agent(message) {
             piece = str(tok);
             reply += piece;
             if _TOKEN_SINK is not None { try { _TOKEN_SINK(piece); } except Exception as e {} }
         }
+    } except KeyboardInterrupt {
+        # ^C mid-turn means "stop this answer", not "kill sigil". KeyboardInterrupt
+        # is a BaseException, so the clause below never sees it — uncaught it would
+        # unwind the whole REPL. Keep whatever streamed and flag the turn.
+        interrupted = True;
     } except Exception as e {
         if not reply { reply = "⚠ agent error: " + str(e)[:300]; }
     }
     # keep history bounded (last ~16 turns)
     if len(CHAT_HISTORY) > 32 { CHAT_HISTORY = CHAT_HISTORY[-32:]; }
-    return {"reply": str(reply), "trace": drain_trace()};
+    return {"reply": str(reply), "trace": drain_trace(), "interrupted": interrupted};
 }
 
 def chat_reset() -> str {

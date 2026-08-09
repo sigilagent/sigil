@@ -454,16 +454,28 @@ def _run_and_render(console: any, message: str) {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
         st.start();
         _STATUS = st;
-        r = chat_turn(message);          # streams tokens via the sink; never raises (caught inside)
-        try { st.stop(); } except Exception as e {}
-        _STATUS = None;
+        # finally, not straight-line: chat_turn catches errors AND ^C, but if
+        # anything ever escapes it the spinner thread must still be torn down or
+        # it keeps repainting over the prompt for the rest of the session.
+        try { r = chat_turn(message); }
+        finally {
+            try { st.stop(); } except Exception as e {}
+            _STATUS = None;
+        }
     } else {
         r = chat_turn(message);
     }
+    interrupted = bool(r.get("interrupted") or False);
     if _STREAMED {
         # A reply almost never ends with a newline, so the last line is still in the
         # buffer — flush it or the final sentence never reaches the screen.
         _flush_reply(console);
+        if interrupted { console.print("[dim]  ✂ interrupted (^C) — reply cut short[/dim]"); }
+        console.print();
+    } elif interrupted {
+        # ^C before the first token: there is no reply to render, just say what happened
+        console.print();
+        console.print("[dim]  ✂ interrupted (^C)[/dim]");
         console.print();
     } else {
         # nothing streamed (empty reply, or an error before the first token) — render it
@@ -544,7 +556,15 @@ def chat_repl() {
             if _handle_slash(console, cmd) { break; }
             continue;
         }
-        _run_and_render(console, cmd);
+        try {
+            _run_and_render(console, cmd);
+        } except KeyboardInterrupt {
+            # last-resort net: a ^C that lands outside chat_turn's own guard
+            # (during rendering, or in an approval prompt) still only ends the
+            # TURN — the REPL survives.
+            console.print();
+            console.print("[dim]  ✂ interrupted (^C)[/dim]");
+        }
     }
     console.print("[dim]bye ◆[/dim]");
 }
