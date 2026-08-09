@@ -17,6 +17,7 @@ freshly-recalled memory, so the standing brief stays current without a restart.
 
 import json;
 import os;
+import subprocess;
 import time;
 import tempfile;
 import threading;
@@ -26,9 +27,8 @@ import from .sigil_core {
     cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
 }
 import from .agent { run_task }
-import from .cron { cron_add, cron_list, cron_remove, cron_run_now }
 import from .sigil_daemon { scheduler_running }
-import from .sigil_cron { fmt_when }
+import from .sigil_runtime { _jac_bin, entry_script, project_root }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from .sigil_docs { list_docs, read_doc }
@@ -50,26 +50,64 @@ def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
 # Bridge tools — thin wrappers over the graph-native subsystems, each with a
 # `sem` so the model knows exactly when to reach for it.
 # ---------------------------------------------------------------------------
+# Every cron op runs in a FRESH `jac run` subprocess, never in this long-lived
+# chat process. Chat's graph writes only reach the store as one optimistic
+# commit at exit; with the daemon committing every 30s, that commit loses the
+# version race (WriteConflict) and the whole session's writes are thrown away.
+# A job "scheduled" in-process was invisible to every tick while chat ran, then
+# gone for good when chat closed. A subprocess reads the store fresh, commits
+# alone, and is visible to the next tick — the same isolation tick_isolated
+# uses, pointed the other way. Reads go through it too, so run counts are the
+# daemon's real numbers, not this process's frozen copy.
+def _cron_cli(args: list, timeout_s: int = 300) -> str {
+    argv = [_jac_bin(), "run", entry_script(), "--", "cron"] + [str(a) for a in args];
+    try {
+        p = subprocess.run(argv, cwd=project_root(), capture_output=True,
+                           text=True, timeout=timeout_s);
+    } except subprocess.TimeoutExpired as e {
+        return "cron command timed out after " + str(timeout_s) + "s";
+    } except Exception as ex {
+        return "cron command failed: " + str(ex)[:200];
+    }
+    if p.returncode != 0 {
+        err = str(p.stderr or "").strip() or str(p.stdout or "").strip();
+        return "cron command failed: " + err[-400:];
+    }
+    keep = [ln for ln in str(p.stdout or "").splitlines()
+            if ln.strip() and (not ln.startswith(("INFO - ", "WARNING - ")))];
+    return "\n".join(keep) if keep else "(no output)";
+}
+
+def _local_tz() -> str {
+    # "11am" from the user means 11am on THEIR wall clock. The old hardcoded
+    # "UTC" made `0 11,15 * * *` fire at 07:00 local, and nobody could say why.
+    tz = str(os.getenv("TZ") or "");
+    if tz and ("/" in tz) { return tz; }
+    try {
+        real = str(os.path.realpath("/etc/localtime"));
+        if "zoneinfo/" in real { return real.split("zoneinfo/", 1)[1]; }
+    } except Exception as e {
+        return "UTC";
+    }
+    return "UTC";
+}
+
 sem schedule_task = """Schedule work to run later or on a repeat — the agent's cron.
 `kind`='at' (one-shot) with spec a relative time ('30m','2h','1d'), ISO timestamp, or
 epoch-ms; 'every' with spec = interval in SECONDS; 'cron' with spec a 5-field cron
-expression. `task` is the natural-language instruction to run when it fires.""";
+expression on the host's LOCAL wall clock. `task` is the natural-language instruction
+to run when it fires.""";
 sem schedule_task.name = "A short unique name for the job.";
 sem schedule_task.kind = "One of: at | every | cron.";
-sem schedule_task.spec = "The schedule: relative/ISO/epoch for 'at', seconds for 'every', cron-expression for 'cron'.";
+sem schedule_task.spec = "The schedule: relative/ISO/epoch for 'at', seconds for 'every', cron-expression (local time) for 'cron'.";
 sem schedule_task.task = "The instruction to execute when the job fires.";
 def schedule_task(name: str, kind: str, spec: str, task: str) -> str {
     _trace("schedule", name + " [" + kind + " " + spec + "]");
-    r = cron_add(name, kind, spec, task, "UTC", "", False);
-    if not r.get("ok", True) {
-        return "could not schedule '" + str(name) + "': " + str(r["error"]);
-    }
-    out = "scheduled '" + str(r["name"]) + "' [" + str(r["kind"]) + "] first fire "
-          + fmt_when(int(r["next_run_ms"]));
+    out = _cron_cli(["add", name, kind, spec, task, _local_tz()]);
     if not scheduler_running() {
         # The model has to be able to say this out loud. Answering "scheduled!"
         # while nothing ticks is how a job sat at runs=0 for a week.
-        out += ". WARNING: no scheduler is running, so this job will NOT fire yet — "
+        out += "\nWARNING: no scheduler is running, so this job will NOT fire yet — "
                + "the user needs to start one with `sigil daemon start`.";
     }
     return out;
@@ -79,17 +117,10 @@ sem list_scheduled = """List the currently scheduled cron jobs (name, kind, sche
 next fire time, run counts) and whether a scheduler is actually running. If it is not,
 say so — a job with runs=0 and no scheduler has not failed, it has never been tried.""";
 def list_scheduled() -> str {
-    js = cron_list();
-    if not js { return "(no scheduled jobs)"; }
-    out: list = [];
-    for j in js {
-        out.append(str(j["name"]) + "  [" + str(j["kind"]) + " " + str(j["spec"]) + "]  "
-                   + ("on" if j["enabled"] else "off") + "  runs=" + str(j["runs"])
-                   + "  next=" + fmt_when(int(j["next_run_ms"])) + "  " + str(j["task"]));
-    }
-    if scheduler_running() { out.append("scheduler: running"); }
-    else { out.append("scheduler: NOT RUNNING — nothing will fire until `sigil daemon start` is run"); }
-    return "\n".join(out);
+    out = _cron_cli(["list"]);
+    if scheduler_running() { out += "\nscheduler: running"; }
+    else { out += "\nscheduler: NOT RUNNING — nothing will fire until `sigil daemon start` is run"; }
+    return out;
 }
 
 sem run_scheduled_now = """Run a scheduled job RIGHT NOW, once, without waiting for its
@@ -98,15 +129,13 @@ or wants its result immediately.""";
 sem run_scheduled_now.name = "The job name to run now.";
 def run_scheduled_now(name: str) -> str {
     _trace("run-job", name);
-    r = cron_run_now(name);
-    if not r["ok"] { return str(r["error"]); }
-    ran = dict(r["ran"]);
-    return ("ok" if ran["ok"] else "failed") + ": " + str(ran["summary"])[:600];
+    # The fired task solves in the subprocess and can legitimately take minutes.
+    return _cron_cli(["run", name], timeout_s=1800);
 }
 
 sem cancel_scheduled = "Cancel (remove) a scheduled cron job by name.";
 sem cancel_scheduled.name = "The job name to cancel.";
-def cancel_scheduled(name: str) -> str { _trace("unschedule", name); return cron_remove(name); }
+def cancel_scheduled(name: str) -> str { _trace("unschedule", name); return _cron_cli(["rm", name]); }
 
 sem remember_fact = "Store a durable fact in long-term memory to recall in future conversations.";
 sem remember_fact.fact = "The fact to remember.";
