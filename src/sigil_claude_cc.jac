@@ -491,6 +491,20 @@ def _call(model: str, messages: list):
         result = _drain(proc, deadline)
         proc.wait()
         err = proc.stderr.read() or ""
+    except KeyboardInterrupt:
+        # ^C: reap the CLI child before the interrupt travels on — abandoned,
+        # a headless `claude -p` keeps running (and spending) with no one
+        # reading its stdout.
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        raise
     finally:
         fh.close()
         try:
@@ -548,6 +562,13 @@ async def _acall(model: str, messages: list):
             raise _timed_out("", secs, "SIGIL_CLAUDE_CC_TIMEOUT")
         err = (await proc.stderr.read()).decode(errors="replace")
         await proc.wait()
+    except KeyboardInterrupt:
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        raise
     finally:
         fh.close()
         try:
