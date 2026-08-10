@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Sigil website palette (docs/index.html :root) — the slate ramp is re-tinted
+   to the site's violet-greys so every slate-* class in the app lands on-brand:
+   950 = --bg, 900 = --panel, 800 ≈ --line on dark, 400 = --muted, 600 = --faint. */
+@theme {
+  --color-slate-50: #f7f6fb;
+  --color-slate-100: #efedf6;
+  --color-slate-200: #e0ddec;
+  --color-slate-300: #c9c5dc;
+  --color-slate-400: #9d9ab4;
+  --color-slate-500: #86829e;
+  --color-slate-600: #6f6c86;
+  --color-slate-700: #3f3b54;
+  --color-slate-800: #211e33;
+  --color-slate-900: #12121d;
+  --color-slate-950: #08080d;
+  --color-sigil-gold: #f5c451;
+}
+
+html, body, #root { height: 100%; margin: 0; }
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.vis-network:focus { outline: none; }

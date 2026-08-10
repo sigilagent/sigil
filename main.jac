@@ -316,15 +316,81 @@ def _align_guest_root(data_dir: str) -> bool {
     }
 }
 
+# The Observatory's own port — NOT jac's 8000 default, so it never collides
+# with (or gets mistaken for) some other jac server. 8199 is the established
+# convention: the `sigil` launcher exports SIGIL_PORT (default 8199) and the
+# docs' curl examples target it. Keep all three in sync.
+glob OBSERVATORY_PORT: str = "8199";
+
+def _port_owner(port: str) -> list {
+    # [pid, command] of whatever LISTENs on the port, or [] if it is free.
+    try {
+        r = subprocess.run(["lsof", "-ti", "tcp:" + port, "-sTCP:LISTEN"],
+                           capture_output=True, text=True, timeout=5);
+        pids = [x.strip() for x in str(r.stdout or "").split() if x.strip()];
+        if not pids { return []; }
+        rc = subprocess.run(["ps", "-p", pids[0], "-o", "command="],
+                            capture_output=True, text=True, timeout=5);
+        return [pids[0], str(rc.stdout or "").strip()];
+    } except Exception as e { return []; }
+}
+
+def _claim_port(port: str) -> bool {
+    # STRICT port policy: the Observatory runs on `port` or not at all. jac's
+    # own "port in use → try the next one" fallback is exactly how you end up
+    # watching a stale server's agent without knowing it — so detect the owner
+    # up front and kill it (with consent) or bail with instructions.
+    owner = _port_owner(port);
+    if not owner { return True; }
+    pid = str(owner[0]);
+    cmd = str(owner[1]);
+    stale = ("observatory.jac" in cmd) or ("jac start" in cmd);
+    print("observatory port " + port + " is already in use by pid " + pid
+          + (" (looks like a previous observatory run):" if stale else ":"));
+    print("  " + cmd[:140]);
+    sys.stdout.flush();   # these must land before jac start floods the log
+    doit = False;
+    if sys.stdin.isatty() {
+        ans = str(input("kill it and take the port? [y/N] ")).strip().lower();
+        doit = ans in ["y", "yes"];
+    } else {
+        # headless: replacing our own stale observatory is safe; anything else
+        # is somebody's server — never kill it, and NEVER fall back silently.
+        doit = stale;
+        if stale { print("headless run — replacing the stale observatory."); }
+    }
+    if not doit {
+        print("leaving it alone. free the port (kill " + pid + ") or pick another:  sigil serve <port>");
+        sys.stdout.flush();
+        return False;
+    }
+    try { os.kill(int(pid), 15); } except Exception as e {
+        print("could not kill " + pid + ": " + str(e)[:120]);
+        return False;
+    }
+    tries = 0;
+    while (tries < 20) and _port_owner(port) { time.sleep(0.3); tries += 1; }
+    if _port_owner(port) {
+        print("pid " + pid + " is still holding the port — kill -9 " + pid + " yourself, or:  sigil serve <port>");
+        return False;
+    }
+    print("port " + port + " reclaimed.");
+    sys.stdout.flush();
+    return True;
+}
+
 def serve_observatory(port: str) {
-    # `sigil serve` — run the full-stack server (REST API + Observatory web UI)
-    # on the same graph as the CLI. jac.toml pins the server's SQLite store to
+    # `sigil serve [port]` — run the full-stack server (REST API + Observatory
+    # web UI) on the same graph as the CLI, on the Observatory's OWN port
+    # (8199 unless overridden) — claimed strictly via _claim_port, never
+    # silently moved. jac.toml pins the server's SQLite store to
     # `.jac/data/sigil.db` (the CLI's project db); this handles the root side.
     proj = os.path.dirname(os.path.abspath(__file__));
     data = os.path.join(proj, ".jac", "data");
+    port = str(port) if port else OBSERVATORY_PORT;
+    if not _claim_port(port) { return; }
     aligned = _align_guest_root(data);
-    cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac")];
-    if port { cmdline.extend(["--port", port]); }
+    cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac"), "--port", port];
     p = subprocess.Popen(cmdline, cwd=proj);
     try {
         # First-ever start: the server creates the auth store moments after
@@ -675,14 +741,37 @@ with entry:__main__ {
         try {
             if name == "soul" { payload["data"] = describe_soul(); }
             elif name == "graph" {
+                # Serialize the typed view-model to plain dicts HERE: the payload
+                # crosses the subprocess seam through json.dumps(default=str), which
+                # would otherwise flatten VGraph to its repr string — and the
+                # Observatory would read `nodes: undefined` forever.
                 import from src.sigil { graph_snapshot }
-                payload["data"] = graph_snapshot();
+                _vg = graph_snapshot();
+                payload["data"] = {
+                    "nodes": [{"id": _n.id, "label": _n.label, "group": _n.group, "detail": _n.detail}
+                              for _n in _vg.nodes],
+                    "edges": [{"src": _e.src, "dst": _e.dst, "kind": _e.kind} for _e in _vg.edges],
+                    "skills": _vg.skills, "memories": _vg.memories, "mcp": _vg.mcp
+                };
             }
             elif name == "library" { payload["data"] = library(); }
             elif name == "mcp" { payload["data"] = mcp_status(); }
             elif name == "observability" {
+                # Same seam rule as "graph": VObs must leave as plain dicts.
                 import from src.sigil { observability_tail }
-                payload["data"] = observability_tail(int(a.get("n", 120)));
+                _vo = observability_tail(int(a.get("n", 120)));
+                payload["data"] = {
+                    "calls": [{"model": _c.model, "signature": _c.signature,
+                               "prompt_tokens": _c.prompt_tokens,
+                               "completion_tokens": _c.completion_tokens,
+                               "reasoning_tokens": _c.reasoning_tokens,
+                               "cache_read_tokens": _c.cache_read_tokens,
+                               "cost_usd": _c.cost_usd, "content": _c.content,
+                               "reasoning": _c.reasoning, "tools": _c.tools}
+                              for _c in _vo.calls],
+                    "tin": _vo.tin, "tout": _vo.tout, "treason": _vo.treason,
+                    "cost": _vo.cost, "n": _vo.n
+                };
             }
             elif name == "recall" { payload["data"] = recollect(str(a.get("query", "")), int(a.get("k", 8))); }
             elif name == "teach" { payload["data"] = teach(str(a.get("fact", "")), str(a.get("kind", "fact"))); }
