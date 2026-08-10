@@ -65,7 +65,6 @@ sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runna
 ./agent.jac "extract the tables"         # runs on any model: SIGIL_MODEL=…
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
 sigil register-skill ./y.jac osp         # drop in a precompiled module
-sigil replay agent.jac obs.jsonl "task"  # re-run a recorded run's cognition — free
 sigil gate ./x.agir                      # run G4, the compile oracle, on its own
 ```
 

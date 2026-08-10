@@ -167,6 +167,7 @@ node TaskGraph {
     has module: str;       # path to the lowered OSP on disk
     has version: int = 1;
     has origin: str = "frontier";   # 'frontier' | 'mutation' | 'relearn'
+    has skill_src: str = "";        # the SKILL.md this was compiled from ("" = task-born) — what relearn recompiles
     has runs: int = 0;
     has successes: int = 0;
     has last_score: int = -1;       # last grounded-eval score (0-100); -1 = never evaluated

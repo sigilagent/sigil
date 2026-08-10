@@ -67,8 +67,8 @@ def _extract_message(resp) -> dict:
             fn = (t.get("function") if isinstance(t, dict) else getattr(t, "function", None)) or {}
             name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
             tool_calls.append(name or "?")
-            # arguments too (truncated): with them a recording is fully
-            # REPLAYABLE (compiler.ai.replay) — without, tool rounds are a gap
+            # arguments too (truncated): with them the Observatory shows the
+            # whole tool round — without, tool rounds are a gap
             args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
             tool_args.append(str(args or "")[:2000])
         return {
