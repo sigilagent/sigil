@@ -14,8 +14,9 @@ entry-point = "observatory.jac"
 # into the project venv.
 [dependencies]
 pyyaml = "latest"
-# The interactive `chat` REPL and `config` editor (sigil_chat.jac) render with rich
-# and use prompt_toolkit for line editing / history when stdin is a TTY.
+# The interactive `chat` REPL (sigil_chat.jac) renders with rich; its line editor
+# (sigil_input.jac) is prompt_toolkit — multiline input, "/" command palette,
+# history suggestions, status toolbar — active only when stdin is a TTY.
 rich = "~=15.0"
 prompt_toolkit = "~=3.0"
 # byLLM's streaming path (chat mode streams the reply token-by-token) imports httpx.
