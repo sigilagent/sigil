@@ -45,6 +45,7 @@ import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_t
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
 import from src.sigil_runtime { _jac_bin, read_pid, project_root }
+import from src.sigil_errors { install_error_log, friendly_llm_error, log_error, error_log_path }
 import from src.sigil_api { JSON_MARKER }
 import from src.eject_agent { eject_agent, carries_compiler }
 import from src.sigil_daemon {
@@ -347,6 +348,10 @@ with entry:__main__ {
     # Before anything reads the graph: pin cwd to the project so every entry —
     # CLI, TUI, daemon, a job the daemon fires — is the SAME agent.
     _pin_project_dir();
+    # And before any model can be called: provider failures must never smear
+    # tracebacks over the terminal. byLLM's loguru output and litellm's banners
+    # go to $SIGIL_HOME/log/error.log; each surface reports one sentence.
+    install_error_log();
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
@@ -390,10 +395,17 @@ with entry:__main__ {
         if not task {
             print("usage: solve \"<task>\" [skill]");
         } else {
-            r = run_task(task, skill);
+            try {
+                r = run_task(task, skill);
+            } except Exception as e {
+                # a dead model/key/network must read as a sentence, not a stack
+                log_error("solve failed: " + task[:200], e);
+                print("xx " + friendly_llm_error(e), file=sys.stderr);
+                sys.exit(1);
+            }
             print("=== route trace ===");
             print(r["trace"]);
-            print("=== signature: " + r["signature"] + " ===");
+            print("=== signature: " + str(r["signature"]) + " ===");
             print(redact_secrets(str(r["result"])));   # never surface a resolved secret
         }
     } elif cmd == "library" {
@@ -660,6 +672,7 @@ with entry:__main__ {
         print("project   : " + project_root());
         print("invoked in: " + (_PWD0 or os.getcwd()));
         print("daemon    : " + ("running" if daemon_running() else "not running"));
+        print("errors    : " + error_log_path());
     } elif cmd == "api" {
         # api <name> <json-args> — the machine-readable face of the CLI, and the
         # ONLY thing the HTTP endpoints run. Prints one JSON object behind a
@@ -801,9 +814,18 @@ with entry:__main__ {
             }
             if _tty { print(chr(10) + "  Compiling " + path); }
             if _tty { _install_stream_view(); }
-            r = compile_skill(open(path).read(), eject, eject_path,
-                              _compile_ev if _tty else None, agent_author,
-                              os.path.dirname(os.path.abspath(path)), strict, ask, frontend);
+            try {
+                r = compile_skill(open(path).read(), eject, eject_path,
+                                  _compile_ev if _tty else None, agent_author,
+                                  os.path.dirname(os.path.abspath(path)), strict, ask, frontend);
+            } except Exception as e {
+                # the frontier model died under the compile (bad name, key,
+                # network) — one sentence + the log, never a provider stack
+                if _tty { _vb_close(); print(""); }
+                log_error("compile failed: " + path, e);
+                print("xx " + friendly_llm_error(e, "", "frontier"), file=sys.stderr);
+                sys.exit(1);
+            }
             if _tty { _vb_close(); print(""); }
             if not r["ok"] {
                 # the fix-forward exit note: what failed, what the ladder
