@@ -598,3 +598,27 @@ walker:pub api_observability {
     can run with Root entry { report report_for("observability", {"n": self.n}); }
 }
 
+
+# --- Ops surface: the dashboard's read (+tick) endpoints. Same seam as the
+# rest — report_for runs each request against the agent's real graph. --------
+
+walker:pub api_cron_list {
+    can run with Root entry { report report_for("cron_list", {}); }
+}
+
+walker:pub api_tasks {
+    has n: int = 30;
+    can run with Root entry { report report_for("tasks", {"n": self.n}); }
+}
+
+walker:pub api_hooks {
+    can run with Root entry { report report_for("hooks", {}); }
+}
+
+walker:pub api_channels {
+    can run with Root entry { report report_for("channels", {}); }
+}
+
+walker:pub api_approvals {
+    can run with Root entry { report report_for("approvals", {}); }
+}
