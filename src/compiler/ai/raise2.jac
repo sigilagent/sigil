@@ -24,9 +24,9 @@ Two things that differ from `lift()`:
    gap is closed — the property `lift()` could not get from one front-end.
 """
 
-import from .spec_loop { extract_spec, pin_lift_llm, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default }
+import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default }
 import from .author_direct { author_direct, pin_direct_llm }
-import from .faith { faithfulness_report, FaithReport, proof_lines }
+import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions }
 import from .gates { compile_gate }
 
 obj RaiseResult {
@@ -78,6 +78,7 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     #                             faithful-to-what-was-stated agent is produced and
     #                             the author is told exactly what to re-run with
     #                             --clarify if an assumption is wrong.
+    skill = strip_frontmatter(skill);
     sr = extract_spec(skill, name);
     warnings: list[str] = [];
     if sr.clarify {
@@ -99,6 +100,14 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     return rr;
 }
 
+def _constraint_drop_ids(fr: FaithReport) -> list[str] {
+    out: list[str] = [];
+    for f in fr.dropped {
+        if str(f.shape) == "CONSTRAINT" { out.append(str(f.rule)); }
+    }
+    return out;
+}
+
 def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
     au = author_direct(skill, spec, name);
     ir: str = str(au["ir_text"]).strip();
@@ -110,6 +119,22 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
 
     fr = faithfulness_report(spec, ir);
     rounds = 0;
+
+    # Mechanical rung FIRST (autofixes land before model repair): fold any
+    # untraced prohibition into the model nodes it governs, adopt on
+    # improvement. What remains goes to the model ladder.
+    ids = _constraint_drop_ids(fr);
+    if ids {
+        irf: str = str(fold_untraced_prohibitions(ir, spec, ids));
+        if irf {
+            frf = faithfulness_report(spec, irf);
+            if (len(frf.dropped) + len(frf.added)) < (len(fr.dropped) + len(fr.added)) {
+                ir = irf; fr = frf;
+                repairs.append("autofix: folded " + str(len(ids))
+                               + " untraced prohibition(s) into model-node docs");
+            }
+        }
+    }
     # rule-scoped repair: the SAME coherent author closes exactly the gaps.
     while (not fr.ok) and (rounds < max_repair) {
         rounds += 1;
@@ -129,6 +154,22 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         } else {
             repairs.append("repair round " + str(rounds) + ": no improvement (" + str(before) + " -> " + str(after) + ") — keeping prior");
             break;
+        }
+    }
+
+    # The model ladder can itself stall on a fresh untraced prohibition (an
+    # adopted round that closed other gaps but opened this one) — one more
+    # mechanical pass before the verdict.
+    ids2 = _constraint_drop_ids(fr);
+    if ids2 {
+        irf2: str = str(fold_untraced_prohibitions(ir, spec, ids2));
+        if irf2 {
+            frf2 = faithfulness_report(spec, irf2);
+            if (len(frf2.dropped) + len(frf2.added)) < (len(fr.dropped) + len(fr.added)) {
+                ir = irf2; fr = frf2;
+                repairs.append("autofix: folded " + str(len(ids2))
+                               + " untraced prohibition(s) into model-node docs");
+            }
         }
     }
 

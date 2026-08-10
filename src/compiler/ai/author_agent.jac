@@ -37,7 +37,7 @@ import yaml;
 import from pathlib { Path }
 import from .lift_types { Modality, RuleKind }
 import from .ir_views { LiftResult, NodeType, Owner }
-import from .spec_loop { extract_spec, RuleSet, Rule }
+import from .spec_loop { extract_spec, strip_frontmatter, RuleSet, Rule }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle, KnowledgeItem, KnowledgeView, ToolDef }
 import from .gates { compile_gate, gate_standalone, gate_struct_cov }
@@ -133,8 +133,11 @@ def _rules_md(spec: RuleSet) -> str {
     ];
     for r in spec.rules {
         lines.append("- **" + r.id + "** · " + str(r.kind.name) + " · " + str(r.modality.name)
-                     + (" · when: " + r.condition if r.condition else ""));
+                     + (" · when: " + r.condition if r.condition else "")
+                     + (" · binds: " + r.binds if r.binds not in ["", "agent"] else ""));
         lines.append("  > " + r.quote.replace("\n", " "));
+        if r.statement { lines.append("  = " + r.statement.replace("\n", " ")); }
+        for al in r.aliases { lines.append("  ~ also stated as: " + str(al).replace("\n", " ")); }
     }
     if spec.sub_resources {
         lines.append("");
@@ -149,6 +152,7 @@ def _must_trace(spec: RuleSet) -> list[str] {
     for r in spec.rules {
         if r.modality != Modality.MANDATORY { continue; }
         if (r.kind != RuleKind.STEP) and (r.kind != RuleKind.IO) { continue; }
+        if r.binds not in ["", "agent"] { continue; }   # not the agent's to perform
         out.append(r.id);
     }
     return out;
@@ -233,6 +237,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
 
     _t0 = time.time();
     _emit({"stage": "spec", "state": "start"});
+    skill = strip_frontmatter(skill);
     sr = extract_spec(skill, name);
     _emit({"stage": "spec", "state": "done", "secs": time.time() - _t0,
            "rules": len(sr.spec.rules), "rounds": sr.verdict.rounds,

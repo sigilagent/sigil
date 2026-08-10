@@ -255,6 +255,14 @@ test "_inname prefers the read-verb filename and skips save-claimed ones" {
     assert fn("take stuff.csv then save as out.csv") == "stuff.csv";
     # no input named: honest empty, the tool's guard speaks
     assert fn("write a poem and save as poem.txt") == "";
+    # absolute paths survive WHOLE — \b before a '/' can never hold, so the old
+    # regex silently stripped the leading slash (read-verb path) or plucked a
+    # basename fragment out of the middle of the pathname (bare fallback)
+    assert fn("read the packet /a/b/campaign-list.explainer.json and explain it")
+           == "/a/b/campaign-list.explainer.json";
+    assert fn("explain the component using the packet at /a/b/campaign-list.explainer.json")
+           == "/a/b/campaign-list.explainer.json";
+    assert fn("load ~/data/in.csv and chart it") == "~/data/in.csv";
 }
 
 # `task` is not always the only input the IR declares. A carry marked

@@ -39,12 +39,18 @@ obj Rule {
     has modality: Modality = Modality.MANDATORY;
     has condition: str = "";
     has cohesion: Cohesion = Cohesion.ATOMIC;
+    has binds: str = "agent";
+    has aliases: list[str] = [];
+    has statement: str = "";
 }
 
 sem Rule = "One atomic obligation extracted from the skill text.";
 sem Rule.id = "Stable short id (r1, r2, ...). Keep ids stable across revision rounds.";
 sem Rule.quote = "The VERBATIM span from the skill text this rule comes from, copied character-for-character (whitespace may be collapsed). NEVER paraphrase, summarize, or invent — a quote that does not appear in the skill gets the rule mechanically dropped.";
 sem Rule.condition = "If the span is conditional or exemplary ('when uncertain...', 'if the task...', 'e.g. ...'), the condition VERBATIM. Empty only when the span is genuinely unconditional. Hardening a conditional into an unconditional mandate is a faithfulness violation.";
+sem Rule.binds = "WHO the span binds, read from the sentence's SUBJECT: 'agent' (an obligation the executing agent must obey), 'environment' (a fact about a tool, harness, or system the skill describes — 'the harness never guesses' binds the harness, not the agent), 'user' (a statement about the human), 'none' (pure description). Modal force in a descriptive sentence does NOT make it an agent obligation.";
+sem Rule.aliases = "OTHER verbatim spans that RESTATE this same obligation — a cross-reference ('Verify (above).'), a recap bullet, a summary line. Attach them here instead of minting duplicate rules. Each alias must appear verbatim in the skill; non-verbatim aliases are mechanically dropped.";
+sem Rule.statement = "ONE plain imperative line restating the obligation for the author ('never apply two different fixes to residues in the same cluster'). Display and authoring aid ONLY — grounding and faithfulness key on the verbatim quote alone.";
 
 obj RuleSet {
     has skill_name: str = "";
@@ -109,7 +115,16 @@ to...') is ONE rule with cohesion=INVOKE_UNIT — do not shred it into fragments
 (5) A demand to consult a live source at run time is kind=GROUNDING. (6) Keep
 prior rule ids stable; apply the GAPS feedback exactly: remove the listed
 invented rules, add grounded rules covering the listed uncovered spans, fix the
-listed modality drift.""";
+listed modality drift. (7) Set `binds` from the sentence's SUBJECT: an
+imperative addressed to the executing agent binds 'agent'; a sentence describing
+what a tool, harness, or system does binds 'environment' ('the harness never
+guesses' is a fact ABOUT the harness — kind=KNOWLEDGE, binds='environment', even
+though it says 'never'); statements about the human bind 'user'. (8) When a span
+merely RESTATES an obligation already captured — a cross-reference ('Verify
+(above).'), a recap bullet, a summary — attach it to that rule's `aliases`
+instead of minting a duplicate rule. (9) Fill `statement` with one plain
+imperative line restating the rule for the author; the verbatim `quote` remains
+the only anchor.""";
 sem extract_round.skill = "The full skill text — the only ground truth.";
 sem extract_round.prior = "The previous round's RuleSet (empty on round one). Preserve its grounded rules and ids.";
 sem extract_round.gaps = "Code-audit feedback from the previous round: dropped inventions, uncovered spans, modality drift.";
@@ -134,9 +149,36 @@ glob _LENSES: dict = {
 # code disposes
 # ---------------------------------------------------------------------------
 
+def strip_frontmatter(skill: str) -> str {
+    # Frontmatter is the ROUTER's contract — `name:`/`description:` say when a
+    # harness should reach for the skill (see skill_description / mcp-serve).
+    # It is not part of the procedure being compiled: trigger prose left in the
+    # spec loop extracts as rules ("use this whenever ...") with no realizable
+    # slot in the workflow, the r5 class of DROPPED faithfulness failures.
+    # Every compile front-end sheds it here, so grounding never sees it and no
+    # frontmatter-sourced rule can survive extraction.
+    lines = (skill or "").splitlines(True);
+    i = 0;
+    n = len(lines);
+    while (i < n) and (not lines[i].strip()) { i += 1; }
+    if (i >= n) or (lines[i].strip() != "---") { return skill; }
+    j = i + 1;
+    while j < n {
+        if lines[j].strip() == "---" { return "".join(lines[(j + 1):]); }
+        j += 1;
+    }
+    return skill;   # an unterminated fence is a horizontal rule, not frontmatter
+}
+
 def _norm(s: any) -> str {
-    # whitespace-collapsed, casefolded — the grounding equivalence
-    return str(re.sub(r"\s+", " ", str(s))).strip().casefold();
+    # the grounding equivalence: casefolded, punctuation and markdown decoration
+    # replaced by spaces, whitespace collapsed. Verbatim about WORDS, indifferent
+    # to typography — `**bold**`, list numbering, backticks and smart quotes are
+    # exactly what extracted quotes drift on run to run. NOT paraphrase-tolerant:
+    # every word must still appear, in order.
+    t = str(s).casefold();
+    t = re.sub(r"[^\w\s]+", " ", t);
+    return str(re.sub(r"\s+", " ", t)).strip();
 }
 
 def _in_skill(skill_norm: str, span: any) -> bool {
@@ -147,10 +189,13 @@ def _in_skill(skill_norm: str, span: any) -> bool {
 def ground_rules(skill: str, rs: RuleSet) -> list[str] {
     # Soundness: ids of rules whose quote does NOT appear in the skill.
     # This is the mechanical anti-hallucination backbone — never model-judged.
+    # Aliases are held to the same bar individually: a non-verbatim alias is
+    # dropped from the rule (the rule survives on its primary quote).
     sn = _norm(skill);
     bad: list = [];
     for r in rs.rules {
-        if not _in_skill(sn, r.quote) { bad.append(r.id); }
+        if not _in_skill(sn, r.quote) { bad.append(r.id); continue; }
+        if r.aliases { r.aliases = [a for a in r.aliases if _in_skill(sn, a)]; }
     }
     return bad;
 }
@@ -289,6 +334,20 @@ def flag_ambiguous(skill: str, rs: RuleSet) -> list[ClarifyItem] {
                      + '". Should the agent ALWAYS do this (Do), do it ONLY when the task calls for'
                      + " it (Maybe), or NEVER (Don't)?"));
         } elif r.modality == Modality.FORBIDDEN {
+            if r.kind == RuleKind.KNOWLEDGE {
+                # kind/modality CONFLICT — marker presence does NOT settle this:
+                # a descriptive 'never' ("the harness never guesses") carries the
+                # marker yet binds the tool, not the agent. Markers gate questions,
+                # not conclusions.
+                out.append(ClarifyItem(rule_id=r.id, quote=q,
+                    reason="kind/modality conflict: tagged KNOWLEDGE (a fact to carry) yet FORBIDDEN"
+                         + " (a prohibition) — a descriptive 'never' about a tool or the environment"
+                         + " is knowledge, not a mandate on the agent",
+                    question='The skill says: "' + q[:180]
+                         + '". Is this a prohibition the agent itself must obey (Don\'t), background'
+                         + " knowledge to carry verbatim (Do), or optional context (Maybe)?"));
+                continue;
+            }
             if _has_forbid_marker(r.quote) { continue; }   # a genuine Don't
             out.append(ClarifyItem(rule_id=r.id, quote=q,
                 reason="tagged FORBIDDEN (a Don't) but the skill uses no never/do-not — likely a"
@@ -324,17 +383,31 @@ def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[s
     # so the author can re-run with --clarify to set the ones that should be a Do
     # or a Don't. This is the counterpart to apply_clarifications (the HIL path):
     # both resolve the ambiguity, one by assumption + warning, one by asking.
-    ids: list[str] = [c.rule_id for c in clarify];
+    demote: list = [c for c in clarify if not str(c.reason).startswith("kind/modality conflict")];
+    keep: list = [c for c in clarify if str(c.reason).startswith("kind/modality conflict")];
+    ids: list[str] = [c.rule_id for c in demote];
     for r in rs.rules {
         if (r.id in ids) and (r.modality != Modality.DISCRETIONARY) {
             r.modality = Modality.DISCRETIONARY;
         }
     }
     if not clarify { return []; }
-    warns: list[str] = [str(len(clarify)) + " underspecified obligation(s) ASSUMED to be MAYBE"
-                        + " (optional) — the skill states no Do/Don't. Re-run with --clarify to set"
-                        + " these by hand:"];
-    for c in clarify { warns.append("  ? " + c.rule_id + ': "' + str(c.quote)[:70] + '"'); }
+    warns: list[str] = [];
+    if demote {
+        warns.append(str(len(demote)) + " underspecified obligation(s) ASSUMED to be MAYBE"
+                     + " (optional) — the skill states no Do/Don't. Re-run with --clarify to set"
+                     + " these by hand:");
+        for c in demote { warns.append("  ? " + c.rule_id + ': "' + str(c.quote)[:70] + '"'); }
+    }
+    if keep {
+        # KNOWLEDGE+FORBIDDEN keeps its modality: with required_shape treating it
+        # as embodied knowledge, the faithful default is to CARRY the fact, not to
+        # conscript it into a constraint or silently drop it.
+        warns.append(str(len(keep)) + " descriptive prohibition(s) CARRIED as background knowledge"
+                     + " (KNOWLEDGE tagged FORBIDDEN — a fact about a tool, not an agent mandate)."
+                     + " Re-run with --clarify if any is a real Don't:");
+        for c in keep { warns.append("  ? " + c.rule_id + ': "' + str(c.quote)[:70] + '"'); }
+    }
     return warns;
 }
 
@@ -354,6 +427,12 @@ def apply_clarifications(rs: RuleSet, answers: dict[str, str]) -> list[str] {
         if not a { continue; }
         if a not in _ANSWER_MODALITY { notes.append("clarify '" + r.id + "': unrecognized answer '" + a + "' — left unchanged"); continue; }
         m = _ANSWER_MODALITY[a];
+        if (m == Modality.FORBIDDEN) and (r.kind == RuleKind.KNOWLEDGE) {
+            # The human resolved a kind/modality conflict as a REAL prohibition:
+            # it stops being a fact to carry and becomes a constraint to trace.
+            notes.append("clarify '" + r.id + "': KNOWLEDGE -> CONSTRAINT (human: a real prohibition)");
+            r.kind = RuleKind.CONSTRAINT;
+        }
         if m != r.modality {
             notes.append("clarify '" + r.id + "': " + r.modality.name + " -> " + m.name + " (human)");
             r.modality = m;
@@ -366,8 +445,10 @@ def _covered(rs: RuleSet, span: str) -> bool {
     sp = _norm(span);
     if not sp { return True; }
     for r in rs.rules {
-        rq = _norm(r.quote);
-        if rq and ((sp in rq) or (rq in sp)) { return True; }
+        for anchor in ([r.quote] + list(r.aliases)) {
+            rq = _norm(anchor);
+            if rq and ((sp in rq) or (rq in sp)) { return True; }
+        }
     }
     return False;
 }

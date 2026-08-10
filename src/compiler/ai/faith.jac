@@ -51,12 +51,24 @@ sem RealShape.CODE_GATE = "A human gate — an owner=code route or an ask/confir
 sem RealShape.EMBODIED_KNOWLEDGE = "Reference material — a knowledge item (or tool) carrying its content verbatim.";
 sem RealShape.LIVE_TOOL = "A live-source demand — a tool that consults the source at run time.";
 
-def required_shape(kind: RuleKind, modality: Modality) -> RealShape {
-    # DISCRETIONARY is never required (that is what "may / if needed" means); a
-    # FORBIDDEN rule is always a prohibition regardless of the kind it was tagged;
-    # otherwise the kind picks the shape.
+def required_shape(kind: RuleKind, modality: Modality, binds: str = "agent") -> RealShape {
+    # DISCRETIONARY is never required (that is what "may / if needed" means).
+    # An obligation the skill places on a TOOL, the environment, or the user
+    # cannot be demanded of the agent: KNOWLEDGE-kind facts are carried verbatim,
+    # everything else non-agent is unrealizable-by-design (optional).
+    # FORBIDDEN does NOT override KNOWLEDGE — a descriptive 'never' ("the harness
+    # never guesses") is a fact to embody, not a constraint to trace; modal force
+    # never outranks what the rule IS.
     if modality == Modality.DISCRETIONARY { return RealShape.OPTIONAL; }
-    if modality == Modality.FORBIDDEN { return RealShape.CONSTRAINT; }
+    b = str(binds or "agent");
+    if b not in ["agent", ""] {
+        if kind == RuleKind.KNOWLEDGE { return RealShape.EMBODIED_KNOWLEDGE; }
+        return RealShape.OPTIONAL;
+    }
+    if modality == Modality.FORBIDDEN {
+        if kind == RuleKind.KNOWLEDGE { return RealShape.EMBODIED_KNOWLEDGE; }
+        return RealShape.CONSTRAINT;
+    }
     if kind == RuleKind.STEP { return RealShape.NODE; }
     if kind == RuleKind.IO { return RealShape.EMBODIED_WRITE; }
     if kind == RuleKind.CONSTRAINT { return RealShape.CONSTRAINT; }
@@ -223,6 +235,55 @@ def classify(axis: str) -> str {
     return "fail" if axis == "faithfulness" else "warn";
 }
 
+def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str]) -> str {
+    # The mechanical last rung for a DROPPED rule of CONSTRAINT shape: fold the
+    # prohibition's text into the doc of every model-owned working node and add
+    # the rule id to its traces_to — exactly the fix the drop message
+    # prescribes, applied by code. Over-applying a prohibition is conservative-
+    # SAFE: the skill states it, so stamping it onto more slots than strictly
+    # necessary can never make the IR unfaithful (this is assemble.jac's v1
+    # "FORBIDDEN rides every model Mind node" lowering, applied post-hoc).
+    # CONSTRAINT shapes only — auto-attaching a dropped step/knowledge/gate
+    # would mean inventing an element, which is unsound. Returns "" when
+    # nothing could be folded.
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return ""; }
+    if (not isinstance(ir, dict)) or (not ir.get("nodes")) { return ""; }
+    by_id: dict = {};
+    for r in spec.rules { by_id[r.id] = r; }
+    touched = False;
+    for rid in drop_ids {
+        r = by_id.get(str(rid));
+        if not r { continue; }
+        text = (str(r.statement).strip() or str(r.quote).strip());
+        if not text { continue; }
+        for nd in list(ir.get("nodes") or []) {
+            if not isinstance(nd, dict) { continue; }
+            ntype = _ntype(nd.get("type"));
+            owner = str(nd.get("owner", "model")).lower();
+            if (owner == "code") or (ntype in ["TERMINAL", "CODE"]) { continue; }
+            doc = str(nd.get("doc") or "");
+            nd["doc"] = doc + ("\n" if doc else "") + "PROHIBITION (" + str(rid) + "): " + text;
+            tl = _slist(nd.get("traces_to"));
+            if str(rid) not in tl { tl.append(str(rid)); }
+            nd["traces_to"] = tl;
+            touched = True;
+        }
+    }
+    if not touched { return ""; }
+    # body + frontmatter re-serialization, the same shape autofix's _dump_ir uses
+    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
+    body: dict = {};
+    for k in ir {
+        if str(k) != "_frontmatter" { body[k] = ir[k]; }
+    }
+    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
+    if fm {
+        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
+    }
+    return out;
+}
+
 # ---------------------------------------------------------------------------
 # Layer 2 — completeness: every rule has a shape-correct realization.
 # ---------------------------------------------------------------------------
@@ -299,7 +360,9 @@ def _realizes_live_tool(pir: ParsedIR, rid: str) -> bool {
 }
 
 def _fix_for(shape: RealShape, r: Rule) -> str {
-    q = str(r.quote)[:70];
+    # the statement (when the extractor filled one) reads better in a directive
+    # than a truncated span; the quote stays the anchor either way.
+    q = (str(r.statement).strip() or str(r.quote))[:70];
     if shape == RealShape.NODE {
         return "add a node whose traces_to includes '" + r.id + "' realizing: " + q;
     }
@@ -325,7 +388,7 @@ def _fix_for(shape: RealShape, r: Rule) -> str {
 def check_completeness(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
     out: list[FaithFinding] = [];
     for r in spec.rules {
-        shape = required_shape(r.kind, r.modality);
+        shape = required_shape(r.kind, r.modality, r.binds);
         if shape == RealShape.OPTIONAL { continue; }
         realized = False;
         if shape == RealShape.NODE { realized = len(_traced_nodes(pir, r.id)) > 0; }
@@ -406,12 +469,12 @@ def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     dropped = check_completeness(spec, pir);
     added = check_soundness(spec, pir);
 
-    required = [r for r in spec.rules if required_shape(r.kind, r.modality) != RealShape.OPTIONAL];
+    required = [r for r in spec.rules if required_shape(r.kind, r.modality, r.binds) != RealShape.OPTIONAL];
     by_shape: dict[str, int] = {};
     dropped_ids: list[str] = [d.rule for d in dropped];
     realized = 0;
     for r in required {
-        sh = required_shape(r.kind, r.modality).name;
+        sh = required_shape(r.kind, r.modality, r.binds).name;
         if r.id not in dropped_ids {
             realized += 1;
             by_shape[sh] = int(by_shape.get(sh, 0)) + 1;
