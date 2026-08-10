@@ -38,6 +38,7 @@ import from .sigil_workspace {
     sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
+import from .sigil_errors { friendly_llm_error, log_error }
 
 glob chat_llm: any = Model(model_name="gpt-4o-mini");
 glob CHAT_HISTORY: list = [];
@@ -470,7 +471,15 @@ def chat_turn(message: str) -> dict {
         # unwind the whole REPL. Keep whatever streamed and flag the turn.
         interrupted = True;
     } except Exception as e {
-        if not reply { reply = "⚠ agent error: " + str(e)[:300]; }
+        # The turn died mid-call (bad model name, dead key, no network…). The
+        # error log gets which turn and the full traceback — byLLM's own
+        # retry-by-retry copy is already there, entry re-points loguru at the
+        # file — and the chat gets ONE sentence that names the fix.
+        mname = "";
+        try { mname = str(getattr(chat_llm, "model_name", "") or ""); } except Exception {}
+        log_error("chat turn failed (model=" + (mname or "?") + "): " + message[:200], e);
+        note = "⚠ " + friendly_llm_error(e, mname, "chat");
+        reply = note if not reply else (reply + "\n\n" + note);
     }
     # keep history bounded (last ~16 turns)
     if len(CHAT_HISTORY) > 32 { CHAT_HISTORY = CHAT_HISTORY[-32:]; }
