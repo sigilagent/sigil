@@ -22,8 +22,10 @@ src/compiler/
     lift.jac           the public entrypoint: lift(skill, name, skill_dir) -> LiftResult
 ```
 
-Opt-in wiring: `SIGIL_AI_LIFT=1 sigil register-skill ./SKILL.md` routes the md
-path through the fix-forward LIFT; unset, the legacy one-shot `lift_skill` runs.
+Wiring: there is ONE compile pathway. `sigil compile` and `sigil register-skill
+<SKILL.md>` both run `compile_skill` (raise2 by default; `SIGIL_FRONTEND=legacy|staged`
+selects the older front-ends), and `sigil relearn` recompiles a skill's stored
+source through the same engine at a bumped version.
 
 **The raise contract is fix-forward.** The gates DIAGNOSE; they do not veto. A
 lift fails only when no runnable module exists (G4 rejects the IR after the

@@ -22,7 +22,7 @@ import sqlite3;
 import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
-    add_mcp, remove_mcp, mcp_status, register_skill, compile_skill,
+    add_mcp, remove_mcp, mcp_status, register_skill, compile_skill, lint_skill,
     eval_skill, relearn, forget,
     model_alias, model_set_fallback, models_info, use_claude_code,
     tool_group_set, tool_allowed, tools_policy_info,
@@ -290,6 +290,79 @@ def _clarify_ask_tui(question: str) -> str {
         sys.stdout.flush();
     } except Exception {  }
     try { return str(input()); } except Exception { return ""; }
+}
+
+# The SKILL LINTER review loop, in the clarify TUI's aesthetic: each finding
+# shows how the compiler read the skill sentence and the minimal edit that
+# would make the reading unambiguous; the human accepts edits one by one.
+# Accepted edits are written back to the SKILL.md — the durable form of a
+# --clarify answer. Returns {source, pre_spec, applied}: the (possibly
+# amended) text to compile, and the already-extracted spec for reuse when
+# nothing changed (amending invalidates it — the compile re-extracts).
+def _lint_review_tui(path: str, source: str) -> dict {
+    import from src.compiler.ai.lint { apply_edits }
+    amber = chr(27) + "[38;5;220m";
+    grn = chr(27) + "[32m";
+    red = chr(27) + "[31m";
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    print("  " + dim + "linting (spec extraction — this takes a few minutes)..." + rst);
+    lr = lint_skill(source);
+    findings = list(lr["findings"]);
+    if not findings {
+        print("  lint: CLEAR — every obligation states its modal force.");
+        return {"source": source, "pre_spec": lr["spec"], "applied": 0};
+    }
+    fixable = [f for f in findings if f.applicable];
+    print("  lint: " + str(len(findings)) + " finding(s), " + str(len(fixable))
+          + " with a suggested fix" + (":" if fixable else "."));
+    accepted: list = [];
+    stop = False;
+    for f in findings {
+        one = str(f.quote).replace(chr(10), " ")[:90];
+        if not f.applicable {
+            print("    " + dim + "? " + str(f.rule_id) + " [" + str(f.kind) + "] \"" + one
+                  + "\" — no safe suggestion; edit by hand or answer via --clarify" + rst);
+            continue;
+        }
+        if stop { continue; }
+        print(chr(10) + "  " + amber + "?" + rst + " " + str(f.rule_id) + " [" + str(f.kind) + "] "
+              + dim + str(f.reason).replace(chr(10), " ")[:110] + rst);
+        print("      " + red + "- " + str(f.old).replace(chr(10), " ") + rst);
+        opts: list = [];
+        for m in ["do", "maybe", "dont"] {
+            if m in f.variants {
+                print("      " + grn + m + " -> " + str(f.variants[m]).replace(chr(10), " ") + rst);
+                opts.append(m);
+            }
+        }
+        try {
+            sys.stdout.write("      " + dim + " / ".join(opts) + rst
+                             + " = apply that phrasing · " + dim + "n" + rst + " = skip · "
+                             + dim + "q" + rst + " = stop reviewing" + chr(10));
+            sys.stdout.write("      " + amber + "> " + rst);
+            sys.stdout.flush();
+        } except Exception {  }
+        resp = "";
+        try { resp = str(input()).strip().lower(); } except Exception { resp = "q"; }
+        if resp in f.variants {
+            f.new = str(f.variants[resp]);   # the human's modality picks the phrasing
+            accepted.append(f);
+        }
+        elif resp in ["q", "quit"] { stop = True; }
+    }
+    if not accepted {
+        print("  lint: no fixes applied.");
+        return {"source": source, "pre_spec": lr["spec"], "applied": 0};
+    }
+    amended = apply_edits(source, accepted);
+    try {
+        with open(path, "w") as fh { fh.write(amended); }
+        print("  lint: " + str(len(accepted)) + " fix(es) applied -> " + path);
+    } except Exception as e {
+        print("  lint: could not write " + path + " (" + str(e)[:80] + ") — compiling the amended text anyway");
+    }
+    return {"source": amended, "pre_spec": None, "applied": len(accepted)};
 }
 
 # The all-zeros superroot — the root every plain `jac run` executes against.
@@ -869,16 +942,18 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--clarify] [--strict] [--agent|--legacy]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--strict] [--agent|--legacy]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
-            clarify = False; frontend = "";
+            clarify = False; frontend = ""; lint_force = False; no_lint = False;
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
                 if flg == "--agent" { agent_author = True; }
                 elif flg == "--strict" { strict = True; }
                 elif flg == "--clarify" { clarify = True; }
+                elif flg == "--lint" { lint_force = True; }
+                elif flg == "--no-lint" { no_lint = True; }
                 elif flg == "--legacy" { frontend = "legacy"; }
                 elif flg == "--staged" { frontend = "staged"; }
                 elif (flg == "-e") or (flg == "--eject") {
@@ -901,12 +976,38 @@ with entry:__main__ {
             if clarify and (not _stdin_tty) {
                 print("  (note: --clarify needs an interactive terminal; assuming Maybe + warning instead)");
             }
+            src_text = open(path).read();
+            pre_spec: any = None;
+            # The SKILL LINTER gate: on an interactive compile, offer to lint
+            # first — suggested fixes are reviewed one by one and accepted
+            # edits land in the SKILL.md before the compile reads it.
+            if _stdin_tty and _tty and (not no_lint) {
+                go_lint = lint_force;
+                if not go_lint {
+                    try {
+                        sys.stdout.write(chr(10) + "  ? lint the skill first — review suggested fixes one by one? [Y/n] ");
+                        sys.stdout.flush();
+                        lresp = str(input()).strip().lower();
+                        go_lint = (lresp in ["", "y", "yes"]);
+                    } except Exception { go_lint = False; }
+                }
+                if go_lint {
+                    try {
+                        lrv = _lint_review_tui(path, src_text);
+                        src_text = str(lrv["source"]);
+                        pre_spec = lrv["pre_spec"];
+                    } except Exception as le {
+                        log_error("lint failed: " + path, le);
+                        print("  lint failed (" + str(le)[:80] + ") — compiling without it");
+                    }
+                }
+            }
             if _tty { print(chr(10) + "  Compiling " + path); }
             if _tty { _install_stream_view(); }
             try {
-                r = compile_skill(open(path).read(), eject, eject_path,
+                r = compile_skill(src_text, eject, eject_path,
                                   _compile_ev if _tty else None, agent_author,
-                                  os.path.dirname(os.path.abspath(path)), strict, ask, frontend);
+                                  os.path.dirname(os.path.abspath(path)), strict, ask, frontend, pre_spec);
             } except Exception as e {
                 # the frontier model died under the compile (bad name, key,
                 # network) — one sentence + the log, never a provider stack
@@ -939,6 +1040,54 @@ with entry:__main__ {
                 if r["eject"] {
                     print("ejected runnable: " + str(r["eject"]));
                     print("  run it:  ./" + str(r["eject"]) + " \"<task>\"    (SIGIL_MODEL=... to pick the model)");
+                }
+            }
+        }
+    } elif cmd == "lint" {
+        # lint <SKILL.md> [--fix] — the SKILL LINTER standalone: the same spec
+        # extraction a compile runs, reported as authoring findings with
+        # suggested edits. --fix (interactive) reviews and applies them one by
+        # one, exactly like the compile-time gate — without compiling anything.
+        path = _arg(argv, 1);
+        if (not path) or path.startswith("-") {
+            print("usage: lint <SKILL.md> [--fix]");
+        } else {
+            fix = False;
+            j = 2;
+            while j < len(argv) {
+                if _arg(argv, j) == "--fix" { fix = True; }
+                j += 1;
+            }
+            path = user_path(path);
+            _lstdin = False;
+            try { _lstdin = bool(sys.stdin.isatty()); } except Exception {  }
+            src_text = open(path).read();
+            if fix and _lstdin {
+                _lint_review_tui(path, src_text);
+            } else {
+                if fix { print("  (note: --fix needs an interactive terminal; printing the report instead)"); }
+                lr = lint_skill(src_text);
+                lfs = list(lr["findings"]);
+                if not lfs {
+                    print("lint: CLEAR — every obligation states its modal force.");
+                } else {
+                    print("lint: " + str(len(lfs)) + " finding(s):");
+                    for f in lfs {
+                        print("  ? " + str(f.rule_id) + " [" + str(f.kind) + "] \""
+                              + str(f.quote).replace(chr(10), " ")[:90] + "\"");
+                        print("      " + str(f.reason).replace(chr(10), " ")[:120]);
+                        if f.applicable {
+                            print("      - " + str(f.old).replace(chr(10), " "));
+                            for m in ["do", "maybe", "dont"] {
+                                if m in f.variants {
+                                    print("      " + m + " -> " + str(f.variants[m]).replace(chr(10), " "));
+                                }
+                            }
+                        } else {
+                            print("      (no safe suggestion — edit by hand or answer via compile --clarify)");
+                        }
+                    }
+                    print("re-run `sigil lint " + path + " --fix` in a terminal to apply fixes interactively.");
                 }
             }
         }
@@ -978,22 +1127,6 @@ with entry:__main__ {
                 sys.exit(1);
             }
             print("gate: ok  (" + str(len(gv.module_src.splitlines())) + " lines lowered)");
-        }
-    } elif cmd == "replay" {
-        # replay <agent.jac> <observability.jsonl> "<task>" [workdir] — re-run a
-        # RECORDED run's cognition through the (re)compiled module: no model, no
-        # cost; regression-test compiler changes against real runs.
-        modp = _arg(argv, 1); obsp = _arg(argv, 2); rtask = _arg(argv, 3);
-        rwd = _arg(argv, 4) if len(argv) > 4 else ".";
-        if (not modp) or (not obsp) or (not rtask) {
-            print("usage: replay <agent.jac> <observability.jsonl> \"<task>\" [workdir]");
-        } else {
-            import from src.compiler.ai.replay { replay_run }
-            rr = replay_run(user_path(modp), user_path(obsp), rtask, user_path(rwd));
-            print("replay: " + str(rr["calls_used"]) + "/" + str(rr["calls_recorded"])
-                  + " recorded calls, " + str(rr["nodes"]) + " nodes visited");
-            if rr["error"] { print("  error: " + str(rr["error"])); }
-            print("  report: " + str(rr["report"])[:400]);
         }
     } elif cmd == "channel" {
         sub = _arg(argv, 1);
@@ -1214,13 +1347,13 @@ with entry:__main__ {
         print("");
         print("compile & run skills");
         print("  compile <SKILL.md> [-e|--eject [out.jac]] [--agent]   gated compile onto the graph; -e ejects a standalone runnable .jac");
-        print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md lifted / hand-authored AG-IR / precompiled OSP)");
+        print("  lint <SKILL.md> [--fix]             the skill linter: authoring findings + suggested edits; --fix reviews & applies them one by one");
+        print("  register-skill <path> [md|agir|osp] add a skill (SKILL.md runs the same compiler as `compile` / hand-authored AG-IR / precompiled OSP)");
         print("  solve \"<task>\" [skill]              route a task: run a compiled skill (HIT), compile a new one (MISS), or adapt one (PARTIAL)");
         print("  library                             list compiled skills, with run stats");
         print("  eval <sig> [probe]                  grounded-eval a skill — run it and judge the artifact");
-        print("  relearn <sig> [hint]                recompile a skill fresh with the frontier model");
+        print("  relearn <sig> [hint]                recompile a skill fresh through the main compiler (task-born skills re-author via frontier)");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
-        print("  replay <agent.jac> <obs.jsonl> \"<task>\"   re-run a recorded run's cognition through a module (no model cost)");
         print("  gate <file.agir> [name]             run G4 (compile oracle) + G9-TY (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
         print("claude code (no API key — uses your claude CLI)");
@@ -1231,7 +1364,7 @@ with entry:__main__ {
         print("");
         print("use it");
         print("  chat                                conversational tool-using REPL — the whole agent from one conversation");
-        print("  serve [port]                        REST API + Observatory web UI on the CLI's graph (alias: observatory)");
+        print("  serve [port]                        REST API + Observatory web UI on the CLI's graph (alias: observatory; own port 8199, claimed strictly — never falls back)");
         print("  channel setup <kind>                how to connect discord|telegram|whatsapp|slack");
         print("  channel connect <name> <kind>       register a channel + its token secret, print next steps");
         print("");

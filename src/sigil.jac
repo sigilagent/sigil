@@ -102,9 +102,10 @@ def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: 
 #                                        TaskGraph --MutatedFrom--> TaskGraph  (lineage)
 # ---------------------------------------------------------------------------
 
-def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origin: str, version: int) -> TaskGraph {
+def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origin: str, version: int,
+             skill_src: str = "") -> TaskGraph {
     tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=module,
-                   version=version, origin=origin);
+                   version=version, origin=origin, skill_src=skill_src);
     reg +>:Crystallized:+> tg;
     return tg;
 }
@@ -186,12 +187,6 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
 # agents via byLLM's native McpClient. Adding one takes effect on the next run.
 # ---------------------------------------------------------------------------
 
-sem lift_skill = """Lift this SKILL.md (or prose skill description) into a COMPLETE AG-IR:
-a typed graph a compiler lowers to a runnable OSP agent covering the skill's whole task
-CLASS. Maximize mechanizable structure; bind any given REGISTERED TOOLS by exact name;
-honor the given ETHOS and conform to the given AG-IR CONTRACT. Return ONLY the AG-IR text.""";
-def lift_skill(skill_md: str, ethos: str, tools: str, contract: str) -> str by frontier();
-
 def register_skill(source: str, kind: str) -> dict {
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
@@ -206,36 +201,19 @@ def register_skill(source: str, kind: str) -> dict {
         sig = agir_name(source);
         path = install_osp(source, sig, WORKDIR);
         tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
-    } elif os.environ.get("SIGIL_AI_LIFT", "") not in ["", "0", "false"] {
-        # source is SKILL.md text — the AI compiler runs the full fix-forward
-        # LIFT: spec convergence loop -> spine -> annotator flows -> assemble ->
-        # autofix chain + gates + bounded repair. Opt-in via SIGIL_AI_LIFT=1.
-        # Only `failed` (no runnable module) raises — and it raises the explain
-        # note, not a bare error. A degraded lift persists WITH its findings:
-        # a runnable agent plus a report beats no agent. SIGIL_STRICT=1
-        # restores fail-on-any-finding.
-        # LAZY import: a top-level import of the ai package changes the module
-        # topology under multi-file `jac test` and trips the slot-__globals__
-        # runtime bug (see ci.yml) — load it only when the flag path runs.
-        import from .compiler.ai.lift { lift, pin_all_lift_llms }
-        import from .compiler.ai.report { explain, strict_mode }
-        pin_all_lift_llms(frontier);
-        sig = agir_name(source);
-        lr = lift(source, sig);
-        if (lr.status == "failed") or (strict_mode() and not lr.ok) {
-            raise RuntimeError("AI lift " + lr.status + " for '" + sig + "':\n" + explain(lr));
-        }
-        path = write_module(lr.module_src, sig, 1, WORKDIR);
-        tg = _persist(reg, sig, "lifted from SKILL.md (AI compiler)", lr.ir_text, path, "lifted-skill-ai", 1);
     } else {
-        # source is SKILL.md text — frontier lifts it to an AG-IR, then compile.
-        agir = lift_skill(source, ETHOS, digest(mcp_servers()) + chr(10) + builtin_catalogue(), CONTRACT);
-        sig = agir_name(agir);
-        osp = transpile_ir(agir, sig);
-        path = write_module(osp, sig, 1, WORKDIR);
-        ldesc = skill_description(source);
-        tg = _persist(reg, sig, ldesc if ldesc else "lifted from SKILL.md",
-                      agir, path, "lifted-skill", 1);
+        # source is SKILL.md text — ONE compile pathway: the exact gated
+        # compiler the `compile` verb runs (raise2 by default; SIGIL_FRONTEND
+        # selects legacy/staged). register-skill is an alias for compile, not
+        # a second engine — the old one-shot lift_skill slot and the
+        # SIGIL_AI_LIFT side door are gone.
+        r = compile_skill(source);
+        if not r.get("ok") {
+            raise RuntimeError("compile " + str(r.get("status", "failed")) + " for '"
+                               + str(r.get("signature", "?")) + "':\n" + str(r.get("explain") or ""));
+        }
+        return {"signature": r["signature"], "version": r.get("version", 1),
+                "origin": r.get("origin", "compiled-skill-raise2"), "module": r["module"]};
     }
     return {"signature": tg.signature, "version": tg.version, "origin": tg.origin, "module": tg.module};
 }
@@ -245,10 +223,26 @@ def register_skill(source: str, kind: str) -> dict {
 # front-ends (the CLI's live build view and chat's tool trace) want the same two
 # strings out of an event, so they live here rather than being written twice and
 # drifting apart.
+def lint_skill(source: str, name: str = "") -> dict {
+    # The SKILL LINTER pre-pass: extract the spec (the same loop compile runs)
+    # and draft guarded fix suggestions for its findings. Returns
+    # {"spec": SpecResult, "findings": list[LintFinding]} — the CLI reviews
+    # findings with the human and, when nothing is accepted, hands "spec" back
+    # to compile_skill (pre_spec) so extraction is not paid for twice.
+    import from .compiler.ai.spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
+    import from .compiler.ai.lint { lint_findings }
+    awaken();
+    pin_lift_llm(frontier);
+    body = strip_frontmatter(source);
+    nm = name if name else agir_name(source);
+    sr = extract_spec(body, nm);
+    return {"spec": sr, "findings": lint_findings(body, sr)};
+}
+
 def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False,
                   skill_dir: str = "", strict: bool = False,
-                  ask: any = None, frontend: str = "") -> dict {
+                  ask: any = None, frontend: str = "", pre_spec: any = None) -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the fix-forward AI lift:
     # spec loop -> spine -> flows -> assemble -> autofix chain + gates +
     # bounded repair. Only `failed` (no runnable module) refuses to persist —
@@ -272,7 +266,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     #   SIGIL_FRONTEND=legacy|staged   the pre-raise2 lift() (staged forces the spine pipeline)
     fe = frontend if frontend else os.environ.get("SIGIL_FRONTEND", "");
     if (not agent) and (fe not in ["legacy", "lift", "staged"]) {
-        return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask);
+        return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask, pre_spec);
     }
     pin_all_lift_llms(frontier);
     if fe == "staged" { os.environ["SIGIL_STAGED"] = "1"; }
@@ -296,7 +290,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     path = write_module(lr.module_src, sig, 1, WORKDIR);
     desc = skill_description(source);
     tg = _persist(reg, sig, desc if desc else "compiled from SKILL.md (AI compiler)",
-                  lr.ir_text, path, "compiled-skill", 1);
+                  lr.ir_text, path, "compiled-skill", 1, skill_src=source);
     ejected = "";
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
@@ -309,7 +303,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
 }
 
 def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_path: str,
-                    progress: any, skill_dir: str, strict: bool, ask: any) -> dict {
+                    progress: any, skill_dir: str, strict: bool, ask: any,
+                    pre_spec: any = None, version: int = 1, origin: str = "compiled-skill-raise2") -> dict {
     # The DEFAULT front-end: the faithfulness-first raise. Faithfulness FAILS the
     # compile (an agent that violates the skill is not a success); underspecified
     # modality is assumed MAYBE + warned, or asked inline via the TUI asker (`ask`,
@@ -319,7 +314,7 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     import from .compiler.ai.eject { eject_program, write_program }
     import from .compiler.ai.report { strict_mode }
     pin_raise2_llms(frontier);
-    rr = raise2(source, sig, skill_dir=skill_dir, ask=ask);
+    rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec);
 
     findings: list = [];
     for d in rr.proof.dropped { findings.append({"gate": "faith", "severity": "error", "message": str(d.message)}); }
@@ -338,16 +333,17 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
                 "warnings": rr.warnings, "compile_errors": rr.compile_errors,
                 "env": [], "par": [], "explain": note};
     }
-    path = write_module(rr.module_src, sig, 1, WORKDIR);
+    path = write_module(rr.module_src, sig, version, WORKDIR);
     desc = skill_description(source);
     tg = _persist(reg, sig, desc if desc else "compiled from SKILL.md (raise2)",
-                  rr.ir_text, path, "compiled-skill-raise2", 1);
+                  rr.ir_text, path, origin, version, skill_src=source);
     ejected = "";
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
         ejected = write_program(eject_program(rr.module_src, sig), ep);
     }
     return {"ok": True, "status": rr.status, "signature": tg.signature, "module": tg.module,
+            "version": tg.version, "origin": tg.origin,
             "issues": [], "findings": findings, "fixes": [], "repairs": rr.repairs,
             "warnings": rr.warnings, "eject": ejected, "env": [], "par": [], "explain": note};
 }
@@ -439,9 +435,9 @@ walker solve {
                 tg.last_eval = ev.reason;
                 self.trace += "eval -> " + str(ev.score) + "/100 (" + ev.reason + ")\n";
                 if ev.score < soul.eval_threshold {
-                    self.trace += "eval FAIL -> relearn (frontier) + retry\n";
+                    self.trace += "eval FAIL -> relearn + retry\n";
                     prev = tg;
-                    tg = _compile_fresh(reg, prev.signature, prev.intent, self.task, prev.version + 1, "relearn");
+                    tg = _recompile(reg, prev, "", "relearn");
                     tg +>:MutatedFrom:+> prev;
                     self.signature = tg.signature;
                     res = run_compiled(tg, self.task, ctx, self.skill);
@@ -504,16 +500,39 @@ def eval_skill(signature: str, probe: str = "") -> dict {
     };
 }
 
+def _recompile(reg: Registry, tg: TaskGraph, hint: str = "", origin: str = "relearn") -> TaskGraph {
+    # THE recompile pathway — one core behind manual `relearn` and the solve
+    # loop's eval-triggered relearn, and it reuses the MAIN compiler: a skill
+    # born from a SKILL.md re-enters the same gated raise the `compile` verb
+    # runs (its stored source + optional guidance, version bumped); only a
+    # task-born procedure (no source document) re-authors via the frontier
+    # task compiler. Guidance rides the skill text itself, so the spec loop
+    # grounds it like any other obligation.
+    if str(tg.skill_src).strip() {
+        src = tg.skill_src;
+        if hint { src = src + "\n\n## Relearn guidance\n" + hint + "\n"; }
+        r = _compile_raise2(src, tg.signature, reg, False, "", None, "", False, None, None,
+                            tg.version + 1, origin);
+        if not r.get("ok") {
+            raise RuntimeError("recompile " + str(r.get("status", "failed")) + " for '"
+                               + tg.signature + "':\n" + str(r.get("explain") or ""));
+        }
+        nt = _find_skill(reg, tg.signature);
+        return nt if nt else tg;
+    }
+    intent = (tg.intent + "\nExtra guidance: " + hint) if hint else tg.intent;
+    return _compile_fresh(reg, tg.signature, intent, tg.intent, tg.version + 1, origin);
+}
+
 def relearn(signature: str, hint: str = "") -> dict {
-    # Discard the current (degraded) procedure and recompile it FROM SCRATCH with
-    # the frontier — same signature, bumped version, lineage kept. Manual counterpart
-    # to the solve loop's automatic eval-triggered relearn.
+    # Discard the current (degraded) procedure and recompile it FROM SCRATCH —
+    # same signature, bumped version, lineage kept. Manual counterpart to the
+    # solve loop's automatic eval-triggered relearn; both ride _recompile.
     awaken();
     reg = [root -->][?:Registry][0];
     tg = _find_skill(reg, signature);
     if tg is None { return {"ok": False, "error": "no such skill: " + signature}; }
-    intent = (tg.intent + "\nExtra guidance: " + hint) if hint else tg.intent;
-    nt = _compile_fresh(reg, signature, intent, tg.intent, tg.version + 1, "relearn");
+    nt = _recompile(reg, tg, hint, "relearn");
     nt +>:MutatedFrom:+> tg;
     return {"ok": True, "signature": signature, "version": nt.version, "origin": "relearn", "module": nt.module};
 }

@@ -70,7 +70,7 @@ def _directives(fr: FaithReport) -> str {
     return "\n".join(lines);
 }
 
-def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask: any = None) -> RaiseResult {
+def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask: any = None, pre: any = None) -> RaiseResult {
     # Full entry: extract the grounded spec, resolve any underspecified modality,
     # then raise. The ambiguity policy:
     #   ask given (--clarify)  -> HIL: ask the human, bind Do/Maybe/Don't per answer.
@@ -79,7 +79,10 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     #                             the author is told exactly what to re-run with
     #                             --clarify if an assumption is wrong.
     skill = strip_frontmatter(skill);
-    sr = extract_spec(skill, name);
+    # `pre`: a SpecResult the lint pre-pass already extracted from this same
+    # (stripped) text — reuse it instead of paying for the spec loop twice.
+    # Only valid when the source was NOT amended after extraction.
+    sr = pre if pre else extract_spec(skill, name);
     warnings: list[str] = [];
     if sr.clarify {
         if ask {

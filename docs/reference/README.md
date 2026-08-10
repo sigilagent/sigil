@@ -10,7 +10,7 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | Topic | What it covers |
 |---|---|
 | [overview](overview.md) | What Sigil is and how a request flows through it |
-| [skill-compilation](skill-compilation.md) | The compiler: SKILL.md → AG-IR → runnable agent, the gates, eject & replay |
+| [skill-compilation](skill-compilation.md) | The compiler: SKILL.md → AG-IR → runnable agent, the gates, eject |
 | [configuration](configuration.md) | Every `configure` key and what it does |
 | [chat-and-tools](chat-and-tools.md) | Chat mode and the full tool-belt |
 | [workspace-and-tools](workspace-and-tools.md) | The workspace, the sandbox switch, the exec gate, and never-timed-out shell jobs |
