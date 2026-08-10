@@ -29,7 +29,7 @@ runnable AND nothing left to report. Nothing is ever swallowed: residuals ride
 import from .ir_views { LiftResult }
 import os;
 import time;
-import from .spec_loop { extract_spec, pin_lift_llm }
+import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
@@ -247,6 +247,7 @@ def lift(skill: str, name: str, parallel: bool = True, skill_dir: str = "") -> L
     # staged pipeline's coverage critics exist to catch.
     _t0 = time.time();
     _emit({"stage": "spec", "state": "start"});
+    skill = strip_frontmatter(skill);
     sr = extract_spec(skill, name);
     _emit({"stage": "spec", "state": "done", "secs": time.time() - _t0,
            "rules": len(sr.spec.rules), "rounds": sr.verdict.rounds,

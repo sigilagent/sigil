@@ -541,15 +541,21 @@ def _inname(task, fallback=""):
     # Prefer the filename following a read-side verb; else the first bare
     # filename NOT claimed by a save-side verb; else fallback ("" keeps the
     # tool's own guard error honest when the task truly names no input).
+    # No leading \b on the captures: a word boundary can never precede the '/'
+    # of an absolute path (or the '~' of a home path), so \b silently strips
+    # the leading slash — "read /a/b.json" must return "/a/b.json", never
+    # "a/b.json". The stems accept full paths for the same reason: the bare
+    # fallback matching only basenames plucked "explainer.json" out of the
+    # MIDDLE of a pathname.
     import re
     t = task or ""
-    m = re.search(r'(?:read|open|load|parse|clean|process|convert|analy[sz]e|summari[sz]e|merge|from)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    m = re.search(r'(?:read|open|load|parse|clean|process|convert|analy[sz]e|summari[sz]e|merge|from)\b[^.\n]{0,60}?([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.[A-Za-z0-9]{1,5})\b', t, re.I)
     if m:
         return m.group(1)
     saved = set()
-    for sm in re.finditer(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I):
+    for sm in re.finditer(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.[A-Za-z0-9]{1,5})\b', t, re.I):
         saved.add(sm.group(1))
-    for bm in re.finditer(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I):
+    for bm in re.finditer(r'([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I):
         if bm.group(1) not in saved:
             return bm.group(1)
     return fallback

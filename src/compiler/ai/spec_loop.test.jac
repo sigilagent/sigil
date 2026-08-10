@@ -158,5 +158,127 @@ test "apply_clarifications binds a human's Do/Maybe/Don't answer to the rule's m
     assert len(notes) == 2;                        # a and c changed; b did not
 }
 
+glob FM_SKILL: str = """---
+name: csv-extractor
+description: >-
+  Use this whenever you need CSV extraction. Do NOT use it for JSON.
+---
+
+# CSV Extractor
+Always write the output as CSV with a header row.
+""";
+
+test "strip_frontmatter sheds the router block and keeps the body" {
+    body = strip_frontmatter(FM_SKILL);
+    assert "Use this whenever" not in body;
+    assert "csv-extractor" not in body;
+    assert "Always write the output as CSV with a header row." in body;
+}
+
+test "strip_frontmatter is a no-op without frontmatter" {
+    assert strip_frontmatter(SKILL) == SKILL;
+    assert strip_frontmatter("") == "";
+}
+
+test "an unterminated fence is a horizontal rule, not frontmatter" {
+    hr = "---\nAlways write the output as CSV.\n";
+    assert strip_frontmatter(hr) == hr;
+}
+
+test "leading blank lines before the fence still count as frontmatter" {
+    padded = "\n\n" + FM_SKILL;
+    assert "Use this whenever" not in strip_frontmatter(padded);
+}
+
+test "a frontmatter-sourced rule can no longer survive grounding" {
+    # The r5 class: trigger prose from `description:` extracted as a rule.
+    # Grounded against the stripped body, it is mechanically dropped.
+    rs = RuleSet(rules=[
+        Rule(id="r5", quote="Use this whenever you need CSV extraction."),
+        Rule(id="r1", quote="Always write the output as CSV with a header row.")
+    ]);
+    bad = ground_rules(strip_frontmatter(FM_SKILL), rs);
+    assert bad == ["r5"];
+}
+
+test "grounding is markdown/typography tolerant but still word-exact" {
+    rs = RuleSet(rules=[
+        Rule(id="a", quote="**Always** write the `output` as CSV with a header row."),
+        Rule(id="b", quote="1. Never use Unicode subscripts in output."),
+        Rule(id="c", quote="Always write the CSV output.")
+    ]);
+    bad = ground_rules(SKILL, rs);
+    # a: bold/backtick decoration normalizes away; b: fails — '1.' adds a WORD
+    # ('1') the skill never wrote; c: fails — reordered words are a paraphrase
+    assert bad == ["b", "c"];
+}
+
+test "a non-verbatim alias is dropped; the rule survives on its quote" {
+    rs = RuleSet(rules=[
+        Rule(id="a", quote="Always write the output as CSV with a header row.",
+             aliases=["Parse the input file with the standard library.",
+                      "Compress the output with gzip."])
+    ]);
+    bad = ground_rules(SKILL, rs);
+    assert bad == [];
+    assert rs.rules[0].aliases == ["Parse the input file with the standard library."];
+}
+
+test "an aliased span counts as covered — no duplicate rule gets re-extracted" {
+    rs = RuleSet(rules=[
+        Rule(id="a", quote="Always write the output as CSV with a header row.",
+             aliases=["Parse the input file with the standard library."])
+    ]);
+    assert _covered(rs, "Parse the input file with the standard library.");
+    assert not _covered(rs, "Never use Unicode subscripts in output.");
+}
+
+test "a KNOWLEDGE+FORBIDDEN conflict is flagged even with a forbid marker" {
+    conflict_skill = "The harness converts what it can prove safe. it never silently guesses.\nNever use tabs.\n";
+    rs = RuleSet(rules=[
+        Rule(id="r_fact", quote="it never silently guesses.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.FORBIDDEN),
+        Rule(id="r_real", quote="Never use tabs.",
+             kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN)
+    ]);
+    items = flag_ambiguous(conflict_skill, rs);
+    # r_real has its marker and agrees with its kind -> not questioned;
+    # r_fact's marker does NOT settle the kind/modality conflict -> questioned
+    assert len(items) == 1;
+    assert items[0].rule_id == "r_fact";
+    assert items[0].reason.startswith("kind/modality conflict");
+    assert "prohibition the agent itself must obey" in items[0].question;
+}
+
+test "default policy carries a conflict as knowledge instead of demoting it" {
+    rs = RuleSet(rules=[
+        Rule(id="r_fact", quote="it never silently guesses.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.FORBIDDEN),
+        Rule(id="r_vague", quote="merge the PDFs", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    items = [
+        ClarifyItem(rule_id="r_fact", quote="it never silently guesses.",
+                    reason="kind/modality conflict: tagged KNOWLEDGE ..."),
+        ClarifyItem(rule_id="r_vague", quote="merge the PDFs", reason="tagged MANDATORY ...")
+    ];
+    warns = resolve_ambiguous_default(rs, items);
+    by_id: dict = {};
+    for r in rs.rules { by_id[r.id] = r.modality; }
+    assert by_id["r_fact"] == Modality.FORBIDDEN;        # kept — carried as knowledge
+    assert by_id["r_vague"] == Modality.DISCRETIONARY;   # demoted as before
+    assert any(["CARRIED as background knowledge" in w for w in warns]);
+}
+
+test "a human 'dont' on a KNOWLEDGE rule reclassifies it as a real prohibition" {
+    rs = RuleSet(rules=[
+        Rule(id="r_fact", quote="it never silently guesses.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.FORBIDDEN)
+    ]);
+    notes = apply_clarifications(rs, {"r_fact": "dont"});
+    assert rs.rules[0].kind == RuleKind.CONSTRAINT;
+    assert rs.rules[0].modality == Modality.FORBIDDEN;
+    assert any(["KNOWLEDGE -> CONSTRAINT" in n for n in notes]);
+}
+
 # NOTE: the MockLLM convergence run lives in scenarios/spec_loop.jac (run via
 # `jac run` in CI) — same runtime bug as above.

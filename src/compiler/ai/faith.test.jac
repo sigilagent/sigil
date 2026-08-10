@@ -13,10 +13,13 @@ lock in the two properties the rearchitecture turns on:
 
 # --- Layer 0: the required-realization table ------------------------------
 
-test "required_shape covers every rule kind, and modality dominates kind" {
-    # FORBIDDEN is always a prohibition, whatever kind it was tagged
+test "required_shape covers every rule kind; force never outranks KNOWLEDGE" {
+    # FORBIDDEN is a prohibition for act-kinds ...
     assert required_shape(RuleKind.CONSTRAINT, Modality.FORBIDDEN) == RealShape.CONSTRAINT;
     assert required_shape(RuleKind.STEP, Modality.FORBIDDEN) == RealShape.CONSTRAINT;
+    # ... but a descriptive 'never' tagged KNOWLEDGE is a fact to CARRY, not a
+    # constraint to trace — the r71 class ("the harness never silently guesses")
+    assert required_shape(RuleKind.KNOWLEDGE, Modality.FORBIDDEN) == RealShape.EMBODIED_KNOWLEDGE;
     # DISCRETIONARY is never required
     assert required_shape(RuleKind.STEP, Modality.DISCRETIONARY) == RealShape.OPTIONAL;
     assert required_shape(RuleKind.IO, Modality.DISCRETIONARY) == RealShape.OPTIONAL;
@@ -26,6 +29,84 @@ test "required_shape covers every rule kind, and modality dominates kind" {
     assert required_shape(RuleKind.HIL, Modality.MANDATORY) == RealShape.CODE_GATE;
     assert required_shape(RuleKind.KNOWLEDGE, Modality.MANDATORY) == RealShape.EMBODIED_KNOWLEDGE;
     assert required_shape(RuleKind.GROUNDING, Modality.MANDATORY) == RealShape.LIVE_TOOL;
+}
+
+test "required_shape: a non-agent bearer cannot be obligated, only carried" {
+    # an obligation on a tool/user is unrealizable-by-design -> OPTIONAL ...
+    assert required_shape(RuleKind.STEP, Modality.MANDATORY, "environment") == RealShape.OPTIONAL;
+    assert required_shape(RuleKind.STEP, Modality.FORBIDDEN, "user") == RealShape.OPTIONAL;
+    # ... except facts, which are still worth embodying verbatim
+    assert required_shape(RuleKind.KNOWLEDGE, Modality.FORBIDDEN, "environment") == RealShape.EMBODIED_KNOWLEDGE;
+    # default / explicit agent unchanged
+    assert required_shape(RuleKind.STEP, Modality.MANDATORY, "agent") == RealShape.NODE;
+    assert required_shape(RuleKind.STEP, Modality.MANDATORY, "") == RealShape.NODE;
+}
+
+glob FOLD_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: fix
+    type: GEN-RAW
+    doc: Resolve the residue cluster.
+    traces_to: [r_step]
+  - id: verify
+    type: CODE
+    owner: code
+    doc: Run the typecheck.
+    traces_to: [r_check]
+  - id: done
+    type: TERMINAL
+""";
+
+test "fold_untraced_prohibitions traces the prohibition on model nodes only" {
+    spec = RuleSet(rules=[
+        Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r_forbid", quote="do not solve the same thing 12 different ways",
+             statement="never apply inconsistent fixes to one cluster",
+             kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN)
+    ]);
+    folded = fold_untraced_prohibitions(FOLD_IR, spec, ["r_forbid"]);
+    assert folded;
+    pir = parse_ir(folded);
+    by_id: dict = {};
+    for n in pir.nodes { by_id[n.id] = n; }
+    # the model node carries the prohibition + trace; code/terminal untouched
+    assert "r_forbid" in by_id["fix"].traces_to;
+    assert "PROHIBITION (r_forbid): never apply inconsistent fixes" in by_id["fix"].doc;
+    assert "r_forbid" not in by_id["verify"].traces_to;
+    assert by_id["done"].doc == "";
+    # and the closure that failed before now passes for the prohibition
+    d = check_completeness(spec, pir);
+    assert [f.rule for f in d] == [];
+}
+
+test "fold refuses non-constraint drops and unknown rules" {
+    spec = RuleSet(rules=[
+        Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    # unknown id -> nothing to fold -> ""
+    assert fold_untraced_prohibitions(FOLD_IR, spec, ["r_ghost"]) == "";
+    # unparseable IR -> ""
+    assert fold_untraced_prohibitions("not: [valid", spec, ["r_step"]) == "";
+}
+
+test "check_completeness skips a non-agent step but demands the knowledge" {
+    spec = RuleSet(rules=[
+        Rule(id="r_env", quote="the harness rewrites the imports",
+             kind=RuleKind.STEP, modality=Modality.MANDATORY, binds="environment"),
+        Rule(id="r_fact", quote="it never silently guesses",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.FORBIDDEN, binds="environment"),
+        Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    pir = ParsedIR(nodes=[
+        PNode(id="fix", ntype="GEN_RAW", traces_to=["r_step"]),
+        PNode(id="done", ntype="TERMINAL")
+    ]);
+    d = check_completeness(spec, pir);
+    # r_env is not the agent's to perform -> no drop; r_fact must be carried -> drop
+    assert len(d) == 1;
+    assert d[0].rule == "r_fact";
+    assert d[0].shape == "EMBODIED_KNOWLEDGE";
 }
 
 # --- Layer 2: completeness (nothing dropped) ------------------------------

@@ -100,8 +100,11 @@ def _rules_md(spec: RuleSet) -> str {
     ];
     for r in spec.rules {
         lines.append("- **" + r.id + "** · " + str(r.kind.name) + " · " + str(r.modality.name)
-                     + (" · when: " + r.condition if r.condition else ""));
+                     + (" · when: " + r.condition if r.condition else "")
+                     + (" · binds: " + r.binds if r.binds not in ["", "agent"] else ""));
         lines.append("  > " + r.quote.replace("\n", " "));
+        if r.statement { lines.append("  = " + r.statement.replace("\n", " ")); }
+        for al in r.aliases { lines.append("  ~ also stated as: " + str(al).replace("\n", " ")); }
     }
     if spec.sub_resources {
         lines.append("");
