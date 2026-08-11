@@ -4,7 +4,8 @@ for why this runs under `jac run` instead of `jac test`. Exits nonzero on failur
 import from jaclang.byllm.lib { MockLLM }
 import from src.compiler.ai.lift_types { Modality, RuleKind, Cohesion }
 import from src.compiler.ai.spec_loop {
-    Rule, RuleSet, extract_spec, pin_lift_llm, ground_rules, _norm, _in_skill
+    Rule, RuleSet, extract_spec, pin_lift_llm, ground_rules, _norm, _in_skill,
+    set_spec_progress
 }
 
 glob SKILL: str = """# CSV Extractor
@@ -13,6 +14,10 @@ Parse the input file with the standard library.
 Never use Unicode subscripts in output.
 If the file is a form, read FORMS.md and follow its instructions.
 """;
+
+glob _seen: list = [];
+
+def _capture(ev: dict) -> None { _seen.append(str(ev.get("phase"))); }
 
 with entry:__main__ {
     r1 = Rule(id="r1", quote="Always write the output as CSV with a header row.",
@@ -38,9 +43,16 @@ with entry:__main__ {
         [], [], []
     ]}));
 
+    # the lint pre-pass installs a progress renderer here; capture the phase
+    # stream so the "no more silent 10-minute lint" behavior is pinned in CI.
+    set_spec_progress(_capture);
+
     res = extract_spec(SKILL, "csv-extractor");
     spec = res.spec;
     v = res.verdict;
+
+    set_spec_progress(None);
+    seen = _seen;
 
     assert v.sound;                    # round 2 introduced no ungrounded rules
     assert v.complete;                 # all three lens candidates covered
@@ -51,5 +63,13 @@ with entry:__main__ {
     assert len(spec.rules) == 4;
     sn = _norm(SKILL);
     for r in spec.rules { assert _in_skill(sn, r.quote); }   # frozen spec is fully grounded
+
+    # every phase fired, both rounds narrated, and clarify closed the loop
+    for ph in ["extract", "ground", "coverage", "modality", "round_done", "clarify"] {
+        assert ph in seen;
+    }
+    assert seen.count("extract") == 2;      # one per round
+    assert seen.count("round_done") == 2;
+    assert seen[-1] == "clarify";           # the final skill-quality pass
     print("SCENARIO spec_loop OK");
 }

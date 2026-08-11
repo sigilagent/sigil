@@ -84,18 +84,31 @@ def cli_args(raw: list) -> list {
     return out;
 }
 
-glob _CV: dict = {"open": "", "line": ""};   # current in-flight stage: label + rendered line
-glob _HB: dict = {"on": False, "t0": 0.0};   # the stage heartbeat (see _hb_tick)
+glob _CV: dict = {"open": "", "line": ""};          # current in-flight stage: label + rendered line
+glob _HB: dict = {"on": False, "t0": 0.0, "gen": 0}; # the stage heartbeat (see _hb_tick)
 
-def _hb_tick() -> None {
-    # Liveness for the quiet stage view. A raise2 stage is one frontier call that
-    # can run for MINUTES; without this the open "◐ authoring …" line sat frozen
-    # and a working compile was indistinguishable from a hung one. While a stage
-    # is open, rewrite its line once a second with the elapsed time. The stage
-    # events own the line the moment they fire (done clears `line` first).
-    while _HB["on"] {
+def _hb_start() -> None {
+    # Start a fresh heartbeat, retiring any prior one. `gen` fences a stale
+    # ticker that was mid-sleep when it stopped: if a new stage (e.g. compile
+    # right after lint) turns the beat back on within its 1s tick, the old
+    # thread sees a bumped gen and exits instead of double-painting the line.
+    _HB["gen"] = int(_HB["gen"]) + 1;
+    _HB["on"] = True;
+    _HB["t0"] = time.time();
+    mygen = int(_HB["gen"]);
+    threading.Thread(target=_hb_tick, args=(mygen,), daemon=True).start();
+}
+
+def _hb_tick(mygen: int) -> None {
+    # Liveness for the quiet stage view. A raise2 stage (or the lint spec loop)
+    # is a chain of frontier calls that can run for MINUTES; without this the
+    # open "◐ authoring …" line sat frozen and a working compile was
+    # indistinguishable from a hung one. While the beat is live, rewrite its
+    # line once a second with the elapsed time. Stage events own the line the
+    # moment they fire (done clears `line` first).
+    while _HB["on"] and (int(_HB["gen"]) == mygen) {
         time.sleep(1.0);
-        if (not _HB["on"]) or _VB["on"] { continue; }
+        if (not _HB["on"]) or (int(_HB["gen"]) != mygen) or _VB["on"] { continue; }
         line = str(_CV["line"] or "");
         if not line { continue; }
         secs = int(time.time() - float(_HB["t0"]));
@@ -342,15 +355,53 @@ def _clarify_ask_tui(question: str) -> str {
 # --clarify answer. Returns {source, pre_spec, applied}: the (possibly
 # amended) text to compile, and the already-extracted spec for reuse when
 # nothing changed (amending invalidates it — the compile re-extracts).
+# One live status line for the spec loop, cooking-show style: which round, which
+# phase, how many obligations found so far. `_CV["line"]` is the heartbeat's
+# canvas — set it here and the ticker keeps elapsed time counting beside it.
+def _lint_spec_status(ev: dict) -> None {
+    purple = chr(27) + "[38;5;135m";
+    dim = chr(27) + "[2m";
+    rst = chr(27) + "[0m";
+    phase = str(ev.get("phase", ""));
+    rnd = ev.get("round", 0);
+    cap = ev.get("cap", 0);
+    rules = ev.get("rules", 0);
+    where = (dim + "round " + str(rnd) + ("/" + str(cap) if cap else "") + rst + "  ") if rnd else "";
+    verb = {"extract": "reading the obligations",
+            "ground": "grounding " + str(rules) + " against the prose",
+            "coverage": "hunting for gaps (" + str(ev.get("lenses", 0)) + " lenses) · " + str(rules) + " so far",
+            "modality": "auditing modal force · " + str(rules) + " rules",
+            "round_done": str(rules) + " rules" + ((" · " + str(ev.get("uncovered", 0)) + " gaps left") if ev.get("uncovered", 0) else " · looks complete"),
+            "clarify": "flagging under-specified rules · " + str(rules) + " total"}.get(phase, phase);
+    _CV["line"] = "  " + purple + chr(0x25D0) + rst + " lint  " + where + verb;
+}
+
 def _lint_review_tui(path: str, source: str) -> dict {
     import from src.compiler.ai.lint { apply_edits }
+    import from src.compiler.ai.spec_loop { set_spec_progress }
     amber = chr(27) + "[38;5;220m";
     grn = chr(27) + "[32m";
     red = chr(27) + "[31m";
     dim = chr(27) + "[2m";
     rst = chr(27) + "[0m";
-    print("  " + dim + "linting (spec extraction — this takes a few minutes)..." + rst);
-    lr = lint_skill(source);
+    # Live view instead of a frozen "this takes a few minutes": the spec loop is
+    # a multi-minute chain of frontier calls and used to print one line and hang.
+    _tty = False;
+    try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
+    if _tty {
+        _CV["line"] = "  " + chr(27) + "[38;5;135m" + chr(0x25D0) + rst + " lint  " + dim + "extracting the spec" + rst;
+        set_spec_progress(_lint_spec_status);
+        _hb_start();
+    } else {
+        print("  " + dim + "linting (spec extraction — this takes a few minutes)..." + rst);
+    }
+    try { lr = lint_skill(source); }
+    finally {
+        _HB["on"] = False;
+        _CV["line"] = "";
+        set_spec_progress(None);
+        if _tty { sys.stdout.write(chr(13) + chr(27) + "[2K"); sys.stdout.flush(); }
+    }
     findings = list(lr["findings"]);
     if not findings {
         print("  lint: CLEAR — every obligation states its modal force.");
@@ -1050,9 +1101,7 @@ with entry:__main__ {
             if _tty and (not _VB["on"]) {
                 # the quiet view's liveness thread — the verbose transcript has
                 # the token stream for that
-                _HB["on"] = True;
-                _HB["t0"] = time.time();
-                threading.Thread(target=_hb_tick, daemon=True).start();
+                _hb_start();
             }
             try {
                 r = compile_skill(src_text, eject, eject_path,
