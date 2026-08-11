@@ -299,6 +299,37 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
     return str(path);
 }
 
+# ---------------------------------------------------------------------------
+# Eager graph commit for long-lived processes. jac commits a process's graph
+# writes ONCE, at exit, with a per-anchor optimistic version check — and one
+# stale anchor rolls back the WHOLE changeset. The chat REPL sits open for
+# hours while the daemon commits every 30s, so its exit commit is guaranteed
+# to lose that race on any anchor both sides touch (the Registry hub, every
+# time a skill runs in-process). Committing immediately after each mutation
+# shrinks the dirty window from session-length to sub-second.
+# Returns "" on success, else one short sentence for the terminal; the full
+# story lands in $SIGIL_HOME/log/error.log either way. Never raises.
+# ---------------------------------------------------------------------------
+def commit_now(context: str = "") -> str {
+    import from jaclang.jac0core.runtime { JacRuntime }
+    import from jaclang.runtimelib.exceptions { WriteConflict }
+    import from .sigil_errors { log_error }
+    try {
+        JacRuntime.commit();
+    } except WriteConflict as wc {
+        path = log_error("commit_now(" + context + ")", wc);
+        return ("graph writes from " + (context or "this session")
+                + " lost a version race with a concurrent commit (a daemon tick or "
+                + "another sigil process) and were discarded — detail: " + path);
+    } except Exception as e {
+        # Non-conflict commit trouble (store locked, disk): logged, not fatal —
+        # the writes stay dirty and the exit commit retries them.
+        log_error("commit_now(" + context + ")", e);
+        return "";
+    }
+    return "";
+}
+
 # Run a compiled module in an isolated ``jac run`` subprocess. Returns
 # ``{ok, report, error}``. Never raises — a crash/timeout is a typed failure the
 # walker escalates (mutate + retry), never a walker abort. ``mcp_json`` is the

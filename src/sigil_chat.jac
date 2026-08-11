@@ -26,6 +26,7 @@ import from .sigil_core { describe_soul, configure, library, recollect, teach }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
+import from .sigil_runtime { commit_now }
 import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
 import from .sigil_docs { list_docs, read_doc }
 import from .sigil_input { COMMANDS, make_session, make_plain_session, prompt_text, set_toolbar }
@@ -468,6 +469,14 @@ def _run_and_render(console: any, message: str) {
 # ---------------------------------------------------------------------------
 # slash commands
 # ---------------------------------------------------------------------------
+# Slash-command writes (teach/configure) mutate the graph in THIS long-lived
+# process. Commit each one as it happens instead of betting the whole session's
+# writes on the once-at-exit commit racing the daemon (see commit_now).
+def _commit_ui(console: any, context: str) {
+    warn = commit_now(context);
+    if warn { console.print("[dim]  ⚠ " + warn + "[/dim]"); }
+}
+
 def _handle_slash(console: any, cmd: str) -> bool {
     parts = cmd.split(" ", 1);
     verb = str(parts[0]).lower();
@@ -486,11 +495,11 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/clear" { console.clear(); }
     elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }
     elif verb == "/sandbox" {
-        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); _sync_toolbar(); }
+        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); _sync_toolbar(); _commit_ui(console, "/sandbox"); }
         else { console.print("[dim]  usage: /sandbox <off|jail|docker>   (currently " + str(workspace_info()["sandbox"]) + ")[/dim]"); }
     }
     elif verb in ["/remember", "/teach"] {
-        if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); }
+        if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); _commit_ui(console, "/remember"); }
         else { console.print("[dim]  usage: /remember <fact>[/dim]"); }
     }
     elif verb == "/recall" {
@@ -500,7 +509,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     }
     elif verb == "/model" {
         mp = rest.split(" ", 1);
-        if len(mp) == 2 { console.print("[green]  ✓[/green] [dim]" + str(configure(str(mp[0]).strip() + "_model", str(mp[1]).strip())) + "[/dim]"); _sync_toolbar(); }
+        if len(mp) == 2 { console.print("[green]  ✓[/green] [dim]" + str(configure(str(mp[0]).strip() + "_model", str(mp[1]).strip())) + "[/dim]"); _sync_toolbar(); _commit_ui(console, "/model"); }
         else { console.print("[dim]  usage: /model <frontier|small|router|chat> <name>[/dim]"); }
     }
     else { console.print("[dim]  unknown command " + verb + " — /help[/dim]"); }
@@ -547,7 +556,21 @@ def chat_repl() {
             console.print("[dim]  ✂ interrupted (^C)[/dim]");
         }
     }
+    # Commit any remaining graph writes OURSELVES, before jac's CLI teardown
+    # does its once-at-exit commit. If an anchor moved under us (a daemon tick
+    # landed since the last eager commit), that teardown commit dies in a raw
+    # WriteConflict traceback ON TOP of the farewell — with the session's
+    # writes rolled back either way. Say it in one honest line instead, then
+    # hard-exit so the doomed changeset is never re-collected by the teardown.
+    warn = commit_now("chat session");
     console.print("[dim]bye ◆[/dim]");
+    if warn {
+        console.print("[dim]  ⚠ " + warn + "[/dim]");
+        # os._exit skips interpreter teardown INCLUDING stdout flushing — if
+        # stdout is a pipe the farewell would vanish with the process.
+        try { sys.stdout.flush(); } except Exception as e {}
+        os._exit(0);
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -574,7 +597,7 @@ def setup_wizard() {
         except EOFError as e { console.print(); return; }
         except KeyboardInterrupt as e { console.print(); return; }
         if (not val) and default { val = default; }
-        if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); }
+        if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); _commit_ui(console, "setup"); }
         console.print();
     }
     s = describe_soul();
@@ -637,5 +660,6 @@ def config_menu() {
         except KeyboardInterrupt as e { continue; }
         if not newval { continue; }
         console.print("[green]  ✓[/green] [dim]" + str(configure(fk, newval)) + "[/dim]");
+        _commit_ui(console, "config");
     }
 }

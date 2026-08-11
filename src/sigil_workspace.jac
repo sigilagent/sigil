@@ -40,7 +40,7 @@ import from .sigil_core {
 }
 import from .approvals { check_exec, allowlist_add }
 import from .hooks { fire_hooks }
-import from .sigil_runtime { run_dir, pid_alive }
+import from .sigil_runtime { run_dir, pid_alive, commit_now }
 import from .sigil_secrets { resolve_refs, redact_secrets }
 
 # ---------------------------------------------------------------------------
@@ -676,16 +676,21 @@ def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
     try { r = compile_via_seam(src, want_eject, eject_path, _compile_stage); }
     except Exception as e { _trace("compile", str(e)[:120], False); return "compile error: " + str(e)[:400]; }
     finally { if streaming { _stream_view_off(); } }
+    # A compile writes the new TaskGraph onto the Registry in-process — commit it
+    # now, or a minutes-old dirty anchor bets the whole session on the exit race.
+    warn = commit_now("sigil_compile");
     if not r["ok"] {
         lines: list[str] = ["compile FAILED for '" + str(r["signature"]) + "':"];
         for iss in list(r["issues"] or []) { lines.append("  - " + str(iss)); }
         if r["compile_errors"] { lines.append("  compile: " + str(r["compile_errors"])[:400]); }
         _trace("compile", "failed: " + str(r["signature"]), False);
+        if warn { lines.append("WARNING: " + warn); }
         return chr(10).join(lines);
     }
     out = "compiled skill: " + str(r["signature"]) + "  ->  " + str(r["module"]);
     for rp in list(r["repairs"] or []) { out += chr(10) + "  (repair) " + str(rp); }
     if r["eject"] { out += chr(10) + "  ejected runnable: " + str(r["eject"]); }
+    if warn { out += chr(10) + "WARNING: " + warn; }
     return out;
 }
 

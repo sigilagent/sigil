@@ -28,7 +28,7 @@ import from .sigil_core {
 }
 import from .agent { run_task }
 import from .sigil_daemon { scheduler_running }
-import from .sigil_runtime { _jac_bin, entry_script, project_root }
+import from .sigil_runtime { _jac_bin, entry_script, project_root, commit_now }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from .sigil_docs { list_docs, read_doc }
@@ -140,7 +140,14 @@ def cancel_scheduled(name: str) -> str { _trace("unschedule", name); return _cro
 
 sem remember_fact = "Store a durable fact in long-term memory to recall in future conversations.";
 sem remember_fact.fact = "The fact to remember.";
-def remember_fact(fact: str) -> str { _trace("remember", fact); return teach(fact, "fact"); }
+def remember_fact(fact: str) -> str {
+    _trace("remember", fact);
+    out = teach(fact, "fact");
+    # Committed NOW: a fact only held in this process's exit commit is a fact
+    # that silently vanishes when that commit loses a race with a daemon tick.
+    warn = commit_now("remember_fact");
+    return (out + "\nWARNING: " + warn) if warn else out;
+}
 
 sem recall_memory = "Search long-term memory for facts relevant to a query.";
 sem recall_memory.query = "What to search memory for.";
@@ -171,7 +178,9 @@ def learn_skill(task: str = "") -> str {
     }
     _trace("learn", task);
     r = run_task(task, "");
-    return "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
+    warn = commit_now("learn_skill");
+    out = "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
+    return (out + "\nWARNING: " + warn) if warn else out;
 }
 
 sem list_skills = "List the compiled (learned) skills — signature, run stats, and what each one is for.";
@@ -255,12 +264,16 @@ def use_skill(signature: str, task: str = "") -> str {
         if prev is None { os.environ.pop("AGIR_PROGRESS", None); }
         else { os.environ["AGIR_PROGRESS"] = prev; }
     }
+    # A run mutates the graph in-process (run counts, Attempts, eval verdicts on
+    # the Registry hub) — commit before those writes can age into a lost race.
+    warn = commit_now("use_skill:" + sig);
     # the honest route story — route/HIT/eval/relearn — onto the trace, warts and all
     for ln in str(r.get("trace") or "").splitlines() {
         cl = str(ln).strip();
         if cl and (not cl.startswith("prompt-mode")) { _trace("skill", cl); }
     }
-    return "skill '" + str(r.get("signature") or sig) + "' finished.\n" + str(r.get("result") or "")[:6000];
+    out = "skill '" + str(r.get("signature") or sig) + "' finished.\n" + str(r.get("result") or "")[:6000];
+    return (out + "\nWARNING: " + warn) if warn else out;
 }
 
 sem mcp_call = """Invoke a tool exposed by a registered MCP server (external tools the
