@@ -915,8 +915,8 @@ def solve_known_task(task: str, skill: str = "") -> dict {
 glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
                             "flows": "annotator flows", "assemble": "assemble",
                             "gates": "gates", "repair": "repair",
-                            "author": "claude authoring", "autofix": "mechanical fixes",
-                            "bind": "env/par bind"};
+                            "author": "authoring", "autofix": "mechanical fixes",
+                            "faith": "faithfulness", "bind": "env/par bind"};
 
 def compile_stage_label(stage: str) -> str {
     return str(_STAGE_LABELS.get(stage, stage));
@@ -938,6 +938,15 @@ def compile_stage_line(ev: dict) -> str {
         return "clean" if not ev["issues"] else (str(ev["issues"]) + " gate issues");
     } elif s == "gates" {
         return ("compile ✓" if ev["g4"] else "compile ✗") + ((" · " + str(ev["repairs"]) + " IR repairs") if ev["repairs"] else "");
+    } elif s == "faith" {
+        # the raise2 closure verdict: how many rules the IR silently dropped/added
+        gaps = int(ev.get("dropped", 0)) + int(ev.get("added", 0));
+        if not gaps { return "0 gaps · faithful"; }
+        return str(ev.get("dropped", 0)) + " dropped · " + str(ev.get("added", 0)) + " added";
+    } elif s == "repair" {
+        # a finished repair round: gap count before -> after, and whether it stuck
+        return (str(ev.get("before", "?")) + " -> " + str(ev.get("after", "?")) + " gap(s)"
+                + ("" if ev.get("adopted") else " · kept prior"));
     } elif s == "autofix" {
         n_fx = int(ev.get("fixes", 0));
         return (str(n_fx) + " fix(es) applied") if n_fx else "nothing to fix";

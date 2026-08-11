@@ -24,10 +24,16 @@ Two things that differ from `lift()`:
    gap is closed — the property `lift()` could not get from one front-end.
 """
 
+import time;
 import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default }
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions }
 import from .gates { compile_gate }
+# The same progress seam the legacy lift uses: compile_skill installs the CLI's
+# (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
+# narrates through the identical hook. Without these events the DEFAULT compile
+# ran its whole multi-minute pipeline in total silence.
+import from .lift { _emit }
 
 obj RaiseResult {
     has ok: bool = False;           # faithful AND compiles
@@ -82,7 +88,13 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     # `pre`: a SpecResult the lint pre-pass already extracted from this same
     # (stripped) text — reuse it instead of paying for the spec loop twice.
     # Only valid when the source was NOT amended after extraction.
+    _t0 = time.time();
+    _emit({"stage": "spec", "state": "start"});
     sr = pre if pre else extract_spec(skill, name);
+    _emit({"stage": "spec", "state": "done", "secs": time.time() - _t0,
+           "rules": len(sr.spec.rules), "rounds": sr.verdict.rounds,
+           "sound": sr.verdict.sound, "complete": sr.verdict.complete,
+           "drift": sr.verdict.drift});
     warnings: list[str] = [];
     if sr.clarify {
         if ask {
@@ -112,15 +124,23 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
 }
 
 def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
+    _t = time.time();
+    _emit({"stage": "author", "state": "start"});
     au = author_direct(skill, spec, name);
     ir: str = str(au["ir_text"]).strip();
+    _emit({"stage": "author", "state": "done", "secs": time.time() - _t,
+           "lines": len(ir.splitlines()) if ir else 0});
     repairs: list[str] = [str(x) for x in list(au["notes"])];
     if not ir {
         repairs.append("author produced no IR");
         return RaiseResult(status="failed", repairs=repairs);
     }
 
+    _t = time.time();
+    _emit({"stage": "faith", "state": "start"});
     fr = faithfulness_report(spec, ir);
+    _emit({"stage": "faith", "state": "done", "secs": time.time() - _t,
+           "dropped": len(fr.dropped), "added": len(fr.added)});
     rounds = 0;
 
     # Mechanical rung FIRST (autofixes land before model repair): fold any
@@ -141,15 +161,22 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
     # rule-scoped repair: the SAME coherent author closes exactly the gaps.
     while (not fr.ok) and (rounds < max_repair) {
         rounds += 1;
+        before = len(fr.dropped) + len(fr.added);
+        _t = time.time();
+        _emit({"stage": "repair", "state": "start", "round": rounds,
+               "issues": before, "target": "faithfulness"});
         au2 = author_direct(skill, spec, name, _directives(fr));
         ir2: str = str(au2["ir_text"]).strip();
         if not ir2 {
             repairs.append("repair round " + str(rounds) + ": author returned empty — keeping prior");
+            _emit({"stage": "repair", "state": "done", "secs": time.time() - _t,
+                   "round": rounds, "before": before, "after": before, "adopted": False});
             break;
         }
         fr2 = faithfulness_report(spec, ir2);
-        before = len(fr.dropped) + len(fr.added);
         after = len(fr2.dropped) + len(fr2.added);
+        _emit({"stage": "repair", "state": "done", "secs": time.time() - _t,
+               "round": rounds, "before": before, "after": after, "adopted": after < before});
         # monotone: adopt only if it closes gaps without opening new ones.
         if after < before {
             ir = ir2; fr = fr2;
@@ -178,7 +205,11 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
 
     # Coherence gate LAST — faithfulness first, compilability second (the inverse of
     # today's _finalize, which compiles before it checks coverage).
+    _t = time.time();
+    _emit({"stage": "gates", "state": "start"});
     v = compile_gate(ir, name);
+    _emit({"stage": "gates", "state": "done", "secs": time.time() - _t,
+           "g4": v.ok, "g1_issues": 0, "repairs": 0});
     if not fr.ok { status = "unfaithful"; }
     elif not v.ok { status = "uncompilable"; }
     else { status = "faithful"; }

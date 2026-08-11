@@ -19,6 +19,7 @@ import os;
 import sys;
 import time;
 import sqlite3;
+import threading;
 import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
@@ -83,7 +84,26 @@ def cli_args(raw: list) -> list {
     return out;
 }
 
-glob _CV: dict = {"open": ""};   # current in-flight stage line
+glob _CV: dict = {"open": "", "line": ""};   # current in-flight stage: label + rendered line
+glob _HB: dict = {"on": False, "t0": 0.0};   # the stage heartbeat (see _hb_tick)
+
+def _hb_tick() -> None {
+    # Liveness for the quiet stage view. A raise2 stage is one frontier call that
+    # can run for MINUTES; without this the open "◐ authoring …" line sat frozen
+    # and a working compile was indistinguishable from a hung one. While a stage
+    # is open, rewrite its line once a second with the elapsed time. The stage
+    # events own the line the moment they fire (done clears `line` first).
+    while _HB["on"] {
+        time.sleep(1.0);
+        if (not _HB["on"]) or _VB["on"] { continue; }
+        line = str(_CV["line"] or "");
+        if not line { continue; }
+        secs = int(time.time() - float(_HB["t0"]));
+        el = (str(secs // 60) + "m" + str(secs % 60).rjust(2, "0") + "s") if secs >= 60 else (str(secs) + "s");
+        sys.stdout.write(chr(13) + chr(27) + "[2K" + line + " " + chr(27) + "[2m" + chr(0x2026) + " " + el + chr(27) + "[0m");
+        sys.stdout.flush();
+    }
+}
 
 # ---------------------------------------------------------------------------
 # The verbose build view — watching the model write the artifact.
@@ -98,7 +118,7 @@ glob _CV: dict = {"open": ""};   # current in-flight stage line
 # the current line only works when nothing else is writing to it, and here
 # something is. Stages print as a scrolling transcript instead.
 # ---------------------------------------------------------------------------
-glob _VB: dict = {"on": False, "col": 0, "open": False, "w": 100, "kind": ""};
+glob _VB: dict = {"on": False, "col": 0, "open": False, "w": 100, "kind": "", "nl": 0};
 
 def _term_cols() -> int {
     # A pty with no winsize set reports 0 rather than raising, and 0 silently
@@ -115,6 +135,10 @@ def _term_cols() -> int {
 def _stream_sink(kind: str, text: str) -> None {
     # One delta from the model. `kind` is "text" (the answer) or "thinking".
     if not text { return; }
+    # A whitespace-only delta must never OPEN a block: a stream that led with
+    # newlines painted a column of blank lines before its first word — which
+    # read as a hung compile printing nothing.
+    if (not _VB["open"]) and (not str(text).strip()) { return; }
     ind = "      ";
     sty = (chr(27) + "[2m") if kind == "text" else (chr(27) + "[2;3;38;5;98m");
     if not _VB["open"] {
@@ -125,6 +149,7 @@ def _stream_sink(kind: str, text: str) -> None {
         _VB["open"] = True;
         _VB["col"] = 0;
         _VB["kind"] = "";
+        _VB["nl"] = 0;
     }
     if (str(_VB["kind"]) != kind) and (int(_VB["col"]) > 0) {
         # thinking and answer are styled differently, but they also deserve a
@@ -137,8 +162,16 @@ def _stream_sink(kind: str, text: str) -> None {
     w = int(_VB["w"]);
     buf = "";
     for ch in str(text) {
-        if ch == chr(10) { buf += chr(10) + ind; _VB["col"] = 0; }
-        else {
+        if ch == chr(10) {
+            # cap a newline RUN at one blank line — models love to pad JSON
+            # blocks with whitespace, and every extra newline was a blank line
+            # of "progress"
+            if int(_VB["nl"]) >= 2 { continue; }
+            _VB["nl"] = int(_VB["nl"]) + 1;
+            buf += chr(10) + ind;
+            _VB["col"] = 0;
+        } else {
+            _VB["nl"] = 0;
             if int(_VB["col"]) >= w { buf += chr(10) + ind; _VB["col"] = 0; }
             buf += ch;
             _VB["col"] = int(_VB["col"]) + 1;
@@ -192,16 +225,26 @@ def _compile_ev(ev: dict) -> None {
         return;
     }
     if str(ev.get("state")) == "start" {
+        _HB["t0"] = time.time();
         if str(ev["stage"]) == "repair" {
-            sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views")) + chr(10));
+            line = "  " + chr(27) + "[38;5;135m" + chr(0x27F3) + chr(27) + "[0m repair  round " + str(ev.get("round", 1)) + ": " + str(ev.get("issues", "?")) + " issues " + chr(0x2192) + " " + str(ev.get("target", "views"));
         } else {
-            sys.stdout.write("  " + chr(27) + "[38;5;135m" + chr(0x25D0) + chr(27) + "[0m " + label + " " + chr(27) + "[2m" + chr(0x2026) + chr(27) + "[0m");
-            _CV["open"] = label;
+            line = "  " + chr(27) + "[38;5;135m" + chr(0x25D0) + chr(27) + "[0m " + label;
         }
+        # The line stays OPEN (no newline) — `done` rewrites it in place with the
+        # counts, and the heartbeat rewrites it with elapsed time in between.
+        # Repair rounds included: each one is a minutes-long author call, and the
+        # old newline-terminated form left them tickerless.
+        sys.stdout.write(chr(13) + chr(27) + "[2K" + line + " " + chr(27) + "[2m" + chr(0x2026) + chr(27) + "[0m");
+        _CV["open"] = label;
+        _CV["line"] = line;
         sys.stdout.flush();
     } elif str(ev.get("state")) == "done" {
-        sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + compile_stage_line(ev) + "  " + chr(27) + "[2m" + compile_stage_secs(ev) + chr(27) + "[0m" + chr(10));
+        # clear BEFORE writing so a ticker firing mid-write never repaints a
+        # stale open line over the finished one
         _CV["open"] = "";
+        _CV["line"] = "";
+        sys.stdout.write(chr(13) + chr(27) + "[2K  " + chr(27) + "[38;5;51m" + chr(0x2714) + chr(27) + "[0m " + (label + "                ")[:16] + compile_stage_line(ev) + "  " + chr(27) + "[2m" + compile_stage_secs(ev) + chr(27) + "[0m" + chr(10));
         sys.stdout.flush();
     }
 }
@@ -1004,6 +1047,13 @@ with entry:__main__ {
             }
             if _tty { print(chr(10) + "  Compiling " + path); }
             if _tty { _install_stream_view(); }
+            if _tty and (not _VB["on"]) {
+                # the quiet view's liveness thread — the verbose transcript has
+                # the token stream for that
+                _HB["on"] = True;
+                _HB["t0"] = time.time();
+                threading.Thread(target=_hb_tick, daemon=True).start();
+            }
             try {
                 r = compile_skill(src_text, eject, eject_path,
                                   _compile_ev if _tty else None, agent_author,
@@ -1011,11 +1061,13 @@ with entry:__main__ {
             } except Exception as e {
                 # the frontier model died under the compile (bad name, key,
                 # network) — one sentence + the log, never a provider stack
+                _HB["on"] = False;
                 if _tty { _vb_close(); print(""); }
                 log_error("compile failed: " + path, e);
                 print("xx " + friendly_llm_error(e, "", "frontier"), file=sys.stderr);
                 sys.exit(1);
             }
+            _HB["on"] = False;
             if _tty { _vb_close(); print(""); }
             if not r["ok"] {
                 # the fix-forward exit note: what failed, what the ladder
