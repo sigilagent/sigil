@@ -21,6 +21,7 @@ stays scriptable).
 import sys;
 import os;
 import re;
+import time;
 import from .sigil_logo { BANNER_LOGO }
 import from .sigil_core { describe_soul, configure, library, recollect, teach }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
@@ -229,120 +230,66 @@ def _show_library(console: any) {
 # ---------------------------------------------------------------------------
 glob _STATUS: any = None;    # the live spinner handle, set for the duration of a turn
 glob _STREAMED: bool = False; # did the reply stream any tokens this turn? (skip re-render if so)
-glob _GUTTER: str = chr(27) + "[38;5;141m│" + chr(27) + "[0m ";  # purple left-border on each reply line
-glob _GUTTER_MU: str = "[#a78bfa]│[/] ";   # the same gutter as rich markup
-glob _LINEBUF: dict[str, str] = {"s": ""};   # partial line held until its newline arrives
-glob _FENCE: dict = {"in": False, "lang": "", "buf": []};   # open ``` block being collected
-
-def _style_inline(text: str) -> str {
-    # Inline markdown -> rich markup, on text whose own brackets are already escaped
-    # so a model writing "[dim]" cannot inject styling of its own.
-    out = re.sub(r"`([^`]+)`", "[cyan]\\1[/cyan]", text);
-    # non-greedy, and space-anchored like emphasis: `[^*]+` could not cross an
-    # asterisk, so "**2 * 3 = 6** and a lone **" paired the WRONG two runs and
-    # bolded the text between them.
-    out = re.sub(r"\*\*(?!\s)(.+?)(?<!\s)\*\*", "[bold]\\1[/bold]", out);
-    # emphasis, but not arithmetic: markdown requires the opening * to be followed
-    # by non-space and the closing * preceded by non-space, so `2 * 3 = 6` and a
-    # lone ** are left exactly as the model wrote them.
-    out = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", "[italic]\\1[/italic]", out);
-    return out;
-}
-
-def _style_line(line: str) -> str {
-    # One PROSE line as rich markup. Fenced blocks never reach here — _emit_line
-    # collects them and hands the whole block to rich's Syntax, which is the only
-    # way to get real highlighting.
-    body = line.replace("[", "\\[");
-    stripped = body.lstrip();
-    indent = body[:len(body) - len(stripped)];
-    if stripped.startswith("#") {
-        head = stripped.lstrip("#").strip();
-        return indent + "[bold #a78bfa]" + _style_inline(head) + "[/]";
-    }
-    for bullet in ["- ", "* "] {
-        if stripped.startswith(bullet) {
-            return indent + "[#a78bfa]•[/] " + _style_inline(stripped[2:]);
-        }
-    }
-    return indent + _style_inline(stripped) if not indent else (indent + _style_inline(stripped));
-}
+glob _GUTTER_MU: str = "[#a78bfa]│[/] ";   # purple left-border, as rich markup, on each reply line
+glob _REPLYBUF: dict[str, str] = {"s": ""};   # the whole reply accumulated so far this turn
+glob _LIVE: any = None;                        # the rich Live region rendering it (None = not streaming)
+glob _LIVE_T: dict[str, float] = {"last": 0.0};   # last re-render time, for throttling
 
 def _body_width(console: any) -> int {
     try { w = int(console.width); } except Exception as e { w = 80; }
     return max(20, w - 2);   # the gutter itself costs "│ "
+
 }
 
-def _print_gutter(console: any, txt: any, hang: int = 0) {
-    # rich wraps to the console width, but the gutter was only ever on the string
-    # handed to it — so every CONTINUATION line came out flush-left and the block
-    # lost its left border mid-paragraph. Wrap at (width - 2) here and put the
-    # gutter on each produced line instead.
-    lines = txt.wrap(console, _body_width(console) - hang);
-    if not lines { console.print(Text.from_markup(_GUTTER_MU), highlight=False); return; }
-    first = True;
-    for seg in lines {
+def _guttered_markdown(console: any, md_text: str) -> any {
+    # Render the reply-so-far as REAL markdown — rich's Markdown, the same
+    # renderer the non-streaming path uses — and hang the purple gutter off every
+    # produced line. Partial markdown is fine: an unterminated ```fence, a
+    # half-built table or a dangling ** renders as far as it parses and snaps into
+    # shape as more tokens arrive. This is why the streamed answer now gets
+    # ordered/nested lists, tables and blockquotes the old line-at-a-time styler
+    # could never do — we re-render the whole buffer, not one line, each tick.
+    import from rich.markdown { Markdown }
+    w = _body_width(console);
+    md = Markdown(str(md_text), code_theme="ansi_dark", inline_code_theme="ansi_dark");
+    opts = console.options.update(width=w);
+    rows: list = [];
+    for segs in console.render_lines(md, opts, pad=False) {
         row = Text.from_markup(_GUTTER_MU);
-        # continuation of a bullet hangs under its text, not under the marker —
-        # otherwise a wrapped list item reads as a new paragraph
-        if not first and hang { row.append(" " * hang); }
-        row.append_text(seg);
-        console.print(row, highlight=False);
-        first = False;
+        for s in segs {
+            t = str(s.text).replace(chr(10), "");
+            if t { row.append(t, s.style); }
+        }
+        rows.append(row);
     }
+    # Markdown pads a trailing blank line after each block; drop trailing rows
+    # that are only the gutter so the block doesn't end on a dangling "│".
+    while rows and (not str(rows[-1].plain).replace(chr(0x2502), " ").strip()) { rows.pop(); }
+    out = Text();
+    for (i, r) in enumerate(rows) {
+        if i { out.append(chr(10)); }
+        out.append_text(r);
+    }
+    if not rows { out = Text.from_markup(_GUTTER_MU); }
+    return out;
 }
 
-def _print_code(console: any, code: str, lang: str) {
-    # A fenced block is handed to rich whole, so it gets real syntax highlighting
-    # rather than the dimmed verbatim text a line-at-a-time renderer can manage.
-    try {
-        import from rich.syntax { Syntax }
-        w = _body_width(console);
-        syn = Syntax(code, lang if lang else "text", theme="ansi_dark",
-                     background_color="default", word_wrap=True, code_width=w);
-        opts = console.options.update(width=w);
-        for segs in console.render_lines(syn, opts, pad=False) {
-            row = Text.from_markup(_GUTTER_MU);
-            for s in segs {
-                t = str(s.text).replace(chr(10), "");
-                if t { row.append(t, s.style); }
-            }
-            console.print(row, highlight=False);
-        }
-    } except Exception as e {
-        for ln in code.split(chr(10)) {
-            _print_gutter(console, Text.from_markup("[dim]" + ln.replace("[", "\\[") + "[/dim]"));
-        }
-    }
-}
-
-def _emit_line(console: any, line: str) {
-    if line.strip().startswith("```") {
-        if _FENCE["in"] {
-            _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
-            _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
-        } else {
-            _FENCE["in"] = True; _FENCE["lang"] = line.strip()[3:].strip(); _FENCE["buf"] = [];
-        }
-        return;
-    }
-    if _FENCE["in"] { _FENCE["buf"].append(line); return; }
-    hang = 2 if line.lstrip().startswith("- ") or line.lstrip().startswith("* ") else 0;
-    try { _print_gutter(console, Text.from_markup(_style_line(line)), hang); }
-    except Exception as e { _print_gutter(console, Text(line), hang); }
+def _live_render(console: any) {
+    # Rebuild the markdown view from the whole buffer and repaint the Live region.
+    if _LIVE is None { return; }
+    try { _LIVE.update(_guttered_markdown(console, str(_REPLYBUF["s"])), refresh=True); }
+    except Exception as e {  }
 }
 
 def _flush_reply(console: any) {
-    # End of turn: emit the last partial line, and close an unterminated fence so
-    # a truncated reply still shows the code it had already produced.
-    if _LINEBUF["s"] {
-        _emit_line(console, str(_LINEBUF["s"]));
-        _LINEBUF["s"] = "";
+    # End of turn: one last full re-render (so the final frame is the complete,
+    # fully-formatted reply left in scrollback), then retire the Live region.
+    if _LIVE is not None {
+        _live_render(console);
+        try { _LIVE.stop(); } except Exception as e {  }
+        _LIVE = None;
     }
-    if _FENCE["in"] {
-        _print_code(console, chr(10).join([str(x) for x in _FENCE["buf"]]), str(_FENCE["lang"]));
-        _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
-    }
+    _REPLYBUF["s"] = "";
 }
 
 # Width of the "  ✓ toolname   " gutter every trace line starts with. Continuation
@@ -385,27 +332,38 @@ def _install_hooks(console: any, session: any) {
         }
     }
     def token_sink(piece: str) {
-        # first token ends the "thinking" phase: stop the spinner, print the "◆ sigil"
-        # header, then stream the reply as a distinct block — a purple left-border gutter
-        # on every line so each turn's answer is clearly bracketed and separated.
+        # Accumulate the whole reply and re-render it as live markdown. On a
+        # non-terminal (piped/scripted) stdout there is no Live region to drive —
+        # leave _STREAMED False so the end-of-turn path prints the reply once with
+        # rich Markdown, keeping scripts clean and still fully formatted.
+        term = True;
+        try { term = bool(console.is_terminal); } except Exception as e { term = True; }
+        if not term { return; }
         if not _STREAMED {
+            # first token ends the "thinking" phase: stop the spinner, print the
+            # "◆ sigil" header, then open the Live region the answer renders into.
             _STREAMED = True;
             if _STATUS is not None { try { _STATUS.stop(); } except Exception as e {} }
             console.print();
             console.print("[#a78bfa]◆[/] [dim]sigil[/]");
+            import from rich.live { Live }
+            # auto_refresh off: WE repaint on throttle, so a background thread
+            # never paints a half-token frame or fights the spinner teardown.
+            # vertical_overflow visible: a reply taller than the screen scrolls
+            # naturally instead of being cropped to the last N lines.
+            _LIVE = Live(console=console, auto_refresh=False, vertical_overflow="visible");
+            try { _LIVE.start(); } except Exception as e {  }
+            _LIVE_T["last"] = 0.0;
         }
-        # Buffer to the line break and style whole lines. Streaming raw put literal
-        # `**bold**`, backticks and `- ` bullets on screen — the model writes markdown
-        # and nothing was rendering it, because only the non-streaming fallback below
-        # ever reached rich's Markdown. A line is the largest unit that can be styled
-        # without waiting for the whole reply, so the reply still arrives live.
-        _LINEBUF["s"] += str(piece);
-        while chr(10) in _LINEBUF["s"] {
-            (line, rest) = _LINEBUF["s"].split(chr(10), 1);
-            _LINEBUF["s"] = rest;
-            _emit_line(console, line);
+        _REPLYBUF["s"] += str(piece);
+        # Re-rendering the whole markdown buffer every token is O(n) per token;
+        # throttle to ~12fps (and always on a newline, which usually closes a
+        # block worth showing) so a long reply stays cheap and flicker-free.
+        now = time.monotonic();
+        if (chr(10) in str(piece)) or (now - float(_LIVE_T["last"]) >= 0.08) {
+            _LIVE_T["last"] = now;
+            _live_render(console);
         }
-        sys.stdout.flush();
     }
     def approver(command: str) -> bool {
         paused = False;
@@ -424,10 +382,11 @@ def _install_hooks(console: any, session: any) {
 
 def _run_and_render(console: any, message: str) {
     _STREAMED = False;
-    # Per-turn render state. A reply that ended mid-fence would otherwise dim the
-    # whole of the NEXT answer, and a leftover partial line would prefix it.
-    _LINEBUF["s"] = "";
-    _FENCE["in"] = False; _FENCE["lang"] = ""; _FENCE["buf"] = [];
+    # Per-turn render state: a stale buffer would prefix the next answer, and a
+    # Live left open from a crashed turn would keep repainting over it.
+    _REPLYBUF["s"] = "";
+    _LIVE = None;
+    _LIVE_T["last"] = 0.0;
     r: dict = {};
     if sys.stdin.isatty() {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
