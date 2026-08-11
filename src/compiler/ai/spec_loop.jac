@@ -93,6 +93,23 @@ def pin_lift_llm(m: any) -> None {
     _LIFT_PINNED = True;
 }
 
+# Fine-grained progress hook for the spec loop — the ONE stage that is a
+# multi-minute chain of frontier calls (extract → ground → coverage → modality,
+# per round) with no sub-structure the coarse compile stage view can show. The
+# lint pre-pass installs a renderer here so `[Y/n] Y` stops looking hung; the
+# compile path leaves it None (its "spec loop" stage line + heartbeat suffice).
+# Deliberately separate from lift.jac's `lift_progress`: different granularity,
+# and keeping it local to spec_loop avoids a spec_loop→lift import cycle.
+glob spec_progress: any = None;
+
+def set_spec_progress(cb: any) -> None { spec_progress = cb; }
+
+def _emit_spec(ev: dict) -> None {
+    if spec_progress is not None {
+        try { spec_progress(ev); } except Exception as e {  }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # model proposes
 # ---------------------------------------------------------------------------
@@ -492,10 +509,13 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     # specs (40-140 rules) — scale with observed size, bounded.
     cap = max_rounds if (max_rounds > 0) else 5;
     while (rounds < cap) and (dry < 2) {
+        rnum = rounds + 1;
+        _emit_spec({"phase": "extract", "round": rnum, "cap": cap});
         rs = extract_round(skill, prior, _gaps_digest(verdict));
         rs.skill_name = name;
 
         # dispose 1 — soundness: mechanically drop hallucinated rules
+        _emit_spec({"phase": "ground", "round": rnum, "rules": len(rs.rules)});
         bad = ground_rules(skill, rs);
         if bad { rs.rules = [r for r in rs.rules if r.id not in bad]; }
 
@@ -505,6 +525,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
         demote_examples(skill, rs);
 
         # dispose 2 — completeness: 3 lenses, self-filtered against the skill
+        _emit_spec({"phase": "coverage", "round": rnum, "rules": len(rs.rules), "lenses": len(_LENSES)});
         covered_digest = " | ".join([r.quote for r in rs.rules])[:4000];
         uncovered: list = [];
         for lens in _LENSES.keys() {
@@ -517,6 +538,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
         }
 
         # dispose 3 — modality faithfulness
+        _emit_spec({"phase": "modality", "round": rnum, "rules": len(rs.rules)});
         notes = audit_modality(skill, rs);
 
         rounds += 1;
@@ -528,11 +550,15 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
             drift_notes=notes, changed=changed, rounds=rounds
         );
         prior = rs;
+        _emit_spec({"phase": "round_done", "round": rounds, "rules": len(rs.rules),
+                    "sound": verdict.sound, "complete": verdict.complete,
+                    "drift": verdict.drift, "uncovered": len(uncovered)});
         if verdict.sound and verdict.complete and (not verdict.drift) { break; }
         if not changed { dry += 1; } else { dry = 0; }
     }
     # skill-quality pass: surface obligations whose modal force the skill never
     # stated (underspecified authoring) — warned, not guessed.
+    _emit_spec({"phase": "clarify", "rules": len(prior.rules)});
     clar = flag_ambiguous(skill, prior);
     return SpecResult(spec=prior, verdict=verdict, clarify=clar);
 }
