@@ -12,8 +12,10 @@ command the exec policy gates. All of it drives the SAME persistent graph as the
 commands, so a fact remembered or a job scheduled in chat is there for `solve`, cron, and
 the Observatory too.
 
-Rendering uses `rich`; line editing/history uses `prompt_toolkit` in a real terminal,
-falling back to builtin input() when piped (so it stays scriptable).
+Rendering uses `rich`; input is the sigil_input.jac editor — multiline (Enter sends,
+Ctrl-J newlines), a "/" command palette with argument completion, fish-style history
+suggestions and a status toolbar — falling back to builtin input() when piped (so it
+stays scriptable).
 """
 
 import sys;
@@ -26,33 +28,12 @@ import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
 import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
 import from .sigil_docs { list_docs, read_doc }
+import from .sigil_input { COMMANDS, make_session, make_plain_session, prompt_text, set_toolbar }
 import from rich.console { Console }
 import from rich.panel { Panel }
 import from rich.table { Table }
 import from rich.text { Text }
 import from rich.markdown { Markdown }
-
-# ---------------------------------------------------------------------------
-# input plumbing — prompt_toolkit in a TTY (history + arrows), input() otherwise
-# ---------------------------------------------------------------------------
-def _make_session() -> any {
-    if not sys.stdin.isatty() { return None; }
-    try {
-        import from prompt_toolkit { PromptSession }
-        import from prompt_toolkit.history { FileHistory }
-        return PromptSession(history=FileHistory(os.path.expanduser("~/.sigil_chat_history")));
-    } except Exception as e { return None; }
-}
-
-def _prompt(session: any, msg: str) -> str {
-    if session is not None {
-        try {
-            import from prompt_toolkit { ANSI }
-            return str(session.prompt(ANSI(msg)));   # lets the prompt carry ANSI colour
-        } except Exception as e { return str(session.prompt(msg)); }
-    }
-    return str(input(msg));
-}
 
 def _to_int(s: str, dflt: int) -> int {
     try { return int(s); } except Exception as e { return dflt; }
@@ -102,30 +83,27 @@ def _banner(console: any) {
 }
 
 def _help(console: any) {
-    rows = [
-        ["/help", "show this help"],
-        ["/soul", "identity, models, skills & memory"],
-        ["/config", "edit settings interactively"],
-        ["/tools", "the tool-belt the agent can use"],
-        ["/workspace", "workspace dir + running shell jobs"],
-        ["/sandbox <off|jail|docker>", "containment for the tools (default off)"],
-        ["/cron", "list scheduled jobs"],
-        ["/channels", "channels: supported + configured"],
-        ["/connect <kind>", "how to connect discord|telegram|whatsapp|slack"],
-        ["/docs [topic]", "Sigil's reference — how it works, config, tools"],
-        ["/skills", "list compiled skills"],
-        ["/model <tier> <name>", "set frontier|small|router|chat model"],
-        ["/remember <fact>", "store a durable memory"],
-        ["/recall <query>", "search memories"],
-        ["/reset", "clear the conversation (keeps graph)"],
-        ["/clear", "clear the screen"],
-        ["/exit", "quit (also Ctrl-D)"]
-    ];
+    # rendered from sigil_input's COMMANDS — the same table that powers the "/"
+    # palette, so help and completion can never drift apart.
+    import from rich.markup { escape }
     console.print();
     console.print("[bold]commands[/bold]");
-    for r in rows { console.print("  [cyan]" + r[0].ljust(28) + "[/cyan] [dim]" + r[1] + "[/dim]"); }
+    # escape AFTER padding: "[topic]" would otherwise read as a rich tag and
+    # vanish, and escaping first would pad to the wrong visible width.
+    for r in COMMANDS { console.print("  [cyan]" + escape(str(r[0]).ljust(28)) + "[/cyan] [dim]" + str(r[1]) + "[/dim]"); }
     console.print("  [dim]anything else is a message to the agent — it will use its tools to act.[/dim]");
     console.print();
+}
+
+def _sync_toolbar() {
+    # the editor's toolbar reads a plain string on every keystroke; the graph
+    # read that produces it happens only here — at startup and on config change.
+    try {
+        s = describe_soul();
+        wi = workspace_info();
+        cm = str(s["chat_model"]) if s["chat_model"] else "model unset";
+        set_toolbar("◆ " + cm + "  ·  sandbox " + str(wi["sandbox"]) + "  ·  " + str(s["skills"]) + " skills");
+    } except Exception { set_toolbar(""); }
 }
 
 def _tool_style(tool: str) -> str {
@@ -433,7 +411,7 @@ def _install_hooks(console: any, session: any) {
         if _STATUS is not None { try { _STATUS.stop(); paused = True; } except Exception as e {} }
         console.print("  [yellow]⚠ approve shell[/yellow] [dim]" + command + "[/dim]");
         decided = False;
-        try { ans = str(_prompt(session, "    run this? [y/N] ")).strip().lower(); decided = ans in ["y", "yes"]; }
+        try { ans = str(prompt_text(session, "    run this? [y/N] ")).strip().lower(); decided = ans in ["y", "yes"]; }
         except Exception as e { decided = False; }
         if paused { try { _STATUS.start(); } except Exception as e {} }
         return decided;
@@ -497,7 +475,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     if verb in ["/exit", "/quit", "/q"] { return True; }
     elif verb in ["/help", "/?", "/h"] { _help(console); }
     elif verb == "/soul" { _show_soul(console); }
-    elif verb == "/config" { config_menu(); }
+    elif verb == "/config" { config_menu(); _sync_toolbar(); }
     elif verb == "/tools" { _show_tools(console); }
     elif verb == "/workspace" { _show_workspace(console); }
     elif verb == "/cron" { _show_cron(console); }
@@ -508,7 +486,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/clear" { console.clear(); }
     elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }
     elif verb == "/sandbox" {
-        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); }
+        if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); _sync_toolbar(); }
         else { console.print("[dim]  usage: /sandbox <off|jail|docker>   (currently " + str(workspace_info()["sandbox"]) + ")[/dim]"); }
     }
     elif verb in ["/remember", "/teach"] {
@@ -522,7 +500,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     }
     elif verb == "/model" {
         mp = rest.split(" ", 1);
-        if len(mp) == 2 { console.print("[green]  ✓[/green] [dim]" + str(configure(str(mp[0]).strip() + "_model", str(mp[1]).strip())) + "[/dim]"); }
+        if len(mp) == 2 { console.print("[green]  ✓[/green] [dim]" + str(configure(str(mp[0]).strip() + "_model", str(mp[1]).strip())) + "[/dim]"); _sync_toolbar(); }
         else { console.print("[dim]  usage: /model <frontier|small|router|chat> <name>[/dim]"); }
     }
     else { console.print("[dim]  unknown command " + verb + " — /help[/dim]"); }
@@ -534,15 +512,18 @@ def _handle_slash(console: any, cmd: str) -> bool {
 # ---------------------------------------------------------------------------
 def chat_repl() {
     console = Console();
-    session = _make_session();
-    _install_hooks(console, session);
+    session = make_session();
+    # approvals get a bare single-line session: no palette, no toolbar, and a
+    # "y" typed there never lands in the chat history file.
+    _install_hooks(console, make_plain_session());
+    _sync_toolbar();
     _banner(console);
     # colour the prompt so each user turn stands out from the reply block above it
     user_prompt = chr(27) + "[38;5;141msigil" + chr(27) + "[0m " + chr(27) + "[1m›" + chr(27) + "[0m ";
     while True {
         line = "";
         try {
-            line = _prompt(session, user_prompt);
+            line = prompt_text(session, user_prompt);
         } except EOFError as e {
             console.print();
             break;
@@ -574,7 +555,7 @@ def chat_repl() {
 # ---------------------------------------------------------------------------
 def setup_wizard() {
     console = Console();
-    session = _make_session();
+    session = make_plain_session();
     console.print();
     console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
     console.print();
@@ -589,7 +570,7 @@ def setup_wizard() {
         hint = ("  [" + default + "]") if default else "  (optional)";
         console.print("  [cyan]" + question + "[/cyan][dim]" + hint + "[/dim]");
         val = "";
-        try { val = str(_prompt(session, "  › ")).strip(); }
+        try { val = str(prompt_text(session, "  › ")).strip(); }
         except EOFError as e { console.print(); return; }
         except KeyboardInterrupt as e { console.print(); return; }
         if (not val) and default { val = default; }
@@ -607,7 +588,7 @@ def setup_wizard() {
 # ---------------------------------------------------------------------------
 def config_menu() {
     console = Console();
-    session = _make_session();
+    session = make_plain_session();
     fields = [
         ["name", "agent name"],
         ["persona", "voice / character it speaks with"],
@@ -643,7 +624,7 @@ def config_menu() {
         console.print();
         console.print(t);
         choice = "";
-        try { choice = str(_prompt(session, "edit # (blank = done) › ")).strip(); }
+        try { choice = str(prompt_text(session, "edit # (blank = done) › ")).strip(); }
         except EOFError as e { console.print(); return; }
         except KeyboardInterrupt as e { return; }
         if choice in ["", "0", "q", "done", "exit"] { return; }
@@ -651,7 +632,7 @@ def config_menu() {
         if (idx < 0) or (idx >= len(fields)) { console.print("[dim]  no such option[/dim]"); continue; }
         fk = fields[idx][0];
         newval = "";
-        try { newval = str(_prompt(session, "  " + fk + " = ")).strip(); }
+        try { newval = str(prompt_text(session, "  " + fk + " = ")).strip(); }
         except EOFError as e { console.print(); return; }
         except KeyboardInterrupt as e { continue; }
         if not newval { continue; }
