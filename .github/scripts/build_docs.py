@@ -116,7 +116,114 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 footer{border-top:1px solid var(--line);margin-top:70px;padding:34px 24px 46px}
 .foot-inner{max-width:1080px;margin:0 auto;display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:14px}
 .foot-inner a{color:var(--muted)} .foot-inner a:hover{color:var(--text)}
+
+/* in-article banner card: rendered natively (HTML/SVG) instead of a PNG,
+   so it stays crisp, theme-matched, and the mark animates like the hero */
+.post-banner-wrap{margin:28px 0}
+.post-banner{
+  display:flex;align-items:center;justify-content:space-between;gap:28px;
+  border:1px solid rgba(139,92,246,.35);border-radius:16px;padding:28px 32px;
+  background:
+    radial-gradient(420px 260px at 85% 15%, rgba(139,92,246,.22), transparent 60%),
+    radial-gradient(340px 240px at 8% 95%, rgba(34,211,238,.1), transparent 62%),
+    linear-gradient(180deg,#12121d,#0d0d16);
+  box-shadow:0 14px 50px -18px rgba(139,92,246,.45);
+  transition:border-color .15s ease;
+}
+.post-banner:hover{border-color:var(--violet)}
+.pb-copy{min-width:0}
+.pb-logo{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-weight:700;letter-spacing:.18em;font-size:13px;color:var(--text);margin-bottom:14px}
+.pb-logo svg{width:22px;height:22px;display:block}
+.pb-title{font-size:clamp(21px,3.4vw,29px);font-weight:700;letter-spacing:-.03em;color:var(--text);line-height:1.2}
+.pb-title em{font-style:italic;background:linear-gradient(100deg,var(--violet) 10%,var(--cyan) 90%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.pb-pipeline{font-family:var(--mono);font-size:13px;color:var(--faint);margin-top:10px}
+.pb-pill{display:inline-flex;align-items:center;margin-top:18px;font-family:var(--mono);font-size:12.5px;color:var(--violet);border:1px solid rgba(139,92,246,.4);background:rgba(139,92,246,.1);padding:6px 13px;border-radius:100px}
+.post-banner:hover .pb-pill{color:var(--cyan);border-color:rgba(34,211,238,.5)}
+.pb-mark{flex:0 0 auto}
+.pb-mark svg{width:132px;height:132px;display:block;filter:drop-shadow(0 0 26px rgba(139,92,246,.4))}
+.pb-mark .ring{animation:pbspin 60s linear infinite;transform-box:view-box;transform-origin:center}
+.pb-mark .hex{animation:pbspin 42s linear infinite reverse;transform-box:view-box;transform-origin:center}
+.pb-mark .tri{animation:pbspin 30s linear infinite;transform-box:view-box;transform-origin:center}
+@keyframes pbspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.pb-mark *{animation:none !important}}
+@media (max-width:620px){
+  .post-banner{flex-direction:column-reverse;align-items:flex-start;gap:18px;padding:22px 20px}
+  .pb-mark svg{width:96px;height:96px}
+}
+
+/* fenced code blocks get the landing page's terminal-card chrome: dots,
+   a label, a copy button, and light tinting for shell commands */
+article .code{border:1px solid var(--line);border-radius:13px;background:#0a0a12;margin:0 0 18px;overflow:hidden}
+article .code-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+article .code .dots{display:flex;gap:6px;margin-right:4px}
+article .code .dots i{width:11px;height:11px;border-radius:50%;display:block}
+article .code .dots i:nth-child(1){background:#ff5f57}
+article .code .dots i:nth-child(2){background:#febc2e}
+article .code .dots i:nth-child(3){background:#28c840}
+article .code .lbl{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.03em}
+article .code .copy-btn{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:7px;padding:4px 10px;cursor:pointer;transition:.15s}
+article .code .copy-btn:hover{color:var(--text);border-color:var(--violet)}
+article .code pre{border:0;border-radius:0;margin:0;background:none}
+article .code pre .c{color:var(--faint)}
+article .code pre .k{color:var(--violet)}
+article .code pre .s{color:#4ade80}
+article .code pre .p{color:#f5c451}
 """
+
+# copy-to-clipboard for the dressed code blocks; appended to post pages only
+COPY_JS = """<script>
+document.querySelectorAll('.code .copy-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var code = btn.closest('.code').querySelector('pre').innerText;
+    navigator.clipboard.writeText(code).then(function(){
+      var t = btn.textContent; btn.textContent = 'Copied \\u2713';
+      setTimeout(function(){ btn.textContent = t; }, 1400);
+    });
+  });
+});
+</script>"""
+
+CODE_BLOCK_RE = re.compile(
+    r'<pre><code(?: class="language-([\w-]+)")?>(.*?)</code></pre>', re.S
+)
+SHELL_LANGS = {"bash", "sh", "shell", "zsh", "console"}
+
+
+def tint_shell(code: str) -> str:
+    """Light, conservative tinting for shell snippets: comments, quoted
+    strings, flags, and the leading command word. Operates on the already
+    HTML-escaped code text."""
+    lines = []
+    for line in code.split("\n"):
+        if line.lstrip().startswith("#"):
+            lines.append(f'<span class="c">{line}</span>')
+            continue
+        line = re.sub(r"(&quot;.*?&quot;)", r'<span class="s">\1</span>', line)
+        line = re.sub(r"(?<=[\s=])(--?[A-Za-z][\w-]*)", r'<span class="p">\1</span>', line)
+        line = re.sub(r"^([A-Za-z./][\w./-]*)", r'<span class="k">\1</span>', line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def dress_code_blocks(body: str) -> str:
+    """Wrap every fenced code block in the landing page's terminal-card
+    chrome. Mermaid blocks were already rewritten by render() and don't
+    match here."""
+    def repl(m: re.Match) -> str:
+        lang, code = m.group(1), m.group(2)
+        if lang in SHELL_LANGS:
+            label, code = "your terminal", tint_shell(code)
+        else:
+            label = lang or "code"
+        return (
+            '<div class="code"><div class="code-head">'
+            '<div class="dots"><i></i><i></i><i></i></div>'
+            f'<span class="lbl">{label}</span>'
+            '<button class="copy-btn" type="button">Copy</button></div>'
+            f"<pre><code>{code}</code></pre></div>"
+        )
+
+    return CODE_BLOCK_RE.sub(repl, body)
 
 BLOG_POST_PAGE = """<!doctype html>
 <html lang="en">
@@ -270,7 +377,7 @@ def build_blog() -> int:
             "date": d,
             "date_display": f"{d:%B} {d.day}, {d.year}",
             "readtime": max(1, round(len(body_md.split()) / 200)),
-            "body": render(body_md),
+            "body": dress_code_blocks(render(body_md)),
         })
     posts.sort(key=lambda x: x["date"], reverse=True)
 
@@ -279,7 +386,7 @@ def build_blog() -> int:
     esc = html_mod.escape
     for post in posts:
         hero_site_path = post["hero"].replace("../", "")
-        (out_dir / f"{post['slug']}.html").write_text(BLOG_POST_PAGE.format(
+        page_html = BLOG_POST_PAGE.format(
             css=BLOG_CSS,
             title=esc(post["title"]),
             description=esc(post["description"]),
@@ -288,7 +395,10 @@ def build_blog() -> int:
             author=esc(post["author"]),
             readtime=post["readtime"],
             body=post["body"],
-        ))
+        )
+        (out_dir / f"{post['slug']}.html").write_text(
+            page_html.replace("</body>", COPY_JS + "\n</body>")
+        )
 
     cards = "\n".join(
         f'''  <a class="post-card" href="{post['slug']}.html">
