@@ -1310,3 +1310,50 @@ test "a carry named summary is a recognized deliverable" {
     src = transpile_ir(ir, "digester3");
     assert 'summary={_artifact_text(self.summary)}' in src, src[-1500:];
 }
+
+# A plain-scalar value that itself contains a colon — a lifted digest/format line
+# like `doc: Title : <title>` — used to raise ScannerError ("mapping values are
+# not allowed here") straight out of yaml.safe_load, crashing the whole compile
+# to an empty module. _load_ir now quotes-and-retries on failure.
+glob COLON_IR: str = """name: hn-demo
+walker:
+  carries:
+    stories: { type: list }
+knowledge:
+  - id: k1
+    doc: Title : <title>
+  - id: k2
+    doc: Score : <score> points | Comments: <descendants>
+""";
+
+test "a colon-bearing plain scalar parses instead of crashing the compile" {
+    ir = _load_ir(COLON_IR);
+    kn = ir.get("knowledge");
+    assert isinstance(kn, list) and len(kn) == 2, str(ir);
+    # the colon-bearing values survive verbatim, just parsed as strings now
+    assert str(kn[0]["doc"]) == "Title : <title>", str(kn[0]);
+    assert str(kn[1]["doc"]) == "Score : <score> points | Comments: <descendants>", str(kn[1]);
+}
+
+test "the quote-and-retry never reshapes already-valid IR" {
+    # a URL value (colon NOT followed by space) and a block scalar full of colons
+    # both parse on the first pass, so the repair must leave them exactly as-is
+    ir = _load_ir("""name: ok
+tools:
+  fetch: { url: http://example.com/x }
+knowledge:
+  - id: k1
+    doc: |
+      Title : <title>
+      Why : because
+""");
+    assert str(_dict(ir.get("tools")).get("fetch").get("url")) == "http://example.com/x", str(ir);
+    assert "Title : <title>" in str(ir.get("knowledge")[0]["doc"]), str(ir);
+}
+
+test "an unrepairable IR still degrades to an empty dict, never raises" {
+    # `_load_ir` is called bare (no try) inside _transpile — a genuinely broken
+    # doc must yield {} (an empty module), not an exception that unwinds compile
+    ir = _load_ir("name: x\n  : : : \n\t\tbad: [unclosed");
+    assert isinstance(ir, dict), str(type(ir));
+}
