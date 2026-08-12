@@ -85,17 +85,27 @@ test "clean_verdict strips model decoration so a HIT stays a HIT" {
     assert clean_verdict("clean_csv or hackernews_relevant_posts", known) == "clean_csv or hackernews_relevant_posts";
 }
 
-test "tier accessors return the LIVE binding, not an import-time copy" {
+test "tier accessors track awaken()'s rebind" {
     # `import from` copies a glob's binding at import time: a module that
     # imported `router` directly kept the env-default Model (ollama qwen)
     # forever, and awaken()'s rebind never reached it — cron fires called
     # ollama on a machine whose every configured tier was claude-cc. The
-    # accessors execute in sigil_core, so they must track the current glob:
-    # a fresh read of the module's globals AFTER awaken() must be the same
-    # object the accessors hand out.
+    # accessors execute in sigil_core, so a config change followed by
+    # awaken() must be visible through them. (Behavioral on purpose: the
+    # import-copy identity itself differs across jac releases.)
+    keep_claude = claude_mode();
+    use_claude_code(False);   # the claude-mode override would rewrite our test names
+    soul = awaken();
+    keep_r = soul.router_model;
+    keep_f = soul.frontier_model;
+    soul.router_model = "test-provider/rebound-router";
+    soul.frontier_model = "test-provider/rebound-frontier";
     awaken();
-    import from .sigil_core { router as router_now, small as small_now, frontier as frontier_now }
-    assert cur_router() is router_now;
-    assert cur_small() is small_now;
-    assert cur_frontier() is frontier_now;
+    assert getattr(cur_router(), "model_name", "") == "test-provider/rebound-router";
+    assert getattr(cur_frontier(), "model_name", "") == "test-provider/rebound-frontier";
+    # restore so later tests in this process see the original config
+    soul.router_model = keep_r;
+    soul.frontier_model = keep_f;
+    use_claude_code(keep_claude);
+    awaken();
 }
