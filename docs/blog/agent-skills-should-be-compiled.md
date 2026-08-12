@@ -14,7 +14,23 @@ Consider a skill that tells an agent to run the complete test suite, inspect the
 
 The issue is not necessarily that the model misunderstood the task. The issue is that **the procedure exists only as text inside the model's context**.
 
-[![SIGIL skill compiler: Turn SKILL.md into a runnable agent harness](../assets/blog/skill-compiler-banner.png)](https://sigilagent.com)
+<div class="post-banner-wrap">
+<a class="post-banner" href="https://sigilagent.com" aria-label="SIGIL, the skill compiler: don't prompt the skill, compile it — sigilagent.com">
+<div class="pb-copy">
+<div class="pb-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#a78bfa" stroke-width="1.6"><polygon points="16,3 28,10 28,22 16,29 4,22 4,10"/><path d="M16 3 L16 16 M28 10 L16 16 M28 22 L16 16 M16 29 L16 16 M4 22 L16 16 M4 10 L16 16"/></g><circle cx="16" cy="16" r="2.6" fill="#22d3ee"/></svg>SIGIL</div>
+<div class="pb-title">Don't prompt the skill. <em>Compile</em> it.</div>
+<div class="pb-pipeline">SKILL.md&nbsp;&nbsp;→&nbsp;&nbsp;AG-IR&nbsp;&nbsp;→&nbsp;&nbsp;agent.jac</div>
+<span class="pb-pill">sigilagent.com&nbsp;→</span>
+</div>
+<div class="pb-mark"><svg viewBox="0 0 260 260" aria-hidden="true">
+<defs><radialGradient id="pbcore" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#22d3ee"/><stop offset="100%" stop-color="#8b5cf6"/></radialGradient></defs>
+<g class="ring" stroke="rgba(139,92,246,.35)" fill="none" stroke-width="1"><circle cx="130" cy="130" r="118" stroke-dasharray="3 7"/></g>
+<g class="hex"><g stroke="#a78bfa" stroke-width="1.6" fill="none" opacity=".85"><polygon points="130,28 218,79 218,181 130,232 42,181 42,79"/><path d="M130 28 L130 130 M218 79 L130 130 M218 181 L130 130 M130 232 L130 130 M42 181 L130 130 M42 79 L130 130"/></g><g fill="#8b5cf6"><circle cx="130" cy="28" r="6"/><circle cx="218" cy="79" r="6"/><circle cx="218" cy="181" r="6"/><circle cx="130" cy="232" r="6"/><circle cx="42" cy="181" r="6"/><circle cx="42" cy="79" r="6"/></g></g>
+<g class="tri"><path d="M130 66 L186 162 L74 162 Z" fill="none" stroke="#22d3ee" stroke-width="1.4" opacity=".7"/></g>
+<circle cx="130" cy="130" r="11" fill="url(#pbcore)"/>
+</svg></div>
+</a>
+</div>
 
 ## The rise of `SKILL.md`
 
