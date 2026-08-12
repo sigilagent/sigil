@@ -29,7 +29,8 @@ import from jaclang.byllm.lib { Model, ModelPool }
 # here so every existing `import from .sigil { ... }` keeps resolving.
 import from .sigil_core {
     _find_skill,
-    FRONTIER_NAME, SMALL_NAME, ROUTER_NAME, frontier, small, router, CLAUDE_TIERS,
+    FRONTIER_NAME, SMALL_NAME, ROUTER_NAME, CLAUDE_TIERS,
+    cur_frontier, cur_small, cur_router,
     WORKDIR, CONTRACT, ETHOS, PROMPT_MODE, classify,
     Embodies, Knows, Provides, Remembers, Owns, Anchored, Crystallized, Ran, MutatedFrom,
     Soul, Spec, McpServer, Memory, Registry, TaskGraph, Attempt,
@@ -47,7 +48,7 @@ import from .sigil_core {
 sem name_signature = """Coin a short, stable, kebab-case signature naming the CLASS
 of task (never this one instance): e.g. 'pdf-extract', 'slack-digest',
 'invoice-parse', 'csv-to-chart'. Two tasks of the same kind must get the same name.""";
-def name_signature(task: str) -> str by router();
+def name_signature(task: str) -> str by cur_router()();
 
 sem author_agir = """You are the frontier compiler. Emit a COMPLETE AG-IR (the
 YAML-with-frontmatter contract below) that a compiler lowers to a runnable OSP agent
@@ -75,20 +76,20 @@ emit a raw `::py::` block, and never leave an unescaped `:` inside an unquoted v
 Prefer an embodied `command:` (a runnable shell command) over inline code.
 
 Return ONLY the AG-IR text (starting with the '---' frontmatter), no commentary.""";
-def author_agir(intent: str, task: str, ethos: str, tools: str, contract: str) -> str by frontier();
+def author_agir(intent: str, task: str, ethos: str, tools: str, contract: str) -> str by cur_frontier()();
 
 sem fix_agir = """The PRIOR AG-IR failed to compile with the given ERROR. Return a CORRECTED
 AG-IR that is VALID YAML and conforms to the CONTRACT — fix only what the error indicates
 (commonly: a code body that must become a `field: |` block scalar or a quoted string, an
 unescaped colon, or a bad indent). Return ONLY the AG-IR text.""";
-def fix_agir(prior_agir: str, error: str, contract: str) -> str by frontier();
+def fix_agir(prior_agir: str, error: str, contract: str) -> str by cur_frontier()();
 
 sem revise_agir = """Revise the PRIOR AG-IR so the compiled agent ALSO handles the new
 TASK it failed or under-covered, given the FAILURE signal. Preserve everything that
 works; extend types/tools/operations minimally and surgically. Keep the same top-level
 name/signature. Honor the given ETHOS and conform to the given AG-IR CONTRACT. Return
 ONLY the full revised AG-IR text.""";
-def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: str) -> str by frontier();
+def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: str) -> str by cur_frontier()();
 
 # ---------------------------------------------------------------------------
 # The persistent agent graph. There are NO config files and NO markdown — the
@@ -232,7 +233,7 @@ def lint_skill(source: str, name: str = "") -> dict {
     import from .compiler.ai.spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
     import from .compiler.ai.lint { lint_findings }
     awaken();
-    pin_lift_llm(frontier);
+    pin_lift_llm(cur_frontier());
     body = strip_frontmatter(source);
     nm = name if name else agir_name(source);
     sr = extract_spec(body, nm);
@@ -268,7 +269,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     if (not agent) and (fe not in ["legacy", "lift", "staged"]) {
         return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask, pre_spec);
     }
-    pin_all_lift_llms(frontier);
+    pin_all_lift_llms(cur_frontier());
     if fe == "staged" { os.environ["SIGIL_STAGED"] = "1"; }
     if agent {
         # `--agent`: keep the grounded spec loop and the gate battery, but let a
@@ -313,7 +314,7 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     import from .compiler.ai.raise2 { raise2, explain2, pin_raise2_llms }
     import from .compiler.ai.eject { eject_program, write_program }
     import from .compiler.ai.report { strict_mode }
-    pin_raise2_llms(frontier);
+    pin_raise2_llms(cur_frontier());
     rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec);
 
     findings: list = [];
@@ -348,6 +349,23 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
             "warnings": rr.warnings, "eject": ejected, "env": [], "par": [], "explain": note};
 }
 
+
+def clean_verdict(raw: str, known: list[str]) -> str {
+    # The router's verdict is matched EXACTLY against known signatures, but
+    # models decorate answers — "`sig`", quotes, a trailing period, a full
+    # sentence. An exact matcher then reads a perfect HIT as a MISS and the
+    # run detours into a fresh compile. Strip the decoration; if the reply is
+    # prose that names exactly one known signature, take that signature.
+    s = str(raw).strip();
+    for q in ["`", "\"", "'"] { s = s.replace(q, ""); }
+    s = s.strip().rstrip(".");
+    if (s in known) or (s == "NONE") or s.startswith("MUTATE:") { return s; }
+    hits = [k for k in known if k in s];
+    if len(hits) == 1 {
+        return ("MUTATE:" + hits[0]) if ("MUTATE" in s.upper()) else hits[0];
+    }
+    return s;
+}
 
 def select_target(reg: Registry, compiled_lib: list[TaskGraph], verdict: str, task: str) -> TaskGraph {
     # HIT -> existing procedure; PARTIAL -> mutate it; MISS -> compile a new one.
@@ -407,7 +425,7 @@ walker solve {
             verdict = str(self.skill);
             self.trace += "route -> " + verdict + " (forced)\n";
         } else {
-            verdict = classify(self.task, known) if known else "NONE";
+            verdict = clean_verdict(classify(self.task, known), known) if known else "NONE";
             self.trace += "route -> " + verdict + "\n";
         }
 

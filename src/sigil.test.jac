@@ -67,3 +67,45 @@ test "verbose: off by default, togglable, and SIGIL_VERBOSE wins for one run" {
     assert "off" in configure("verbose", "off");
     assert not verbose_mode();
 }
+
+test "clean_verdict strips model decoration so a HIT stays a HIT" {
+    known = ["hackernews_relevant_posts", "clean_csv"];
+    # the live failure: sonnet wrapped the signature in backticks and the
+    # exact-matcher read a perfect HIT as a MISS
+    assert clean_verdict("`hackernews_relevant_posts`", known) == "hackernews_relevant_posts";
+    assert clean_verdict("  NONE \n", known) == "NONE";
+    assert clean_verdict("'clean_csv'.", known) == "clean_csv";
+    assert clean_verdict("MUTATE:`clean_csv`", known) == "MUTATE:clean_csv";
+    # prose naming exactly one known signature resolves to that signature
+    assert clean_verdict("The right skill is hackernews_relevant_posts.", known) == "hackernews_relevant_posts";
+    assert clean_verdict("This needs a MUTATE of clean_csv to fit.", known) == "MUTATE:clean_csv";
+    # ambiguous or unknown replies pass through untouched (select_target
+    # already treats them as a MISS)
+    assert clean_verdict("gibberish", known) == "gibberish";
+    assert clean_verdict("clean_csv or hackernews_relevant_posts", known) == "clean_csv or hackernews_relevant_posts";
+}
+
+test "tier accessors track awaken()'s rebind" {
+    # `import from` copies a glob's binding at import time: a module that
+    # imported `router` directly kept the env-default Model (ollama qwen)
+    # forever, and awaken()'s rebind never reached it — cron fires called
+    # ollama on a machine whose every configured tier was claude-cc. The
+    # accessors execute in sigil_core, so a config change followed by
+    # awaken() must be visible through them. (Behavioral on purpose: the
+    # import-copy identity itself differs across jac releases.)
+    keep_claude = claude_mode();
+    use_claude_code(False);   # the claude-mode override would rewrite our test names
+    soul = awaken();
+    keep_r = soul.router_model;
+    keep_f = soul.frontier_model;
+    soul.router_model = "test-provider/rebound-router";
+    soul.frontier_model = "test-provider/rebound-frontier";
+    awaken();
+    assert getattr(cur_router(), "model_name", "") == "test-provider/rebound-router";
+    assert getattr(cur_frontier(), "model_name", "") == "test-provider/rebound-frontier";
+    # restore so later tests in this process see the original config
+    soul.router_model = keep_r;
+    soul.frontier_model = keep_f;
+    use_claude_code(keep_claude);
+    awaken();
+}

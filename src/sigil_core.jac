@@ -222,6 +222,17 @@ def _resolve_alias(soul: Soul, name: str) -> str {
     return str(soul.model_aliases.get(name, name));
 }
 
+# Live views of the tier bindings, for OTHER modules. A `import from` of the
+# `frontier`/`small`/`router` globs copies the binding at import time: the
+# importer keeps the module-load Model (the env-default names — ollama qwen,
+# gpt-5) forever, and awaken()'s rebind never reaches it. That is how a cron
+# fire ended up calling ollama on a machine whose every configured tier was
+# claude-cc (the graph config was right; the frozen import copy won). These
+# accessors execute HERE, so they always return the currently-bound tier.
+def cur_frontier() -> any { return frontier; }
+def cur_small() -> any { return small; }
+def cur_router() -> any { return router; }
+
 def use_claude_code(on: bool = True) {
     # Flip every tier onto Claude Code. Call BEFORE awaken() — that is where the
     # tiers bind. Also arms the compiler's escalation path: with Claude Code
