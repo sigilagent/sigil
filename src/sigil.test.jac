@@ -109,3 +109,31 @@ test "tier accessors track awaken()'s rebind" {
     use_claude_code(keep_claude);
     awaken();
 }
+
+test "next_version lands a re-registration ABOVE the existing lineage" {
+    reg = Registry();
+    assert next_version(reg, "csv-clean") == 1;
+    reg +>:Crystallized:+> TaskGraph(signature="csv-clean", intent="", agir="", module="", version=1);
+    reg +>:Crystallized:+> TaskGraph(signature="csv-clean", intent="", agir="", module="", version=13);
+    reg +>:Crystallized:+> TaskGraph(signature="other-skill", intent="", agir="", module="", version=99);
+    # a fresh compile of an existing signature must be routable: above v13,
+    # not a shadowed duplicate v1 that latest_by_sig can never pick
+    assert next_version(reg, "csv-clean") == 14;
+    assert next_version(reg, "brand-new") == 1;
+}
+
+test "lineage_src recovers the original skill document across versions" {
+    reg = Registry();
+    assert lineage_src(reg, "hn-watch") == "";
+    reg +>:Crystallized:+> TaskGraph(signature="hn-watch", intent="", agir="", module="", version=1, skill_src="# the original SKILL.md");
+    reg +>:Crystallized:+> TaskGraph(signature="hn-watch", intent="", agir="", module="", version=2, skill_src="");
+    reg +>:Crystallized:+> TaskGraph(signature="hn-watch", intent="", agir="", module="", version=3, skill_src="");
+    # v2/v3 (mutation-era) lost the source; the lineage still knows it
+    assert lineage_src(reg, "hn-watch") == "# the original SKILL.md";
+    # a newer version WITH a source wins over the older one
+    reg +>:Crystallized:+> TaskGraph(signature="hn-watch", intent="", agir="", module="", version=4, skill_src="# amended SKILL.md");
+    assert lineage_src(reg, "hn-watch") == "# amended SKILL.md";
+    # other signatures never bleed in
+    reg +>:Crystallized:+> TaskGraph(signature="other", intent="", agir="", module="", version=9, skill_src="# other doc");
+    assert lineage_src(reg, "hn-watch") == "# amended SKILL.md";
+}
