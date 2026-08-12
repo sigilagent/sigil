@@ -67,3 +67,35 @@ test "verbose: off by default, togglable, and SIGIL_VERBOSE wins for one run" {
     assert "off" in configure("verbose", "off");
     assert not verbose_mode();
 }
+
+test "clean_verdict strips model decoration so a HIT stays a HIT" {
+    known = ["hackernews_relevant_posts", "clean_csv"];
+    # the live failure: sonnet wrapped the signature in backticks and the
+    # exact-matcher read a perfect HIT as a MISS
+    assert clean_verdict("`hackernews_relevant_posts`", known) == "hackernews_relevant_posts";
+    assert clean_verdict("  NONE \n", known) == "NONE";
+    assert clean_verdict("'clean_csv'.", known) == "clean_csv";
+    assert clean_verdict("MUTATE:`clean_csv`", known) == "MUTATE:clean_csv";
+    # prose naming exactly one known signature resolves to that signature
+    assert clean_verdict("The right skill is hackernews_relevant_posts.", known) == "hackernews_relevant_posts";
+    assert clean_verdict("This needs a MUTATE of clean_csv to fit.", known) == "MUTATE:clean_csv";
+    # ambiguous or unknown replies pass through untouched (select_target
+    # already treats them as a MISS)
+    assert clean_verdict("gibberish", known) == "gibberish";
+    assert clean_verdict("clean_csv or hackernews_relevant_posts", known) == "clean_csv or hackernews_relevant_posts";
+}
+
+test "tier accessors return the LIVE binding, not an import-time copy" {
+    # `import from` copies a glob's binding at import time: a module that
+    # imported `router` directly kept the env-default Model (ollama qwen)
+    # forever, and awaken()'s rebind never reached it — cron fires called
+    # ollama on a machine whose every configured tier was claude-cc. The
+    # accessors execute in sigil_core, so they must track the current glob:
+    # a fresh read of the module's globals AFTER awaken() must be the same
+    # object the accessors hand out.
+    awaken();
+    import from .sigil_core { router as router_now, small as small_now, frontier as frontier_now }
+    assert cur_router() is router_now;
+    assert cur_small() is small_now;
+    assert cur_frontier() is frontier_now;
+}
