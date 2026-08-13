@@ -265,8 +265,8 @@ def gate_env_binding(ir_text: str) -> list[str] {
     pr = probe_manifest(mf);
     for m in list(pr["missing_py"]) {
         issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(m[2])]) + "] import '" + str(m[0])
-            + "' — not importable in this runtime. Bind it (pip install " + str(m[1])
-            + ") or ship the module with the agent bundle.");
+            + "' — not importable in this runtime. Bind it (jac -m pip install " + str(m[1])
+            + " — plain pip targets a different interpreter) or ship the module with the agent bundle.");
     }
     for b in list(pr["missing_bin"]) {
         issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(b[1])]) + "] shell out to '" + str(b[0])
