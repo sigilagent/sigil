@@ -25,9 +25,17 @@ Three exports:
 
 The compile-time probe feeds gate G7 (ai/gates.jac); the emitted preflight
 re-probes at `run()` entry on the EXECUTION host — SkillRT's install-time /
-run-time split. The preflight fails LOUD (stderr + AGIR_PROGRESS) and never
-raises; auto-binding (pip install via a real python) is opt-in via
-SIGIL_ENV_AUTOBIND=1, because the compile must never mutate a host silently.
+run-time split. Imports resolve in the hermetic rt-closure interpreter, so a
+missing module cannot be fixed from OUTSIDE the artifact (#149: the agent's
+`pip install` lands in an interpreter the closure never sees; under `jac run`
+`sys.executable` is the jac binary, and `jac -m pip` IS the closure's pip).
+The preflight therefore remediates by default: it installs missing modules
+into the artifact-local `.jac/pydeps` beside the module via the closure's own
+pip and rejoins that dir to sys.path on every run — the artifact owns its
+runtime environment, mutating only its own directory, never the host.
+SIGIL_ENV_AUTOBIND=0 opts out. Whatever still cannot bind fails LOUD (stderr
++ AGIR_PROGRESS, naming the probed interpreter and a copy-pasteable install
+command) and never raises.
 """
 
 import sys;
@@ -252,10 +260,13 @@ def manifest_empty(manifest: dict) -> bool {
 
 def preflight_src(manifest: dict) -> str {
     # The runtime half: `_ENV_MANIFEST` + `_env_preflight()` as a ::py:: block
-    # for the lowered module. Re-probes on the EXECUTION host at run() entry,
-    # reports loud (stderr + AGIR_PROGRESS), never raises, and only ever
-    # installs under SIGIL_ENV_AUTOBIND=1 (idempotent: probe -> install ->
-    # re-probe). "" when there is nothing to bind.
+    # for the lowered module. Re-probes on the EXECUTION host at run() entry
+    # and BINDS what is missing into the artifact-local `.jac/pydeps` via the
+    # closure's own pip (default on; SIGIL_ENV_AUTOBIND=0 opts out) — the
+    # closure interpreter is the only one these imports resolve in, and pydeps
+    # rejoins sys.path before every probe, so binds persist across runs.
+    # Reports loud (stderr + AGIR_PROGRESS), never raises. "" when there is
+    # nothing to bind.
     if manifest_empty(manifest) { return ""; }
     lite: dict = {"py": {}, "bin": []};
     for kv in manifest.get("py", {}).items() {
@@ -269,10 +280,20 @@ def preflight_src(manifest: dict) -> str {
         "_ENV_MANIFEST = " + json.dumps(lite),
         "def _env_preflight():",
         "    # Environment binding (SkillRT AOT pass 2): probe every dependency the",
-        "    # compiled tools need BEFORE the walker runs. A missing import inside an",
-        "    # ability kills the walker mid-graph after tokens are spent; a missing",
-        "    # dep must fail loud at entry instead. Never raises; auto-bind is opt-in.",
-        "    import importlib.util as _ilu, shutil as _shu, os as _os, sys as _sys, json as _jsn",
+        "    # compiled tools need BEFORE the walker runs. Imports resolve in the",
+        "    # hermetic closure interpreter, so nothing installed from OUTSIDE the",
+        "    # artifact can fix a missing module (#149) — remediate here instead:",
+        "    # bind into ./.jac/pydeps beside this module (mutates the artifact,",
+        "    # never the host). SIGIL_ENV_AUTOBIND=0 opts out. Never raises.",
+        "    import importlib as _il, importlib.util as _ilu, shutil as _shu, os as _os, sys as _sys, json as _jsn",
+        "    try:",
+        "        _here = _os.path.dirname(_os.path.abspath(__file__))",
+        "    except Exception:",
+        "        _here = _os.getcwd()",
+        "    _bind = _os.path.join(_here, \".jac\", \"pydeps\")",
+        "    if _os.path.isdir(_bind) and _bind not in _sys.path:",
+        "        _sys.path.insert(0, _bind)",
+        "        _il.invalidate_caches()",
         "    miss_py, miss_bin = [], []",
         "    for _m, _p in _ENV_MANIFEST.get(\"py\", {}).items():",
         "        _ok = False",
@@ -285,17 +306,30 @@ def preflight_src(manifest: dict) -> str {
         "    for _b in _ENV_MANIFEST.get(\"bin\", []):",
         "        if _shu.which(_b) is None:",
         "            miss_bin.append(_b)",
-        "    if miss_py and _os.environ.get(\"SIGIL_ENV_AUTOBIND\", \"\"):",
+        "    if miss_py and _os.environ.get(\"SIGIL_ENV_AUTOBIND\", \"\") != \"0\":",
+        "        # bind with _sys.executable — under jac that IS the jac binary, and",
+        "        # `jac -m pip` is the closure's own pip. `which python3` would install",
+        "        # into an interpreter these imports never see (the #149 dead end).",
         "        import subprocess as _sp",
-        "        _py = _shu.which(\"python3\") or _sys.executable",
-        "        for _m, _p in list(miss_py):",
+        "        _bound, _can = [], True",
+        "        try:",
+        "            _os.makedirs(_bind, exist_ok=True)",
+        "        except Exception:",
+        "            _can = False",
+        "        if _can and _bind not in _sys.path:",
+        "            _sys.path.insert(0, _bind)",
+        "        for _m, _p in (list(miss_py) if _can else []):",
         "            try:",
-        "                _r = _sp.run([_py, \"-m\", \"pip\", \"install\", \"--quiet\", _p], timeout=600)",
+        "                _r = _sp.run([_sys.executable, \"-m\", \"pip\", \"install\", \"--quiet\", \"--upgrade\", \"--target\", _bind, _p], timeout=600)",
+        "                _il.invalidate_caches()",
         "                if _r.returncode == 0 and _ilu.find_spec(_m) is not None:",
         "                    miss_py.remove((_m, _p))",
+        "                    _bound.append(_p)",
         "            except Exception:",
         "                _bind_failed = True",
-        "    notes = [\"python module '%s' missing (bind: pip install %s)\" % _mp for _mp in miss_py]",
+        "        if _bound:",
+        "            _sys.stderr.write(\"ENV_PREFLIGHT: bound %s into %s\\n\" % (\", \".join(_bound), _bind))",
+        "    notes = [\"python module '%s' missing (probed %s; bind: %s -m pip install --target %s %s)\" % (_m, _sys.executable, _sys.executable, _bind, _p) for _m, _p in miss_py]",
         "    notes += [\"command '%s' not on PATH\" % _b for _b in miss_bin]",
         "    if notes:",
         "        _sys.stderr.write(\"ENV_PREFLIGHT: \" + \"; \".join(notes) + \"\\n\")",

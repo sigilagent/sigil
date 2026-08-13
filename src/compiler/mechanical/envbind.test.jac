@@ -86,3 +86,25 @@ test "preflight source embeds the manifest and the probe function" {
     # empty manifest -> no block at all (the module stays untouched)
     assert preflight_src({"py": {}, "bin": {}}) == "";
 }
+
+test "preflight binds closure-visibly: artifact-local target, closure pip, honest message" {
+    # the #149 contract: a missing module is remediated into a dir the CLOSURE
+    # interpreter imports from, installed by the closure's own pip — and the
+    # residual failure message names the probed interpreter with a working command
+    ir = _ir_with_tools({"t": {"body": "import docx\nreturn 1"}});
+    src = preflight_src(extract_manifest(ir));
+    # installs land beside the module and rejoin sys.path each run
+    assert "pydeps" in src;
+    assert "--target" in src;
+    assert "_sys.path.insert" in src;
+    assert "invalidate_caches" in src;
+    # the installer is _sys.executable (`jac -m pip` = the closure's pip);
+    # `which python3` is the interpreter the closure never sees
+    assert '_sp.run([_sys.executable, "-m", "pip"' in src;
+    assert 'which("python3")' not in src;
+    # bind is default-on (mutates only the artifact); =0 opts out
+    assert '"SIGIL_ENV_AUTOBIND", ""' in src and '!= "0"' in src;
+    # the failure note is copy-pasteable remediation, not the pip dead end
+    assert "probed %s" in src;
+    assert "python-docx" in src;
+}
