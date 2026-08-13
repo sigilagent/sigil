@@ -279,11 +279,13 @@ def skill_description(text: str) -> str {
 }
 
 # Drop a precompiled OSP module into crystallized/ and return its new path.
-def install_osp(src_path: str, signature: str, workdir: str = ".") -> str {
+def install_osp(src_path: str, signature: str, workdir: str = ".", version: int = 1) -> str {
     d = Path(workdir) / CRYSTAL_DIR;
     d.mkdir(parents=True, exist_ok=True);
     (d / "__init__.jac").touch(exist_ok=True);
-    dst = d / f"{module_name(signature, 1)}.jac";
+    # versioned filename: re-registering an existing signature must not
+    # silently overwrite the module file an older TaskGraph still points at
+    dst = d / f"{module_name(signature, version)}.jac";
     dst.write_text(Path(src_path).read_text());
     return str(dst);
 }

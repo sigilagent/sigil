@@ -111,6 +111,35 @@ def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origi
     return tg;
 }
 
+def next_version(reg: Registry, sig: str) -> int {
+    # Registering a signature that already exists must land ABOVE it. A fresh
+    # compile used to persist at a hardcoded v1 under an existing v13 — real on
+    # the graph, but latest_by_sig can never route to it, so the recompile the
+    # user just paid for stayed invisible while the drifted lineage kept firing.
+    top = 0;
+    for tg in [reg -->][?:TaskGraph] {
+        if (tg.signature == sig) and (tg.version > top) { top = tg.version; }
+    }
+    return top + 1;
+}
+
+def lineage_src(reg: Registry, sig: str) -> str {
+    # The ORIGINAL skill document, wherever it survives in the lineage: the
+    # newest version of this signature still carrying a non-empty skill_src.
+    # Mutations used to drop the source, so once one mutation landed, every
+    # later relearn re-authored from a one-line task paraphrase — each
+    # generation drifting further from the skill that was actually written.
+    best_v = 0;
+    src = "";
+    for tg in [reg -->][?:TaskGraph] {
+        if (tg.signature == sig) and str(tg.skill_src).strip() and (tg.version > best_v) {
+            best_v = tg.version;
+            src = tg.skill_src;
+        }
+    }
+    return src;
+}
+
 def _transpile_error(e: any) -> str {
     # What the repair pass is handed. A bare `TypeError: list indices must be
     # integers or slices, not dict` names no section and no shape, so repair
@@ -178,7 +207,11 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
         raise RuntimeError("mutate '" + tg.signature + "' v" + str(v) + ": revised AG-IR did not compile: " + str(low.get("error", "unknown")));
     }
     path = write_module(str(low["osp"]), tg.signature, v, WORKDIR);
-    nt = _persist(reg, tg.signature, tg.intent, str(low["agir"]), path, "mutation", v);
+    # The source document rides every generation: a mutation that dropped
+    # skill_src cut the whole lineage off from the skill it was compiled from,
+    # and every later relearn re-authored from a task paraphrase instead.
+    src = tg.skill_src if str(tg.skill_src).strip() else lineage_src(reg, tg.signature);
+    nt = _persist(reg, tg.signature, tg.intent, str(low["agir"]), path, "mutation", v, skill_src=src);
     nt +>:MutatedFrom:+> tg;
     return nt;
 }
@@ -195,13 +228,15 @@ def register_skill(source: str, kind: str) -> dict {
         # source is raw AG-IR text — compile only, no model call.
         sig = agir_name(source);
         osp = transpile_ir(source, sig);
-        path = write_module(osp, sig, 1, WORKDIR);
-        tg = _persist(reg, sig, "registered AG-IR", source, path, "registered-agir", 1);
+        v = next_version(reg, sig);
+        path = write_module(osp, sig, v, WORKDIR);
+        tg = _persist(reg, sig, "registered AG-IR", source, path, "registered-agir", v);
     } elif kind == "osp" {
         # source is a path to a precompiled OSP .jac module — drop it in.
         sig = agir_name(source);
-        path = install_osp(source, sig, WORKDIR);
-        tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", 1);
+        v = next_version(reg, sig);
+        path = install_osp(source, sig, WORKDIR, v);
+        tg = _persist(reg, sig, "registered OSP module", "", path, "registered-osp", v);
     } else {
         # source is SKILL.md text — ONE compile pathway: the exact gated
         # compiler the `compile` verb runs (raise2 by default; SIGIL_FRONTEND
@@ -267,7 +302,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     #   SIGIL_FRONTEND=legacy|staged   the pre-raise2 lift() (staged forces the spine pipeline)
     fe = frontend if frontend else os.environ.get("SIGIL_FRONTEND", "");
     if (not agent) and (fe not in ["legacy", "lift", "staged"]) {
-        return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask, pre_spec);
+        return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask, pre_spec,
+                               next_version(reg, sig));
     }
     pin_all_lift_llms(cur_frontier());
     if fe == "staged" { os.environ["SIGIL_STAGED"] = "1"; }
@@ -288,10 +324,11 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                 "compile_errors": lr.compile_errors, "repairs": lr.repairs,
                 "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
     }
-    path = write_module(lr.module_src, sig, 1, WORKDIR);
+    v = next_version(reg, sig);
+    path = write_module(lr.module_src, sig, v, WORKDIR);
     desc = skill_description(source);
     tg = _persist(reg, sig, desc if desc else "compiled from SKILL.md (AI compiler)",
-                  lr.ir_text, path, "compiled-skill", 1, skill_src=source);
+                  lr.ir_text, path, "compiled-skill", v, skill_src=source);
     ejected = "";
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
@@ -526,8 +563,11 @@ def _recompile(reg: Registry, tg: TaskGraph, hint: str = "", origin: str = "rele
     # task-born procedure (no source document) re-authors via the frontier
     # task compiler. Guidance rides the skill text itself, so the spec loop
     # grounds it like any other obligation.
-    if str(tg.skill_src).strip() {
-        src = tg.skill_src;
+    # Prefer the ORIGINAL skill document even when this version lost it: walk
+    # the lineage for the newest surviving skill_src before falling back to
+    # task-born re-authoring, which only paraphrases.
+    src = tg.skill_src if str(tg.skill_src).strip() else lineage_src(reg, tg.signature);
+    if str(src).strip() {
         if hint { src = src + "\n\n## Relearn guidance\n" + hint + "\n"; }
         r = _compile_raise2(src, tg.signature, reg, False, "", None, "", False, None, None,
                             tg.version + 1, origin);
