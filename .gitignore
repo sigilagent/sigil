@@ -242,3 +242,9 @@ _site/
 
 # demo output produced by running examples/csv-clean
 examples/csv-clean/cleaned.csv
+
+# skillsbench pilot (local-only: clones, compiled artifacts, key material)
+/skillsbench/
+/pilot/
+/_raise2_pdf.*
+/spin_probe.jac
