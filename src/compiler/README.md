@@ -74,3 +74,53 @@ Architecture + the finding→design rationale: `agentic-voodoo/docs/agir-lift-ha
 
 Tests: `jac test src/compiler/ai/spec_loop.jac` (MockLLM-driven convergence) and
 `jac test src/compiler/ai/gates.jac` (live compile-oracle round-trip).
+
+## Field lessons (SkillsBench pilot, 2026-08-13)
+
+A paired benchmark (OpenHands agent, six tasks, three delivery baselines and
+six compiled-arm variants) measured where compiled skills actually fail in an
+agent's hands. Each lesson below is enforced in code where marked; the rest
+are design obligations for the authoring/gate layers.
+
+**Delivery (enforced in this tree):**
+- Emit a structured calling convention from the IR's input carries
+  (`--<input>=<value>` → `params` → spawn binding, `_EJ_PARAM_KEYS` manifest).
+  Free-text-only invocation forces a lossy NL round-trip that small models
+  fail (`<field>=task` stuffing). — `mechanical/compiler.jac`, `ai/eject.jac`
+- Bound inputs imply a runnable call: never block on the interactive
+  ask-prompt when params were provided. — `ai/eject.jac`
+- Every ejected artifact is also an MCP tool (`--mcp` stdio serve mode,
+  schema from the manifest, description from the skill's imperative surface,
+  in-process `run()`, stdout kept protocol-clean). Delivered as native tools,
+  the pilot's artifacts went 6/6 where prose delivery scored 0–2/6.
+  — `ai/eject.jac`
+- A served tool's outputs must land in the caller's workspace
+  (`SIGIL_CALLER_CWD`), not the tool's private workdir. — `ai/eject.jac`
+- A tool param no rescue rung can bind must never silently lower to a null
+  argument; pathish names are shape-matched (`*_path`, `*_file`, …) and the
+  residue warns at compile time. — `mechanical/compiler.jac`
+
+**Obligation classification (partly enforced):**
+- ASSUMED-optional obligations that are INPUT/OUTPUT steps get an elevated
+  warning: an agent that may skip loading its inputs cannot be faithful in
+  practice. — `ai/spec_loop.jac`
+- Clarify questions about already-negated quotes ("Avoid X") carry a
+  double-negation note so 'do'/'dont' answers cannot flip the rule.
+  — `ai/spec_loop.jac`
+- Open: register mining (rules living in code comments, ❌/DO markers, and
+  narrative sequence get demoted); a library-style skill with no imperative
+  procedure compiles SILENTLY into an invented workflow and should warn.
+
+**Emitted-tool robustness (design obligations, validated by hand-tunes):**
+- Callers improvise parameter dialects (lists vs scalars, object sources,
+  renamed keys) and workflows (batch, incremental append, prose-only);
+  a tool needs one authoritative accumulated spec that every input shape
+  normalizes into — the artifact's internal model is the right engine for
+  the prose case.
+- Destructive fallbacks must be structurally impossible (never demo data
+  over an existing file); errors must be actionable (name available vs
+  requested columns and the fixing move).
+- Skills whose success criteria are structural (grammars, spreadsheets,
+  lexical scoring) should compile to deterministic code, not `by llm`
+  stages — cheaper and correct; the pilot's tool-model sweep showed the
+  internal model then becomes a price knob (gpt-4o-mini internals: 5/6).

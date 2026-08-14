@@ -57,6 +57,7 @@ test "the ejected program parses direct args and carries the MCP server" {
     assert "\"--mcp\" in [str(a) for a in _ej_raw]" in prog;      # serve-mode entry branch
     assert "_ej_params[" in prog;                                  # --key=value binds walker inputs
     assert "params=_ej_params" in prog;                            # ...and reaches run()
+    assert "SIGIL_CALLER_CWD" in prog;                             # outputs anchor to the caller's workspace
 }
 
 test "the ejected program itself passes jac check, and lands executable" {
