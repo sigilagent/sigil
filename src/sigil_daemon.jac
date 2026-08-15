@@ -35,7 +35,7 @@ import platform;
 import subprocess;
 import from pathlib { Path }
 import from .sigil_runtime {
-    sigil_home, run_dir, pid_path, read_pid, pid_alive, write_pidfile,
+    sigil_home, run_dir, log_dir, pid_path, read_pid, pid_alive, write_pidfile,
     clear_pidfile, process_running, project_root, entry_script, _jac_bin
 }
 import from .cron { tick_isolated, next_due_ms, cron_list, cron_daemon_running }
@@ -53,16 +53,6 @@ glob _WARNED: dict[str, bool] = {};   # channels already reported as unconfigure
 # ---------------------------------------------------------------------------
 # Where the daemon leaves its traces
 # ---------------------------------------------------------------------------
-def log_dir() -> str {
-    d = os.path.join(sigil_home(), "log");
-    try {
-        Path(d).mkdir(parents=True, exist_ok=True);
-    } except Exception as e {
-        return d;
-    }
-    return d;
-}
-
 def log_path() -> str {
     return os.path.join(log_dir(), "daemon.log");
 }

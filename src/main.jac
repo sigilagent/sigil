@@ -20,6 +20,7 @@ import sys;
 import time;
 import sqlite3;
 import threading;
+import signal;
 import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
@@ -49,6 +50,9 @@ import from src.sigil_runtime { _jac_bin, read_pid, project_root }
 import from src.sigil_errors { install_error_log, friendly_llm_error, log_error, error_log_path }
 import from src.sigil_api { JSON_MARKER }
 import from src.eject_agent { eject_agent, carries_compiler }
+import from src.sigil_serve {
+    serve_start, serve_stop, serve_status, serve_logs, mark_serving, unmark_serving
+}
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
     scheduler_running,
@@ -564,6 +568,20 @@ def serve_observatory(port: str) {
     aligned = _align_guest_root(data);
     cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac"), "--port", port];
     p = subprocess.Popen(cmdline, cwd=proj);
+    # Record ourselves as THE observatory, whether this is a terminal run or the
+    # detached child of `serve start` — otherwise `serve status` would only ever
+    # see servers started one particular way.
+    mark_serving(port);
+    # `serve stop` sends SIGTERM here, not to the jac child. Without a handler the
+    # default action kills this supervisor outright and leaves that child holding
+    # the port — the orphan `stop` would then have to hunt down. Reap it instead.
+    def _bye(signum: any, frame: any) -> None {
+        try { p.terminate(); } except Exception as _e { }
+        unmark_serving();
+        sys.exit(0);
+    }
+    try { signal.signal(int(signal.SIGTERM), _bye); }
+    except Exception as _sigerr { }
     try {
         # First-ever start: the server creates the auth store moments after
         # boot; align the guest root as soon as it lands so run #1 shares the
@@ -579,6 +597,7 @@ def serve_observatory(port: str) {
         p.terminate();
         p.wait();
     }
+    unmark_serving();
 }
 
 with entry:__main__ {
@@ -625,7 +644,42 @@ with entry:__main__ {
     }
 
     if (cmd == "serve") or (cmd == "observatory") {
-        serve_observatory(_arg(argv, 1));
+        # `serve [port]` still runs in the foreground (Ctrl-C to stop) — the
+        # subcommands below give it the daemon's lifecycle instead.
+        sub = _arg(argv, 1);
+        if sub == "start" {
+            r = serve_start(_arg(argv, 2));
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            if r.get("starting") {
+                print("observatory starting — pid " + str(r["pid"]) + ", " + str(r["url"]));
+                print("  building the web client; it answers in ~30s (sigil serve status)");
+            } else {
+                print("observatory started — pid " + str(r["pid"]) + ", " + str(r["url"]));
+            }
+            print("  log : " + str(r["log"]) + "   (sigil serve logs)");
+            print("  stop: sigil serve stop");
+        } elif sub == "stop" {
+            r = serve_stop();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            extra = ("  (also cleared orphan pid " + str(r["orphan"]) + ")") if ("orphan" in r) else "";
+            print("observatory stopped (pid " + str(r["pid"]) + ")" + extra);
+        } elif sub == "status" {
+            s = serve_status();
+            if s["running"] {
+                print("observatory: running — pid " + str(s["pid"]) + ", " + str(s["url"])
+                      + ("   (adopted: not started by `serve start`)" if s["adopted"] else ""));
+            } else {
+                print("observatory: NOT running   (sigil serve start)");
+            }
+            print("  port  : " + str(s["port"]));
+            print("  graph : " + str(s["graph"]));
+            print("  log   : " + str(s["log"]));
+            if s["owner"] { print("  owner : " + str(s["owner"])); }
+        } elif sub == "logs" {
+            print(serve_logs(_to_int(_arg(argv, 2), 40)));
+        } else {
+            serve_observatory(sub);
+        }
     } elif cmd == "solve" {
         task = _arg(argv, 1);
         skill = _arg(argv, 2);
