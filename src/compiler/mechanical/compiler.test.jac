@@ -272,7 +272,10 @@ test "_inname prefers the read-verb filename and skips save-claimed ones" {
 # the way to the walker.
 test "every unproduced input carry is bound at spawn, not just `task`" {
     src = transpile_ir(ACT_PATH_IR, "saver");
-    assert "spawn SaveAgent(task=task, note=task)" in src;
+    # direct args (#argparse): the carry binds from caller params, falling back
+    # to the task text, and the manifest is exported for the calling surface
+    assert "spawn SaveAgent(task=task, note=str(params.get('note', task)))" in src;
+    assert "_EJ_PARAM_KEYS: list = ['note']" in src;
     assert "spawn SaveAgent(task=task);" not in src;
 }
 
@@ -516,9 +519,11 @@ test "a ROUTE guard whose subject is no carry stays permissive" {
 
 test "spawn binding skips produced and non-string carries" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
-    assert "spawn MixedAgent(task=task, src_path=task)" in src;
-    assert "retries=task" not in src;   # int input: the task text is not an int
-    assert "seen=task" not in src;      # produced by peek_it, not by the caller
+    assert "spawn MixedAgent(task=task, src_path=str(params.get('src_path', task)))" in src;
+    assert "retries=task" not in src;     # int input: the task text is not an int
+    assert "retries=str(" not in src;     # nor a caller param bound as str
+    assert "seen=task" not in src;        # produced by peek_it, not by the caller
+    assert "seen=str(" not in src;
 }
 
 # A verify-then-repair skill: a model proposes, code checks six ways, a gate folds

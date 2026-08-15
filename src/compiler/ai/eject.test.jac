@@ -49,6 +49,16 @@ test "eject wraps a compiled module into a shebang'd runnable with a CLI shim" {
     assert prog.count("#!") == 1;
 }
 
+test "the ejected program parses direct args and carries the MCP server" {
+    v = compile_gate(TOY_IR, "note_writer_ej_mcp", check=False);
+    prog = eject_program(v.module_src, "note-writer");
+    assert "def _mcp_serve(" in prog;                              # self-hosted tool server rides along
+    assert "_mcp_serve(run, Model, _ej_keys, \"note-writer\"" in prog;
+    assert "\"--mcp\" in [str(a) for a in _ej_raw]" in prog;      # serve-mode entry branch
+    assert "_ej_params[" in prog;                                  # --key=value binds walker inputs
+    assert "params=_ej_params" in prog;                            # ...and reaches run()
+}
+
 test "the ejected program itself passes jac check, and lands executable" {
     v = compile_gate(TOY_IR, "note_writer_ej2", check=False);
     prog = eject_program(v.module_src, "note-writer");

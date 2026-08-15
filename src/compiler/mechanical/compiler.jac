@@ -2068,7 +2068,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
     types = ir.get("types");
     edges = _list(ir.get("edges"));
     nodes = _list(ir.get("nodes"));
-    out: list = ["def run(task: str, model: Model, skill: str) -> str {", "    llm = model;", ""];
+    out: list = ["def run(task: str, model: Model, skill: str, params: dict = {}) -> str {", "    llm = model;", ""];
     if env {
         # environment binding (SkillRT AOT pass 2): probe the manifest BEFORE
         # the walker runs — a missing dep fails loud here, not mid-graph
@@ -2101,6 +2101,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         # input to the task text, which is what the invocation actually carries.
         wcar = (ir.get("walker") or {}).get("carries");
         extra_in: list = [];
+        pkeys: list = [];
         for kv in _items(wcar) {
             k = str(kv[0]);
             meta = kv[1];
@@ -2112,9 +2113,15 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             # (e.g. './canvas-fonts'), and the `has` decl is already _safe'd — the
             # spawn kwarg MUST match it or the module is a syntax error (caught
             # live: canvas-design's minted font-dir carry broke its whole compile).
-            extra_in.append(f"{_safe(k)}=task");
+            # Direct args (#argparse): a caller-supplied `--<carry>=<value>` binds
+            # the input verbatim; the task text remains the fallback. This removes
+            # the lossy NL round-trip for callers that already hold the values.
+            sk = _safe(k);
+            pkeys.append(sk);
+            extra_in.append(f"{sk}=str(params.get('{sk}', task))");
         }
         sargs = _j(", ", ["task=task"] + extra_in);
+        out.insert(0, f"glob _EJ_PARAM_KEYS: list = {pkeys};");
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
         out.append("    if not agent.report {");
         out.append("        # loud, not silent: an empty report means the walker stopped at a");
