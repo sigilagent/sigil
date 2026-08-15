@@ -6,7 +6,7 @@ The Observatory has never shown the agent. Measured three ways:
     running server reports `skills: 0, memories: []`
   · `POST /walker/api_teach` returns "remembered" — and the fact appears in no
     anchor in the store, so anything done in the web UI was discarded
-  · `sigil serve` never even ran the guest-root alignment `main.jac` provides,
+  · `sigil serve` never even ran the guest-root alignment `src/main.jac` provides,
     because the launcher exec'd `jac start` directly
 
 Root alignment alone does not fix it: a server booted with `__guest__` already

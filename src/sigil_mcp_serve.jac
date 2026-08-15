@@ -22,7 +22,7 @@ path legitimately prints progress. So the real stdout is dup'd for the protocol
 and `sys.stdout` is repointed at stderr before any skill runs.
 
 Pure Python-runtime work (fd surgery, a dispatch loop), so the body is one
-``::py::`` block; `serve_stdio` is an ordinary module symbol and main.jac passes
+``::py::`` block; `serve_stdio` is an ordinary module symbol and src/main.jac passes
 Sigil's own callables into it.
 """
 
@@ -171,7 +171,7 @@ def serve_stdio(list_skills, run_skill, solve) -> int:
 
     `list_skills() -> list[dict]`, `run_skill(task, signature) -> dict` and
     `solve(task, skill) -> dict` are Sigil's own functions, passed in from
-    main.jac so this module stays free of graph imports.
+    src/main.jac so this module stays free of graph imports.
     """
     # stdout is the wire. Take a private copy of it, then repoint sys.stdout at
     # stderr so that anything Sigil prints while running a skill is diagnostics,

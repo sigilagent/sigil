@@ -302,8 +302,8 @@ Or skip the keys entirely and run on your Claude Code CLI — see
 ## Layout
 
 ```
-main.jac                 CLI entrypoint (compile / solve / chat / serve / …)
-observatory.jac          full-stack server entrypoint — API + web UI
+src/main.jac             CLI entrypoint (compile / solve / chat / serve / …)
+src/observatory.jac      full-stack server entrypoint — API + web UI
 src/
   compiler/              THE COMPILER
     ai/                    LIFT: spec_loop · workflow · flows · assemble · gates · repair · eject · replay

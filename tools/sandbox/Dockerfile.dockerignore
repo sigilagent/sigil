@@ -1,0 +1,14 @@
+# Exclude list for `docker build -f tools/sandbox/Dockerfile .` — the context is the
+# repo root, but BuildKit reads `<dockerfile>.dockerignore` first, so this lives next
+# to the Dockerfile instead of at the repo root. run.sh forces DOCKER_BUILDKIT=1.
+.git
+.jac
+__pycache__
+crystallized
+observability
+*.session
+*.session.*
+bin
+web/node_modules
+.jac/client
+tools/sandbox/out

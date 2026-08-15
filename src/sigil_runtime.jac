@@ -83,16 +83,17 @@ def repo_root() -> str {
     return str(_here());
 }
 
-# The project directory (this module lives in `src/`) and its CLI entry point.
-# Both are absolute so a subprocess can be spawned from anywhere and still land
-# on the same graph — the store is resolved relative to the working directory,
-# so `cwd` is not a detail here, it decides which agent you are talking to.
+# The project directory (this module lives in `src/`) and its CLI entry point
+# (`src/main.jac`, next to this module). Both are absolute so a subprocess can be
+# spawned from anywhere and still land on the same graph — the store is resolved
+# relative to the working directory, so `cwd` is not a detail here, it decides
+# which agent you are talking to.
 def project_root() -> str {
     return str(_here().parent);
 }
 
 def entry_script() -> str {
-    return str(_here().parent / "main.jac");
+    return str(_here() / "main.jac");
 }
 
 # ---------------------------------------------------------------------------

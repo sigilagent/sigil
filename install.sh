@@ -94,7 +94,7 @@ else
   [ -n "$src" ] || die "unexpected tarball layout."
   rm -rf "$SIGIL_HOME"; mv "$src" "$SIGIL_HOME"; rm -rf "$tmp"
 fi
-[ -f "$SIGIL_HOME/main.jac" ] || die "Sigil source looks incomplete (no main.jac in $SIGIL_HOME)."
+[ -f "$SIGIL_HOME/src/main.jac" ] || die "Sigil source looks incomplete (no src/main.jac in $SIGIL_HOME)."
 
 # ---- 3. runtime dependencies -------------------------------------------------
 # Bare `jac install` provisions everything in jac.toml's [dependencies] — notably

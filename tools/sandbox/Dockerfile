@@ -21,12 +21,12 @@ RUN pip install --no-cache-dir reportlab openpyxl || true
 
 WORKDIR /app
 COPY . /app
-RUN chmod +x sandbox/entrypoint.sh
+RUN chmod +x tools/sandbox/entrypoint.sh
 
 # non-root: the model-written script runs as this user, with no host access
 RUN useradd -m runner && mkdir -p /app/out && chown -R runner /app
 USER runner
 
 # the whole test sequence runs in ONE container so the session persists
-ENTRYPOINT ["bash", "sandbox/entrypoint.sh"]
+ENTRYPOINT ["bash", "tools/sandbox/entrypoint.sh"]
 CMD ["write a haiku about the ocean and save it to haiku.txt"]

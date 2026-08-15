@@ -79,21 +79,21 @@ login() {
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  # NOT `jac start` directly: main.jac's serve pins the working directory and
+  # NOT `jac start` directly: src/main.jac's serve pins the working directory and
   # aligns the server's guest root before the server boots. Exec'ing jac start
   # here skipped both, which is one of the reasons the Observatory showed an
   # empty agent.
-  serve)      exec "$JAC" run "$HERE/main.jac" -- serve "${SIGIL_PORT:-8199}" ;;
+  serve)      exec "$JAC" run "$HERE/src/main.jac" -- serve "${SIGIL_PORT:-8199}" ;;
   login)      login ;;
   update)     echo "Updating Sigil to the latest release…"
               exec bash -c 'curl -fsSL "${SIGIL_INSTALL_URL:-https://github.com/sigilagent/sigil/releases/latest/download/install.sh}" | bash' ;;
   help|"")    awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
   *)
-    # LOCAL by default — run the full CLI straight through main.jac, no server.
+    # LOCAL by default — run the full CLI straight through src/main.jac, no server.
     # Export SIGIL_URL to talk to a running gateway (sigil serve) instead.
     if [ -z "${SIGIL_URL+set}" ]; then
       [ "$cmd" = "local" ] && { cmd="${1:-help}"; shift || true; }
-      exec "$JAC" run "$HERE/main.jac" -- "$cmd" "$@"
+      exec "$JAC" run "$HERE/src/main.jac" -- "$cmd" "$@"
     fi
     # GATEWAY mode — SIGIL_URL is set: POST to the running agent's HTTP endpoints.
     case "$cmd" in
