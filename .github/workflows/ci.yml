@@ -67,10 +67,10 @@ jobs:
       # Guards the drift above: the test suite never imports the chat REPL, so a
       # missing REPL dependency was invisible until a user ran `sigil chat`. This
       # boots the real CLI entry point and quits at the prompt — it exits non-zero
-      # if any of sigil_chat.jac's imports are unprovisioned. No API key needed:
+      # if any of src/sigil_chat.jac's imports are unprovisioned. No API key needed:
       # /exit returns before a model is ever called.
       - name: Smoke-test the chat REPL
-        run: printf '/exit\n' | jac run main.jac -s "$RUNNER_TEMP/ci.session" -- chat
+        run: printf '/exit\n' | jac run src/main.jac -s "$RUNNER_TEMP/ci.session" -- chat
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
       # test (present and future) automatically; report_fix_tests.jac is a standalone

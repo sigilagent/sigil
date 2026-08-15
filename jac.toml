@@ -2,7 +2,7 @@
 name = "sigil"
 version = "0.4.5"
 description = "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction."
-entry-point = "observatory.jac"
+entry-point = "src/observatory.jac"
 
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
 # plugin, so there is NO `pip install byllm`. Import it as
@@ -14,8 +14,8 @@ entry-point = "observatory.jac"
 # into the project venv.
 [dependencies]
 pyyaml = "latest"
-# The interactive `chat` REPL (sigil_chat.jac) renders with rich; its line editor
-# (sigil_input.jac) is prompt_toolkit — multiline input, "/" command palette,
+# The interactive `chat` REPL (src/sigil_chat.jac) renders with rich; its line editor
+# (src/sigil_input.jac) is prompt_toolkit — multiline input, "/" command palette,
 # history suggestions, status toolbar — active only when stdin is a TTY.
 rich = "~=15.0"
 prompt_toolkit = "~=3.0"
@@ -35,8 +35,8 @@ httpx = "latest"
 [plugins.byllm.model]
 default_model = "gpt-4o-mini"
 
-# One graph, two doors: `jac run main.jac` (CLI) persists to .jac/data/sigil.db
-# (the project-name default), and this points `jac start observatory.jac` at the
+# One graph, two doors: `jac run src/main.jac` (CLI) persists to .jac/data/sigil.db
+# (the project-name default), and this points `jac start src/observatory.jac` at the
 # SAME file — so skills taught in the CLI show up live in the Observatory.
 # Overridden by MONGODB_URI if set (both sides then need it).
 [plugins.scale.database]
@@ -65,7 +65,7 @@ vis-data = "^7.1.9"
 vite = "^6.4.1"
 "@vitejs/plugin-react" = "^4.2.1"
 # The Observatory is styled with Tailwind v4 (same setup as the AG-IR studio):
-# global.css does `@import "tailwindcss"`, the vite plugin below compiles it.
+# src/global.css does `@import "tailwindcss"`, the vite plugin below compiles it.
 tailwindcss = "^4.0.0"
 "@tailwindcss/vite" = "^4.0.0"
 
@@ -76,7 +76,7 @@ lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 
 # The Observatory's dedicated port — same 8199 the `sigil` launcher's
 # SIGIL_PORT defaults to. `sigil serve` claims it strictly (_claim_port);
-# a bare `jac start observatory.jac` also lands here, but only `sigil serve`
+# a bare `jac start src/observatory.jac` also lands here, but only `sigil serve`
 # guards against jac's silent port-in-use fallback.
 [serve]
 port = 8199

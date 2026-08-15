@@ -5,7 +5,7 @@
 set -uo pipefail
 cd /app
 S=/tmp/prom.session
-Q() { jac run main.jac -s "$S" -- "$@" 2>&1 | grep -vE "plugin 'jac-desktop|^ *[Ww]arning|W0064|Builtins module"; }
+Q() { jac run src/main.jac -s "$S" -- "$@" 2>&1 | grep -vE "plugin 'jac-desktop|^ *[Ww]arning|W0064|Builtins module"; }
 
 TASK="${1:-write a haiku about the ocean and save it to haiku.txt}"
 
@@ -22,6 +22,6 @@ Q library
 
 # lift any artifacts the crystallized script wrote into the mounted out/ dir
 mkdir -p /app/out
-find /app -maxdepth 1 -type f -newer /app/main.jac \
+find /app -maxdepth 1 -type f -newer /app/src/main.jac \
   \( -name '*.txt' -o -name '*.md' -o -name '*.pdf' -o -name '*.png' -o -name '*.csv' -o -name '*.json' -o -name '*.html' \) \
   -exec cp -f {} /app/out/ \; 2>/dev/null || true

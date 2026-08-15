@@ -248,3 +248,10 @@ examples/csv-clean/cleaned.csv
 /pilot/
 /_raise2_pdf.*
 /spin_probe.jac
+
+# artifacts the containerized loop writes back to the host
+/tools/sandbox/out/
+
+# local drafts and research notes that live at the repo root while in progress
+/blog.md
+/hackernews_relevant.txt

@@ -12,7 +12,7 @@ The contract here:
   * the ERROR LOG (`$SIGIL_HOME/log/error.log`, next to the daemon's log) gets
     everything — timestamps, context, tracebacks — for actual debugging.
 
-`install_error_log()` runs once per process (main.jac's entry): it re-points
+`install_error_log()` runs once per process (src/main.jac's entry): it re-points
 loguru (byLLM's logger) and litellm's stdlib loggers at the file and switches
 litellm's banner off. `friendly_llm_error()` maps a caught exception to the
 sentence; `log_error()` appends the full story to the file.

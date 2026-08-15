@@ -127,7 +127,7 @@ That had never been true. Measured three ways: the CLI reported 9 skills while
 `POST /walker/api_soul` on the running server reported `skills: 0`; a `teach`
 through the server answered "remembered" and the fact landed in no anchor in the
 store, so anything done in the web UI was thrown away; and `sigil serve` exec'd
-`jac start` directly, skipping the guest-root alignment `main.jac` performs.
+`jac start` directly, skipping the guest-root alignment `src/main.jac` performs.
 
 Root alignment alone does not fix it — a server booted with `__guest__` already
 pointing at the superroot still reads an empty Soul. So the endpoints stop owning
