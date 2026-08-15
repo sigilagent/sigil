@@ -1,9 +1,9 @@
 name: CI
 
-# Run the Jac test suite on every PR into main (and on main itself).
+# Run the Jac test suite on every PR (any base — stacked PRs included) and
+# on main itself.
 on:
   pull_request:
-    branches: [main]
     paths-ignore:
       - "docs/**"
       - "*.md"

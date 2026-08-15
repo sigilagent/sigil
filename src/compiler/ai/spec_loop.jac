@@ -349,7 +349,8 @@ def flag_ambiguous(skill: str, rs: RuleSet) -> list[ClarifyItem] {
                      + " (no must/always, no never, no may/optional, no if/when) — the reading is a guess",
                 question='The skill says: "' + q[:180]
                      + '". Should the agent ALWAYS do this (Do), do it ONLY when the task calls for'
-                     + " it (Maybe), or NEVER (Don't)?"));
+                     + " it (Maybe), or NEVER (Don't)?"
+                     + _negation_note(q)));
         } elif r.modality == Modality.FORBIDDEN {
             if r.kind == RuleKind.KNOWLEDGE {
                 # kind/modality CONFLICT — marker presence does NOT settle this:
@@ -371,7 +372,8 @@ def flag_ambiguous(skill: str, rs: RuleSet) -> list[ClarifyItem] {
                      + " mis-tagged example or capability, not a real prohibition",
                 question='The skill says: "' + q[:180]
                      + '". Must the agent NEVER do this (Don\'t), MAY it when relevant (Maybe), or'
-                     + " must it ALWAYS (Do)?"));
+                     + " must it ALWAYS (Do)?"
+                     + _negation_note(q)));
         }
     }
     return out;
@@ -392,6 +394,22 @@ def skill_quality_lines(sr: SpecResult) -> list[str] {
     lines.append("  → make each explicit in SKILL.md ('always/must', 'may/optionally', or 'never'),"
                  + " or compile with --clarify to answer inline.");
     return lines;
+}
+
+
+def _negation_note(q: str) -> str {
+    # A quote that is ITSELF a prohibition ("Avoid X", "\u274c Don't Y") makes
+    # the modality question a double negative — 'do' (always avoid) and 'dont'
+    # (never do the avoided thing) collapse into the same intent, and a HIL or
+    # scripted answerer can flip the rule by accident (caught live: the pilot's
+    # clarify driver defaulted 'do' on "Avoid manual Haversine implementations").
+    ql = q.strip().lower();
+    for neg in ["avoid", "don't", "do not", "never", "\u274c"] {
+        if ql.startswith(neg) or ql.startswith("\u274c " + neg) {
+            return " (Note: the quoted rule is itself a prohibition — answer about the rule AS WRITTEN; 'dont' confirms it.)";
+        }
+    }
+    return "";
 }
 
 def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[str] {
@@ -415,6 +433,12 @@ def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[s
                      + " (optional) — the skill states no Do/Don't. Re-run with --clarify to set"
                      + " these by hand:");
         for c in demote { warns.append("  ? " + c.rule_id + ': "' + str(c.quote)[:70] + '"'); }
+        io_re = re.compile(r"\b(load|read|open|parse|import|fetch|write|save|output|emit)\b", re.I);
+        io_hits: list = [c for c in demote if io_re.search(str(c.quote))];
+        if io_hits {
+            io_ids = ", ".join([str(c.rule_id) for c in io_hits][:6]);
+            warns.append(f"(!) {len(io_hits)} of the ASSUMED obligations are INPUT/OUTPUT steps ({io_ids}) — an agent that MAY skip loading its inputs or writing its outputs cannot be faithful in practice; clarify these first.");
+        }
     }
     if keep {
         # KNOWLEDGE+FORBIDDEN keeps its modality: with required_shape treating it

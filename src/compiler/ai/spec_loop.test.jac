@@ -143,6 +143,28 @@ test "resolve_ambiguous_default assumes Maybe and warns to re-run with --clarify
     assert any([("amb" in w) for w in warns]);
 }
 
+test "ASSUMED obligations that are I/O steps get the elevated (!) warning" {
+    rs = RuleSet(rules=[
+        Rule(id="r_load", quote="Load test_center_logs.csv into logs_rows", modality=Modality.MANDATORY),
+        Rule(id="r_sort", quote="rank candidates by score", modality=Modality.MANDATORY)
+    ]);
+    items = [
+        ClarifyItem(rule_id="r_load", quote="Load test_center_logs.csv into logs_rows",
+                    reason="tagged MANDATORY but the skill states no modal force"),
+        ClarifyItem(rule_id="r_sort", quote="rank candidates by score",
+                    reason="tagged MANDATORY but the skill states no modal force")
+    ];
+    warns = resolve_ambiguous_default(rs, items);
+    assert any([(w.startswith("(!)") and ("r_load" in w)) for w in warns]);   # the I/O step is called out
+    assert not any([(w.startswith("(!)") and ("r_sort" in w)) for w in warns]);  # the non-I/O step is not
+}
+
+test "clarify questions about already-negated quotes carry the double-negation note" {
+    assert "'dont' confirms it" in _negation_note("Avoid manual Haversine implementations");
+    assert "'dont' confirms it" in _negation_note("Don't iterate through boundary points");
+    assert _negation_note("project to a metric CRS before measuring") == "";
+}
+
 test "apply_clarifications binds a human's Do/Maybe/Don't answer to the rule's modality" {
     rs = RuleSet(rules=[
         Rule(id="a", quote="merge the PDFs", modality=Modality.MANDATORY),

@@ -50,6 +50,14 @@ glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
 # bound reads[0] (the content) to `path` and left `content` None, so every
 # compiled deliverable was a 0-byte file named after its own content (caught
 # live: algorithmic-art wrote an empty file literally called "Organic Fusion").
+def _pathish_param(pl: str) -> bool {
+    # HANDTUNE pdf-1: exact-name matching missed pdf_path/template_path/…,
+    # so their binding fell through every rescue rung to literal None and the
+    # tool died on open(None). Any *_path/*_file/*_dir-shaped name is pathish.
+    return (pl in PATH_PARAMS) or pl.endswith("_path") or pl.endswith("_file")
+        or pl.endswith("_dir") or pl.endswith("_filename");
+}
+
 glob CONTENT_PARAMS: list = ["content", "text", "data", "body", "code",
     "source", "markdown", "html", "payload"];
 
@@ -619,7 +627,7 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
                 if (str(r) in ck) and (not _pathish_carry(r)) { b = "self." + _safe(str(r)); break; }
             }
         }
-        if (b == "None") and (pl in PATH_PARAMS) {
+        if (b == "None") and _pathish_param(pl) {
             for r in rl {
                 if (str(r) in ck) and _pathish_carry(r) { b = "self." + _safe(str(r)); break; }
             }
@@ -627,7 +635,7 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
         # positional fallback — but never hand a NON-pathish read (content) to a
         # path param; that is exactly the misbinding the role pass exists to stop
         if (b == "None") and (i < len(rl)) and (rl[i] in ck)
-           and (not ((pl in PATH_PARAMS) and (not _pathish_carry(rl[i])))) {
+           and (not (_pathish_param(pl) and (not _pathish_carry(rl[i])))) {
             b = "self." + _safe(str(rl[i]));
         }
         # An ACT tool that takes a DESTINATION has no carry to bind it to: the IR
@@ -635,7 +643,7 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
         # tool a null path, which raises inside the generated module. Resolve it
         # the way the no-tool ACT fallback below already does — the filename the
         # task asks for, else a deterministic name off the carry being written.
-        if (b == "None") and write_target and ("task" in ck) and (pl in PATH_PARAMS) {
+        if (b == "None") and write_target and ("task" in ck) and _pathish_param(pl) {
             b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
         }
         # The SENSE twin — the read side of the same hole (caught live: the
@@ -643,8 +651,15 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
         # killed the run). The input filename lives only in the task string;
         # _inname prefers read-verb filenames, so "clean data.csv and save as
         # out.csv" binds data.csv here while the ACT rung above binds out.csv.
-        if (b == "None") and (not write_target) and ("task" in ck) and (pl in PATH_PARAMS) {
+        if (b == "None") and (not write_target) and ("task" in ck) and _pathish_param(pl) {
             b = "_inname(self.task)";
+        }
+        if b == "None" {
+            # every rescue rung missed: the tool will receive a literal None.
+            # Say so at compile time — the pilot's pdf artifact shipped this
+            # exact hole silently and every run died inside pdfplumber.
+            print(f"  (warn) tool param '{p}' has no binding — lowering to None; "
+                  + "the tool will fail unless it tolerates a null argument");
         }
         out.append(b);
         i += 1;
