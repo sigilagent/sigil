@@ -19,6 +19,7 @@ guessed time, so cron.jac can refuse the job at `cron add` instead of firing it
 at some hour nobody asked for.
 """
 
+import os;
 import time;
 import from datetime { datetime, timedelta, timezone }
 
@@ -60,6 +61,84 @@ def human_secs(secs: int) -> str {
     return str(s // 86400) + "d" + str((s % 86400) // 3600) + "h";
 }
 
+glob _DOW_NAMES: list = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+def _hhmm(hour: str, minute: str) -> str {
+    # "9", "5" -> "09:05". Only for concrete single values; "" otherwise.
+    if not (str(hour).isdigit() and str(minute).isdigit()) { return ""; }
+    return str(int(hour)).rjust(2, "0") + ":" + str(int(minute)).rjust(2, "0");
+}
+
+def _dow_num(tok: str) -> str {
+    # A weekday token as its cron number, name or digit alike. "" if neither.
+    t: str = str(tok).strip().lower();
+    if t in _DOWS { return str(_DOWS[t]); }
+    return t if t.isdigit() else "";
+}
+
+def _dow_label(field: str) -> str {
+    # "1" -> "Mon"; "1-5" -> "Mon-Fri"; "1,3" -> "Mon,Wed". "" if not decodable.
+    out: list[str] = [];
+    for raw in str(field).split(",") {
+        part: str = str(raw).strip().lower();
+        if "-" in part {
+            bits: list = part.split("-", 1);
+            a: str = _dow_num(str(bits[0]));
+            b: str = _dow_num(str(bits[1]));
+            if (not a) or (not b) { return ""; }
+            out.append(str(_DOW_NAMES[int(a) % 8]) + "-" + str(_DOW_NAMES[int(b) % 8]));
+        } else {
+            n: str = _dow_num(part);
+            if not n { return ""; }
+            out.append(str(_DOW_NAMES[int(n) % 8]));
+        }
+    }
+    return ",".join(out);
+}
+
+def describe_schedule(kind: str, spec: str, tz: str = "") -> str {
+    # A schedule as a person would say it. `cron · 0 3 * * *` tells you nothing
+    # you can check against a wall clock; "daily at 03:00 America/New_York" does.
+    # Anything this cannot decode falls back to the raw spec rather than guessing.
+    k = str(kind or "").strip();
+    s = str(spec or "").strip();
+    zone = str(tz or "").strip() or local_tz() or "local time";
+    if k == "at" {
+        return "once, at " + fmt_when(parse_at(s));
+    }
+    if k == "every" {
+        try { return "every " + human_secs(int(float(s))); }
+        except Exception as e { return "every " + s + "s"; }
+    }
+    if k != "cron" { return s; }
+    f: list = cron_fields(s);
+    if not f { return s + " (unparseable)"; }
+    f_min: str = str(f[1]);
+    f_hour: str = str(f[2]);
+    f_dom: str = str(f[3]);
+    f_mon: str = str(f[4]);
+    f_dow: str = str(f[5]);
+    at: str = _hhmm(f_hour, f_min);
+    every_day: bool = _open(f_dom) and _open(f_mon) and _open(f_dow);
+    # */n in the hour field, everything below it pinned -> "every n hours"
+    if f_hour.startswith("*/") and f_hour[2:].isdigit() and f_min.isdigit() and every_day {
+        return "every " + f_hour[2:] + "h (at :" + str(int(f_min)).rjust(2, "0") + ") " + zone;
+    }
+    if f_min.startswith("*/") and f_min[2:].isdigit() and _open(f_hour) and every_day {
+        return "every " + f_min[2:] + " minutes";
+    }
+    if not at { return s + " · " + zone; }
+    if every_day { return "daily at " + at + " " + zone; }
+    if _open(f_dom) and _open(f_mon) {
+        d: str = _dow_label(f_dow);
+        if d { return d + " at " + at + " " + zone; }
+    }
+    if _open(f_dow) and _open(f_mon) and f_dom.isdigit() {
+        return "monthly on the " + str(int(f_dom)) + " at " + at + " " + zone;
+    }
+    return s + " · " + zone;
+}
+
 def parse_at(spec: str) -> int {
     # epoch-ms | ISO-8601 | relative ('90s','20m','2h','3d') -> epoch-ms.
     s = (spec or "").strip();
@@ -80,18 +159,39 @@ def parse_at(spec: str) -> int {
 # ---------------------------------------------------------------------------
 # Cron expression evaluation
 # ---------------------------------------------------------------------------
+def local_tz() -> str {
+    # The host's wall-clock zone, as an IANA name ("America/New_York").
+    # "11am" from a person means 11am on THEIR clock: a hardcoded UTC made
+    # `0 11,15 * * *` fire at 07:00 local, and nobody could say why.
+    tz = str(os.getenv("TZ") or "").strip();
+    if tz and ("/" in tz) { return tz; }
+    try {
+        real = str(os.path.realpath("/etc/localtime"));
+        if "zoneinfo/" in real { return real.split("zoneinfo/", 1)[1]; }
+    } except Exception as e {
+        return "";
+    }
+    return "";
+}
+
 def tzinfo_for(tz: str) -> any {
-    # An unknown zone falls back to UTC rather than raising: a job with a typo'd
+    # An EMPTY zone means the host's local wall clock — the default a person
+    # means when they say "9am". Only an explicit "UTC" gets UTC. An unknown
+    # zone falls back to local rather than raising: a job with a typo'd
     # timezone should still run, an hour off, not vanish.
-    name = str(tz or "UTC").strip();
-    if (not name) or (name.upper() == "UTC") {
+    given: str = str(tz or "").strip();
+    if given.upper() == "UTC" {
         return timezone.utc;
+    }
+    name: str = given if given else local_tz();
+    if not name {
+        return None;   # no IANA name resolvable — a naive datetime is local
     }
     try {
         import from zoneinfo { ZoneInfo }
         return ZoneInfo(name);
     } except Exception as e {
-        return timezone.utc;
+        return None;
     }
 }
 
@@ -217,7 +317,7 @@ def _next_minute(d: datetime) -> datetime {
     return d.replace(second=0, microsecond=0) + timedelta(minutes=1);
 }
 
-def cron_next(expr: str, from_ms: int, tz: str = "UTC") -> int {
+def cron_next(expr: str, from_ms: int, tz: str = "") -> int {
     # Next fire strictly after `from_ms`, in epoch-ms. 0 = never (unparseable, or
     # no match inside the search horizon).
     #

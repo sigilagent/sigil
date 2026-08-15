@@ -22,6 +22,7 @@ import os;
 import re;
 import from .toolib { builtin, builtin_names, builtin_catalogue }
 import from .envbind { extract_manifest, preflight_src }
+import from ...sigil_agir_yaml { load_agir }
 import glob;
 import textwrap;
 import traceback;
@@ -215,71 +216,6 @@ def _block_lit(s: any) -> str {
     lead = "\n" if t.startswith("\"") else "";
     tail = "\n" if t.endswith("\"") else "";
     return "\"\"\"" + lead + t + tail + "\"\"\"";
-}
-
-# Relaxer — the hand-authored .ir files use loose YAML (unquoted flow-map values
-# with commas, `key:{` without a space). Quote flat inline mappings line-by-line
-# WITHOUT touching block-scalar code (those lines don't match the field shape).
-def _relax_line(line: str) -> str {
-    ln = re.sub(r"(\S):\{", r"\1: {", line);
-    m: any = re.match(r"^(\s*[\w\".\-]+\s*):\s*\{(.*)\}\s*$", ln);
-    if not m { return ln; }
-    head = str(m.group(1));
-    inner = str(m.group(2));
-    # Already-valid flow maps (quoted values, nested braces) must be left alone.
-    try { yaml.safe_load("{" + inner + "}"); return ln; }
-    except Exception {  }
-    parts: any = re.split(r",(?=\s*[\w\"]+\s*:)", inner);
-    fixed: list = [];
-    for p in parts {
-        if ":" not in p { fixed.append(p.strip()); continue; }
-        kv: any = p.partition(":");
-        k = str(kv[0]).strip();
-        v = str(kv[2]).strip();
-        if v and (v[0] not in "\"'[{") { v = "'" + v.replace("'", "''") + "'"; }
-        fixed.append(f"{k}: {v}");
-    }
-    joined = _j(", ", fixed);
-    return f"{head}: {{ {joined} }}";
-}
-
-def _relax(text: str) -> str {
-    return _j("\n", [_relax_line(l) for l in text.splitlines()]);
-}
-
-# Second-chance relaxer, run ONLY after yaml.safe_load has already failed: the
-# usual culprit is a PLAIN-scalar value that itself contains a colon — a lifted
-# format/doc line like `doc: Title : <title>`, which YAML reads as an illegal
-# nested mapping ("mapping values are not allowed here") and which otherwise
-# crashes the whole compile to an empty module. Quote such values and let the
-# caller retry. Because it fires only on failure, VALID IR is never reshaped.
-# Block-scalar bodies (`key: |` / `key: >`) are left untouched — their colons are
-# already legal YAML, and they only reach here when some OTHER line broke first.
-def _quote_colon_scalars(text: str) -> str {
-    out: list = [];
-    block_indent: int = -1;   # indent of an open `key: |`/`>` block, else -1
-    for line in text.splitlines() {
-        stripped = line.lstrip();
-        indent = len(line) - len(stripped);
-        if block_indent >= 0 {
-            # a blank line or a deeper-indented line is block-scalar content
-            if (stripped == "") or (indent > block_indent) { out.append(line); continue; }
-            block_indent = -1;   # dedented back out of the block scalar
-        }
-        # a key that OPENS a block scalar: `key: |`, `- key: >-`, `key: |2`, …
-        mb: any = re.match(r"^(\s*)(?:-\s+)?[\w\"'.\-]+:\s*[|>][0-9+-]*\s*$", line);
-        if mb { block_indent = len(str(mb.group(1))); out.append(line); continue; }
-        # a mapping line `key: value` (incl. list item `- key: value`)
-        mm: any = re.match(r"^(\s*(?:-\s+)?[\w\"'.\-]+):[ \t]+(\S.*?)[ \t]*$", line);
-        if not mm { out.append(line); continue; }
-        head = str(mm.group(1));
-        val = str(mm.group(2));
-        # already safe: quoted / flow map|seq / anchor|alias|tag, or no inner
-        # colon that YAML would misread (a colon must be followed by space/eol)
-        if (val[0] in "\"'[{&*!") or (not re.search(r":(?:\s|$)", val)) { out.append(line); continue; }
-        out.append(head + ": '" + val.replace("'", "''") + "'");
-    }
-    return _j("\n", out);
 }
 
 # Sanitize a sig param token to a valid Python identifier (sigs sometimes use
@@ -665,40 +601,10 @@ def _shared_helpers() -> str {
 # IR loading
 # ---------------------------------------------------------------------------
 def _load_ir(text: str) -> any {
-    fm: any = {};
-    # Strip a Markdown code fence if the frontier wrapped the AG-IR (e.g. ```yaml … ```).
-    # Chat models like gpt-4o fence code/YAML by default; without this the raw backticks
-    # crash yaml.safe_load and every compilation lowers to an empty module.
-    s = text.strip();
-    if s.startswith("```") {
-        nl = s.find("\n");
-        s = s[nl + 1:] if nl != -1 else "";
-        c = s.rstrip();
-        if c.endswith("```") { s = c[:c.rfind("```")]; }
-        text = s;
-    }
-    body = text;
-    if text.lstrip().startswith("---") {
-        t = text.lstrip();
-        end = t.find("\n---", 3);
-        if end != -1 {
-            fm_text = t[3:end];
-            body = t[end + 4:];
-            try { fm = yaml.safe_load(fm_text) or {}; }
-            except Exception { fm = {}; }
-        }
-    }
-    relaxed = _relax(body);
-    ir: any = {};
-    try { ir = yaml.safe_load(relaxed) or {}; }
-    except Exception as _ir_err {
-        # a colon-bearing plain scalar is the common break — quote and retry once
-        try { ir = yaml.safe_load(_quote_colon_scalars(relaxed)) or {}; }
-        except Exception as _ir_err2 { ir = {}; }
-    }
-    if not isinstance(ir, dict) { ir = {}; }
-    if "_frontmatter" not in ir { ir["_frontmatter"] = fm; }
-    return ir;
+    # Delegates to the shared AG-IR reader — the Observatory parses the same
+    # documents to draw them, and a viewer that disagreed with the compiler about
+    # what parses would render a graph the compiler never built.
+    return load_agir(text);
 }
 
 # ---------------------------------------------------------------------------

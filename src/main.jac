@@ -553,7 +553,11 @@ def serve_observatory(port: str) {
     # (8199 unless overridden) — claimed strictly via _claim_port, never
     # silently moved. jac.toml pins the server's SQLite store to
     # `.jac/data/sigil.db` (the CLI's project db); this handles the root side.
-    proj = os.path.dirname(os.path.abspath(__file__));
+    # project_root(), not this file's own directory: main.jac lives in src/, so
+    # __file__'s dirname is src/ and every path below would hang off it — the
+    # server would be started from src/observatory.jac (which does not exist)
+    # against src/.jac/data (an empty graph), silently.
+    proj = project_root();
     data = os.path.join(proj, ".jac", "data");
     port = str(port) if port else OBSERVATORY_PORT;
     if not _claim_port(port) { return; }
@@ -764,7 +768,7 @@ with entry:__main__ {
         sub = _arg(argv, 1);
         if sub == "add" {
             r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
-                         _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
+                         _arg(argv, 6) if len(argv) > 6 else "", _arg(argv, 7), False);
             if not r.get("ok", True) {
                 print("xx " + str(r["error"]), file=sys.stderr);
                 sys.exit(1);
@@ -1000,6 +1004,15 @@ with entry:__main__ {
             }
             elif name == "cron_tick" { payload["data"] = cron_tick(); }
             elif name == "cron_list" { payload["data"] = cron_list(); }
+            elif name == "cron_runs" { payload["data"] = cron_runs(str(a.get("name", ""))); }
+            elif name == "cron_enable" {
+                payload["data"] = cron_enable(str(a.get("name", "")), bool(a.get("on", True)));
+            }
+            elif name == "cron_remove" { payload["data"] = cron_remove(str(a.get("name", ""))); }
+            elif name == "skill_agir" {
+                import from src.sigil_agir_view { skill_agir }
+                payload["data"] = skill_agir(str(a.get("signature", "")));
+            }
             elif name == "tasks" { payload["data"] = tasks_list(int(a.get("n", 20))); }
             elif name == "hooks" { payload["data"] = hook_list(); }
             elif name == "channels" { payload["data"] = channel_list(); }

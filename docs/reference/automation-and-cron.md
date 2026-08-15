@@ -49,7 +49,7 @@ at 9am email me". The agent calls `schedule_task`, and you manage jobs with
 |---|---|---|
 | `at` | a relative time (`30m`, `2h`, `1d`), ISO timestamp, or epoch-ms | one-shot; auto-deletes after a successful run, retires after a failed one |
 | `every` | interval in **seconds** | `every 3600` = hourly |
-| `cron` | a 5- or 6-field cron expression (+ optional tz) | `0 9 * * *` = 9am daily |
+| `cron` | a 5- or 6-field cron expression (+ optional tz) | `0 9 * * *` = 9am daily, local time |
 
 ### Cron expressions
 
@@ -59,8 +59,18 @@ comma-separated lists of those. Months and weekdays also take names (`jan`, `mon
 Sunday is both `0` and `7`. When day-of-month and day-of-week are both restricted they
 are OR'd, as in every other cron.
 
-The timezone argument applies to `cron` jobs — `sigil cron add digest cron "0 9 * * *"
-"summarize my inbox" America/New_York` fires at 9am New York, DST included.
+### Timezones
+
+A job with no timezone runs on **the host's local wall clock**. `0 9 * * *` means 9am
+where the machine is, which is what a person means when they say "9am".
+
+Pass a zone to pin a job somewhere else — `sigil cron add digest cron "0 9 * * *"
+"summarize my inbox" America/New_York` fires at 9am New York, DST included. `UTC` is
+accepted and honored like any other zone; it is only no longer the silent default.
+
+Jobs created before this behaved differently: they were stored with an explicit `UTC`
+and still fire on UTC. `sigil cron show <name>` prints the zone a job is on, and
+re-adding it without a timezone argument moves it to local time.
 
 An expression Sigil cannot schedule — a typo, or something impossible like
 `0 0 30 2 *` — is **rejected at `cron add`** rather than accepted and quietly fired at

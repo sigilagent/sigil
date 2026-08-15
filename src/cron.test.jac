@@ -22,7 +22,7 @@ test "_schedule_next: each kind resolves through its own arithmetic" {
     ev = CronJob(name="e", kind="every", spec="600");
     assert _schedule_next(ev, base) == base + 600_000;
 
-    cr = CronJob(name="c", kind="cron", spec="0 9 * * *");
+    cr = CronJob(name="c", kind="cron", spec="0 9 * * *", tz="UTC");
     assert _schedule_next(cr, base) == _at(2026, 3, 11, 9, 0);
 
     # tz is not decoration: the same expression fires at a different instant.

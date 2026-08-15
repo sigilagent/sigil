@@ -29,6 +29,7 @@ import from .sigil_core {
 import from .agent { run_task }
 import from .sigil_daemon { scheduler_running }
 import from .sigil_runtime { _jac_bin, entry_script, project_root, commit_now }
+import from .sigil_cron { local_tz }
 import from .channels { message_send }
 import from .sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from .sigil_docs { list_docs, read_doc }
@@ -79,20 +80,6 @@ def _cron_cli(args: list, timeout_s: int = 300) -> str {
     return "\n".join(keep) if keep else "(no output)";
 }
 
-def _local_tz() -> str {
-    # "11am" from the user means 11am on THEIR wall clock. The old hardcoded
-    # "UTC" made `0 11,15 * * *` fire at 07:00 local, and nobody could say why.
-    tz = str(os.getenv("TZ") or "");
-    if tz and ("/" in tz) { return tz; }
-    try {
-        real = str(os.path.realpath("/etc/localtime"));
-        if "zoneinfo/" in real { return real.split("zoneinfo/", 1)[1]; }
-    } except Exception as e {
-        return "UTC";
-    }
-    return "UTC";
-}
-
 sem schedule_task = """Schedule work to run later or on a repeat — the agent's cron.
 `kind`='at' (one-shot) with spec a relative time ('30m','2h','1d'), ISO timestamp, or
 epoch-ms; 'every' with spec = interval in SECONDS; 'cron' with spec a 5-field cron
@@ -104,7 +91,7 @@ sem schedule_task.spec = "The schedule: relative/ISO/epoch for 'at', seconds for
 sem schedule_task.task = "The instruction to execute when the job fires.";
 def schedule_task(name: str, kind: str, spec: str, task: str) -> str {
     _trace("schedule", name + " [" + kind + " " + spec + "]");
-    out = _cron_cli(["add", name, kind, spec, task, _local_tz()]);
+    out = _cron_cli(["add", name, kind, spec, task, local_tz()]);
     if not scheduler_running() {
         # The model has to be able to say this out loud. Answering "scheduled!"
         # while nothing ticks is how a job sat at runs=0 for a week.
