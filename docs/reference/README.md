@@ -20,8 +20,7 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | [channels](channels.md) | Connecting Discord / Telegram / WhatsApp / Slack |
 | [memory-and-skills](memory-and-skills.md) | Durable memory and the compiled-skill library |
 | [models](models.md) | Model tiers, aliases, fallbacks, and providers |
-| [claude-code](claude-code.md) | Running on your Claude Code CLI, and serving compiled skills to it |
-| [claude-code-setup](claude-code-setup.md) | Step-by-step setup for both directions, with verification and troubleshooting |
+| [claude-code](claude-code.md) | Running on your Claude Code CLI, and serving compiled skills to it — setup, costs, limits |
 
 From the CLI: `sigil docs` lists topics, `sigil docs <topic>` prints one. In the chat
 REPL: `/docs` and `/docs <topic>`.

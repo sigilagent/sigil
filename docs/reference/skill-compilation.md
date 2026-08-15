@@ -23,7 +23,7 @@ flowchart LR
     GATES -->|pass| OUT["agent.jac"]
 ```
 
-- **Spec loop** — the anchor. The model proposes rules; **code disposes**: every
+- **Spec loop** — the anchor. The model proposes rules; code disposes: every
   rule must quote the skill *verbatim* (hallucinated rules are dropped
   mechanically), three coverage critics hunt for dropped obligations, a deontic
   audit catches modality drift ("may" hardened into "must"). Loops until sound,
@@ -43,7 +43,8 @@ flowchart LR
 
 ## The gates
 
-Compilation fails loudly, with rule-level diagnostics, when:
+Each gate rejects a specific way an AG-IR can be unfaithful, with rule-level
+diagnostics:
 
 | Gate | Rejects |
 |---|---|
@@ -53,9 +54,35 @@ Compilation fails loudly, with rule-level diagnostics, when:
 | G5 STRUCT-COV | a mandate folded into some other slot's interior (*monolithic* — model-dependent, same risk as prose) |
 | G6 human gates | a route that consumes human feedback but leaves the decision to model judgment |
 
-Failures route back through a bounded repair pass — each flow fixes its own
-view — and an unfixable lift returns its issues honestly; nothing unfaithful is
-persisted.
+The gates diagnose rather than veto. What a failure triggers, in order:
+mechanical autofixes (each re-gated through G4), then scoped model repair with
+each flow fixing its own view, then faithful degradation. Whatever still remains
+rides the result as typed `{gate, severity, message}` findings — errors are
+runtime crashes or violated mandates, warnings are faithfulness audits. A compile
+fails only when no runnable module exists at all, and it fails with the gate
+diagnostics attached rather than a bare error.
+
+`--strict` (or `SIGIL_STRICT=1`) restores fail-on-any-finding, which is what you
+want in CI.
+
+## Linting a skill first
+
+An interactive compile offers to lint before it compiles. The lint reuses the
+spec loop's extraction, so the obligations it surfaces are the same ones the
+compiler is about to type: the ones whose modal force is underspecified, and the
+ones that contradict another rule.
+
+For each finding you answer once — do, maybe, or don't — and that answer both
+settles the obligation for this compile and rewrites the sentence in your
+`SKILL.md` so the ambiguity is gone for good. The rewrite is mechanically
+guarded: the replaced span is verbatim and at most one sentence, the new text
+must clear a length floor, keep every backtick token, carry a modal marker, and
+survive a punctuation check. Accepting everything is safe by construction.
+
+```bash
+sigil lint ./SKILL.md            # findings only
+sigil lint ./SKILL.md --fix      # findings, and apply the accepted rewrites
+```
 
 ## Using it
 
@@ -63,10 +90,16 @@ persisted.
 sigil compile ./SKILL.md                 # compile → skill set on the graph
 sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runnable
 ./agent.jac "extract the tables"         # runs on any model: SIGIL_MODEL=…
+sigil register-skill ./SKILL.md          # same gated compile as `compile`
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
 sigil register-skill ./y.jac osp         # drop in a precompiled module
 sigil gate ./x.agir                      # run G4, the compile oracle, on its own
+sigil relearn <signature>                # recompile a stored skill at a bumped version
 ```
+
+There is one compile pathway: `compile`, `register-skill <SKILL.md>` and the
+`solve` loop's recompiles all run the same gated engine. Skills persist their
+source, so `relearn` re-enters the compiler with the original skill text.
 
 ## The standard tool library
 
@@ -139,9 +172,9 @@ spec loop and the gate battery: `sigil --claude compile ./SKILL.md --agent`. See
 
 ## Running a compiled artifact
 
-An ejected artifact is a **terminal app, not a script**. Run it in a terminal
+An ejected artifact is a terminal app, not a script. Run it in a terminal
 and you get a live TUI: a banner, the walker's node path rendering as it
-executes (with per-node timings), human gates asked **inline** (`? question`
+executes (with per-node timings), human gates asked inline (`? question`
 → type your answer — the compiled skill's clarify loops become a real
 conversation), and a styled outcome with the report and every artifact the run
 created. No task argument? It prompts for one. Zero extra dependencies — pure

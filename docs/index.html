@@ -749,7 +749,7 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></div>
         <h3>Compile oracle</h3>
-        <p>Every candidate IR round-trips through the real back-end and the type-checker before it's accepted: a deterministic ground truth on every iteration. Failures raise; nothing unfaithful persists.</p>
+        <p>Every candidate IR round-trips through the real back-end and the type-checker before it's accepted: a deterministic ground truth on every iteration. The gates diagnose rather than veto — autofix, scoped repair, then typed findings on whatever remains.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l-4 16M6 8l-4 4 4 4M18 8l4 4-4 4"/></svg></div>
@@ -757,9 +757,9 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
         <p><code>-e</code> emits a single self-contained runnable: shebang'd, runtime embedded. No sigil, no session, no graph needed to run it. Pick the model with an env var.</p>
       </div>
       <div class="feat"><span class="badge done">tested</span>
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-        <h3>Replay</h3>
-        <p>Recorded runs re-execute through a recompiled harness with no model and no cost; every expensive live failure becomes a permanent free regression test for the compiler.</p>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/><path d="M17 9l2 2 4-4"/></svg></div>
+        <h3>Skill linter</h3>
+        <p>Compiling offers to lint the skill first: obligations that are underspecified or self-contradictory come back as findings, and one do / maybe / don't answer writes the sentence that settles it into the SKILL.md.</p>
       </div>
       <div class="feat"><span class="badge done">any model</span>
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/></svg></div>
