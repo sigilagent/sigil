@@ -1,13 +1,13 @@
 # Memory and skills
 
-Sigil has three graph-native memory layers plus the library of **compiled skills**.
+Sigil has three graph-native memory layers plus the library of compiled skills.
 
 ## The three memory layers
 
-- **Semantic** (`Memory` nodes) — durable facts. Add with `remember_fact` (chat) or
-  `sigil teach "<fact>"`; retrieve with `recall_memory` / `sigil recall "<query>"`. Facts
-  are also grown automatically by distilling durable facts from completed tasks, and are
-  injected into chat context each turn.
+- **Semantic** (`Memory` nodes) — durable facts. Add with `remember_fact` (chat)
+  or `sigil teach "<fact>"`, retrieve with `recall_memory` /
+  `sigil recall "<query>"`. Facts also grow automatically, distilled from
+  completed tasks, and are injected into chat context each turn.
 - **Episodic** (`Attempt` nodes) — every run, its outcome, and a summary.
 - **Procedural** (`TaskGraph` nodes) — the compiled skills themselves.
 
@@ -16,14 +16,16 @@ Retrieval mode is set by `recall_mode`: `lexical` (deterministic word overlap, n
 
 ## Skills (compiled procedures)
 
-A skill enters the library two ways: explicitly — `sigil compile ./SKILL.md`
-runs the full gated pipeline (see [skill-compilation](skill-compilation.md)) —
-or at runtime via `solve`, where "compiling" is the same compiler applied on
-demand: the **frontier model** authors the typed procedure (AG-IR), the
-mechanical half lowers it, and the result persists as a `TaskGraph`. Later
-requests of the same kind are a **HIT** and run on the cheap model; a near-match
-is a **PARTIAL** (the procedure is recompiled to cover it); a new kind is a
-**MISS** (compiled fresh).
+A skill enters the library two ways. Explicitly, with `sigil compile ./SKILL.md`,
+which runs the full gated pipeline (see
+[skill-compilation](skill-compilation.md)). Or at runtime via `solve`, where
+compiling is the same compiler applied on demand: the frontier model authors the
+typed procedure (AG-IR), the mechanical half lowers it, and the result persists
+as a `TaskGraph`.
+
+Later requests of the same kind are a **HIT** and run on the cheap model. A
+near-match is a **PARTIAL**, and the procedure is recompiled to cover it. A new
+kind is a **MISS**, compiled fresh.
 
 In chat, `learn_skill(task)` compiles a reusable skill on demand; use it only when you
 want a durable, repeatable procedure rather than a one-off action.

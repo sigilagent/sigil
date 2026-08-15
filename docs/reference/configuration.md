@@ -12,9 +12,9 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 |---|---|---|
 | `name` | text | The agent's name. |
 | `persona` | text | Voice/character the agent speaks with. |
-| `chat_model` | model name | The **user-facing** model for chat and sub-agents — use a strong one. Falls back to `frontier_model`. |
-| `frontier_model` | model name | Expensive model that **compiles** new skills. |
-| `small_model` | model name | Cheap model that **executes** compiled skills. |
+| `chat_model` | model name | The user-facing model for chat and sub-agents — use a strong one. Falls back to `frontier_model`. |
+| `frontier_model` | model name | Expensive model that compiles new skills. |
+| `small_model` | model name | Cheap model that executes compiled skills. |
 | `router_model` | model name | Model that routes a task to a skill. Falls back to `small_model`. |
 | `workspace` | path | Default directory the tools work in — where relative paths resolve and shell jobs start. Default `~/.sigil/workspace`. See [workspace-and-tools](workspace-and-tools.md). |
 | `sandbox` | `off` \| `jail` \| `docker` | Containment for the file/shell tools. **Default `off`** — full host access, so Sigil can drive the tools and agents already installed here. `jail` confines the file tools to the workspace; `docker` also runs each command in a locked-down container. |

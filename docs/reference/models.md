@@ -4,14 +4,14 @@ Sigil uses four model **tiers**, each configured on the graph and rebound on eve
 
 | Tier | Role | Key |
 |---|---|---|
-| `chat` | **user-facing** conversation + sub-agents | `chat_model` (falls back to `frontier`) |
+| `chat` | user-facing conversation + sub-agents | `chat_model` (falls back to `frontier`) |
 | `frontier` | compiles new skills | `frontier_model` |
 | `small` | executes compiled skills | `small_model` |
 | `router` | routes a task to a skill | `router_model` (falls back to `small`) |
 
-The division of labor: **the strong model is what you talk to.** Chat is the user-facing
+The division of labor: the strong model is what you talk to. Chat is the user-facing
 surface and has no compiled procedure to lean on, so `chat` (and `frontier`, which
-authors skills) should be a strong model. The **cheap** model (`small`) is reserved for
+authors skills) should be a strong model. The cheap model (`small`) is reserved for
 *executing* an already-compiled skill — a structured procedure it just follows — and
 for routing. That's the whole thesis: pay the strong model to think and to build harnesses;
 let the cheap model ride them.

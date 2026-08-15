@@ -1,21 +1,21 @@
 # Overview
 
-Sigil is a **skill compiler**. You write a skill as plain markdown; Sigil
-compiles it into a typed agent harness — a program the model runs *inside*, so
+Sigil is a skill compiler. You write a skill as plain markdown, and Sigil
+compiles it into a typed agent harness: a program the model runs *inside*, so
 every step, rule, and check in the skill is enforced by structure rather than
 hoped for in a prompt. See [skill-compilation](skill-compilation.md) for the
 pipeline.
 
 Everything the compiler produces and needs lives on one persistent
-object-spatial graph — compiled skills, configuration, memory — there are no
+object-spatial graph: compiled skills, configuration, memory. There are no
 config files on disk.
 
 ## The two-tier economics
 
-A **frontier model** is paid once, at compile time, to author the typed
-procedure (the AG-IR) that the compiler lowers and gate-checks. From then on a
-**cheap, small, even fully-local model** executes the compiled harness — the
-structure a weak model would skip is no longer skippable.
+A frontier model is paid once, at compile time, to author the typed procedure
+(the AG-IR) that the compiler lowers and gate-checks. From then on a cheap,
+small, even fully-local model executes the compiled harness: the structure a weak
+model would skip is no longer skippable.
 
 ## How a request flows
 
