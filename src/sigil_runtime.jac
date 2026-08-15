@@ -122,6 +122,16 @@ def run_dir() -> str {
     return d;
 }
 
+def log_dir() -> str {
+    d = os.path.join(sigil_home(), "log");
+    try {
+        Path(d).mkdir(parents=True, exist_ok=True);
+    } except Exception as e {
+        return d;
+    }
+    return d;
+}
+
 def pid_path(name: str) -> str {
     return os.path.join(run_dir(), name + ".pid");
 }

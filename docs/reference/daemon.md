@@ -143,6 +143,35 @@ sigil api soul '{}'           # the same seam, from the shell (JSON out)
 A request therefore costs one process start. For a local dashboard that is the
 right trade against showing a confident, empty agent.
 
+### Running it in the background
+
+Bare `sigil serve` holds the terminal until Ctrl-C. The subcommands give it the
+same lifecycle the daemon has:
+
+```bash
+sigil serve start             # detached; the prompt comes straight back
+sigil serve status            # running? which pid, which port, which graph
+sigil serve logs [n]          # what the foreground run would have printed
+sigil serve stop
+```
+
+`start` returns as soon as the server is spawned and confirmed alive — it does
+not wait for the web client to finish building, which takes about half a minute
+on every boot. So the first few seconds after it returns, the URL is not up yet;
+`status` and `logs` say where it has got to. Nothing is streamed to the terminal
+either way.
+
+The port is claimed strictly. `start` refuses if anything already holds it rather
+than sliding to the next one, because a stale listener on 8199 is exactly how you
+end up watching a previous run's agent without knowing. For the same reason
+`stop` will only signal a process it can identify as an Observatory — a foreign
+server on the port is reported and left alone.
+
+An Observatory started any other way (a bare `jac start`, or a `sigil serve` in
+another terminal) is still visible to `status`, and `stop` will adopt and stop it:
+the foreground path registers itself, and an unregistered one is recognised from
+the port.
+
 ## Lifecycle hooks
 
 `sigil hook add <name> <event> <action-kind> <action>` — four documented events
