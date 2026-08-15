@@ -553,7 +553,11 @@ def serve_observatory(port: str) {
     # (8199 unless overridden) — claimed strictly via _claim_port, never
     # silently moved. jac.toml pins the server's SQLite store to
     # `.jac/data/sigil.db` (the CLI's project db); this handles the root side.
-    proj = os.path.dirname(os.path.abspath(__file__));
+    # project_root(), not this file's own directory: main.jac lives in src/, so
+    # __file__'s dirname is src/ and every path below would hang off it — the
+    # server would be started from src/observatory.jac (which does not exist)
+    # against src/.jac/data (an empty graph), silently.
+    proj = project_root();
     data = os.path.join(proj, ".jac", "data");
     port = str(port) if port else OBSERVATORY_PORT;
     if not _claim_port(port) { return; }

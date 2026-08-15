@@ -18,10 +18,12 @@ graph's counts change, and cron/ops load when their tab opens (or on ↻).
 sv import from src.sigil {
     api_graph, api_observability, api_solve, api_soul, api_library, api_mcp,
     api_teach, api_recall, api_eval, api_relearn, api_forget,
-    api_cron_list, api_tasks, api_hooks, api_channels, api_approvals
+    api_cron_list, api_cron_runs, api_cron_enable, api_cron_remove,
+    api_skill_agir, api_tasks, api_hooks, api_channels, api_approvals
 }
 sv import from src.cron { api_cron_tick }
 import from .graph_canvas { GraphCanvas }
+import from .agir_canvas { AgirCanvas }
 import from "./time_interop.js" { fmtWhen }
 import from react { useEffect }
 
@@ -30,6 +32,16 @@ glob BTN2: str = "px-3 py-1.5 rounded-md border border-slate-300 dark:border-sla
 glob CHIP: str = "px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] font-mono";
 glob INP: str = "px-2 py-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500";
 glob TILE: str = "rounded-lg border border-slate-200 dark:border-slate-800 p-2";
+
+# AG-IR legend: [key, dot colour, label] — mirrors agir_canvas._acolor, which
+# mirrors the primitive families in src/contracts/.
+glob AGIR_LEGEND: list = [
+    ["mind", "bg-[#a78bfa]", "model slot"],
+    ["code", "bg-[#22d3ee]", "code"],
+    ["boundary", "bg-[#38bdf8]", "sense / act"],
+    ["flow", "bg-[#f5c451]", "route / loop"],
+    ["terminal", "bg-[#4ade80]", "terminal"]
+];
 
 # graph legend: [label, dot colour, shape, blurb] — mirrors graph_canvas._vcolor
 # (the website's palette: gold soul, violet registry, cyan compiled core).
@@ -97,6 +109,13 @@ def:pub App() -> JsxElement {
         teachMsg: str = "";
     has recallQ: str = "",
         recallRes: list = [];
+    has agir: any = None,
+        agirSig: str = "",
+        agirNode: str = "",
+        agirLoading: bool = False;
+    has cronRuns: dict = {},
+        cronOpen: str = "",
+        cronBusy: str = "";
     has probe: str = "",
         hint: str = "",
         actMsg: str = "",
@@ -133,6 +152,50 @@ def:pub App() -> JsxElement {
             m = r.reports[0];
             if (m is not None) and (not m.error) { cron = list(m); }
         }
+    }
+
+    # The AG-IR for the selected skill. Fetched on demand rather than polled: it
+    # only changes when the skill is recompiled, and each call is a whole process.
+    async def fetchAgir(sig: str) {
+        if (not sig) or agirLoading { return; }
+        agirLoading = True;
+        agirNode = "";
+        r = root spawn api_skill_agir(signature=sig);
+        agirLoading = False;
+        if r.reports {
+            m = r.reports[0];
+            if (m is not None) and (not m.error) { agir = m; agirSig = sig; }
+            else { agir = None; agirSig = ""; }
+        }
+    }
+
+    # Run history for one job, folded open on click. The CronRun nodes have always
+    # been on the graph; nothing surfaced them.
+    async def toggleRuns(name: str) {
+        if cronOpen == name { cronOpen = ""; return; }
+        cronOpen = name;
+        r = root spawn api_cron_runs(name=name);
+        if r.reports {
+            m = r.reports[0];
+            if (m is not None) and (not m.error) { cronRuns = {**cronRuns, name: list(m)}; }
+        }
+    }
+
+    async def setCronEnabled(name: str, on: bool) {
+        if cronBusy { return; }
+        cronBusy = name;
+        root spawn api_cron_enable(name=name, on=on);
+        cronBusy = "";
+        fetchCron();
+    }
+
+    async def dropCron(name: str) {
+        if cronBusy { return; }
+        cronBusy = name;
+        root spawn api_cron_remove(name=name);
+        cronBusy = "";
+        cronOpen = "";
+        fetchCron();
     }
 
     async def fetchOps() {
@@ -518,16 +581,39 @@ def:pub App() -> JsxElement {
                                     <div className="flex items-center gap-2">
                                         <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + ("bg-[#4ade80]" if j.enabled else "bg-slate-400")}></span>
                                         <span className="font-mono font-bold truncate">{j.name}</span>
-                                        <span className={CHIP}>{str(j.kind) + " · " + str(j.spec)}</span>
+                                        <span className={CHIP}>{j.schedule if j.schedule else (str(j.kind) + " · " + str(j.spec))}</span>
                                         <div className="flex-1"></div>
                                         <span className={"text-[10px] font-mono " + ("text-green-500" if (str(j.last_status) == "ok") else ("text-rose-400" if j.last_status else "text-slate-400"))}>{str(j.last_status) if j.last_status else "never ran"}</span>
                                     </div>
                                     <div className="text-slate-500 dark:text-slate-400 truncate">{j.task}</div>
-                                    <div className="flex flex-wrap gap-x-3 font-mono text-[10px] text-slate-400">
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-slate-400">
                                         <span>{"next · " + str(fmtWhen(j.next_run_ms))}</span>
-                                        <span>{str(j.runs) + " runs"}</span>
+                                        <span className="cursor-pointer hover:text-violet-500"
+                                            onClick={lambda (e: MouseEvent) { toggleRuns(str(j.name)); }}>
+                                            {("▾ " if (cronOpen == str(j.name)) else "▸ ") + str(j.runs) + " runs"}</span>
                                         {(<span className="text-rose-400">{str(j.errors) + " errors"}</span>) if j.errors else <span></span>}
+                                        {(<span className="text-slate-400">{"tz " + str(j.zone)}</span>) if j.zone else <span></span>}
+                                        <div className="flex-1"></div>
+                                        <button onClick={lambda (e: MouseEvent) { setCronEnabled(str(j.name), not bool(j.enabled)); }}
+                                            disabled={cronBusy == str(j.name)}
+                                            className={"px-1.5 py-0.5 rounded border text-[10px] transition-colors " + ("opacity-50 " if (cronBusy == str(j.name)) else "") + "border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"}>
+                                            {"pause" if j.enabled else "resume"}</button>
+                                        <button onClick={lambda (e: MouseEvent) { dropCron(str(j.name)); }}
+                                            disabled={cronBusy == str(j.name)}
+                                            className="px-1.5 py-0.5 rounded border border-rose-300 dark:border-rose-800 text-rose-500 text-[10px] hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors">
+                                            delete</button>
                                     </div>
+                                    {(<div className="mt-1 pt-1 border-t border-slate-200 dark:border-slate-800 space-y-0.5">
+                                        {[
+                                            <div key={"r-" + str(ri)} className="flex items-start gap-2 font-mono text-[10px]">
+                                                <span className={"mt-1 w-1 h-1 rounded-full shrink-0 " + ("bg-[#4ade80]" if r.ok else "bg-[#f87171]")}></span>
+                                                <span className="text-slate-400 shrink-0">{str(fmtWhen(r.started_ms))}</span>
+                                                <span className="text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate">{r.summary}</span>
+                                            </div>
+                                            for (ri, r) in enumerate(cronRuns[str(j.name)] if (str(j.name) in cronRuns) else [])
+                                        ]}
+                                        {(<div className="text-slate-400 text-[10px]">No fires recorded yet.</div>) if (not (cronRuns[str(j.name)] if (str(j.name) in cronRuns) else [])) else <span></span>}
+                                    </div>) if (cronOpen == str(j.name)) else <span></span>}
                                 </div>
                                 for j in cron
                             ]}
@@ -677,6 +763,51 @@ def:pub App() -> JsxElement {
                                     <div>
                                         <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Compiled module</div>
                                         <div className="font-mono text-[10px] px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 break-all">{sk.module}</div>
+                                    </div>
+
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className="text-[10px] uppercase tracking-wider text-slate-400">AG-IR — the typed contract this runs</div>
+                                            <div className="flex-1"></div>
+                                            <button onClick={lambda (e: MouseEvent) { fetchAgir(str(sk.signature)); }}
+                                                disabled={agirLoading}
+                                                className={BTN2 + (" opacity-50" if agirLoading else "")}>
+                                                {"loading…" if agirLoading else ("↻ redraw" if (agirSig == str(sk.signature)) else "▶ draw the graph")}</button>
+                                        </div>
+                                        {(<div className="space-y-1">
+                                            <div className="relative h-72 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 overflow-hidden">
+                                                <AgirCanvas nodes={agir.nodes} edges={agir.edges} dark={dark}
+                                                    onSelect={lambda (nid: str) { agirNode = nid; }}/>
+                                            </div>
+                                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                                                {[
+                                                    <span key={str(lg[0])} className="flex items-center gap-1">
+                                                        <span className={"w-1.5 h-1.5 rounded-full " + str(lg[1])}></span>{str(lg[2])}
+                                                    </span>
+                                                    for lg in AGIR_LEGEND
+                                                ]}
+                                                <div className="flex-1"></div>
+                                                <span className="font-mono">{str(len(agir.nodes)) + " nodes · " + str(len(agir.edges)) + " edges"}</span>
+                                            </div>
+                                            {(<div className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-sigil-gold text-[10px]">{"⚠ " + str(agir.warning)}</div>) if agir.warning else <span></span>}
+                                            {[
+                                                <div key={"an-" + str(n.id)} className="px-2 py-1.5 rounded bg-slate-100 dark:bg-slate-800 space-y-0.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-mono font-bold">{n.id}</span>
+                                                        <span className={CHIP}>{n.type}</span>
+                                                        {(<span className={CHIP}>{"owner · " + str(n.owner)}</span>) if n.owner else <span></span>}
+                                                        {(<span className={CHIP}>{"tool · " + str(n.tool)}</span>) if n.tool else <span></span>}
+                                                    </div>
+                                                    {(<div className="text-slate-500 dark:text-slate-400 leading-relaxed">{n.doc}</div>) if n.doc else <span></span>}
+                                                    <div className="font-mono text-[10px] text-slate-400">
+                                                        {("reads " + ", ".join([str(x) for x in n.reads])) if n.reads else ""}
+                                                        {("  →  writes " + ", ".join([str(x) for x in n.writes])) if n.writes else ""}
+                                                    </div>
+                                                </div>
+                                                for n in agir.nodes if (str(n.id) == agirNode)
+                                            ]}
+                                            {(<div className="text-slate-400 text-[10px]">Click a node for what it reads, writes and runs. Diamonds are model-owned slots, boxes are code, dashed edges are not mandatory.</div>) if (not agirNode) else <span></span>}
+                                        </div>) if ((agir is not None) and (agirSig == str(sk.signature))) else <span></span>}
                                     </div>
 
                                     <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">

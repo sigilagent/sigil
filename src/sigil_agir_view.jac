@@ -109,16 +109,18 @@ def parse_agir(text: str) -> dict {
         src: str = str(e.get("from") or "").strip();
         dst: str = str(e.get("to") or "").strip();
         if (not src) or (not dst) { continue; }
+        # `src`/`dst`, not `from`/`to`: the client reads these as attributes and
+        # `from` is a keyword there, so the wire name has to avoid it.
         out["edges"].append({
-            "from": src, "to": dst,
+            "src": src, "dst": dst,
             "modality": str(e.get("modality") or ""),
             "label": str(e.get("when") or e.get("label") or "")[:60]
         });
     }
     # An edge naming a node that does not exist would silently vanish from the
     # canvas; say so instead, because it means the IR itself is inconsistent.
-    dangling: list = [str(e["from"]) + "->" + str(e["to"]) for e in out["edges"]
-                      if (str(e["from"]) not in seen) or (str(e["to"]) not in seen)];
+    dangling: list = [str(e["src"]) + "->" + str(e["dst"]) for e in out["edges"]
+                      if (str(e["src"]) not in seen) or (str(e["dst"]) not in seen)];
     if dangling {
         out["warning"] = "edges reference unknown nodes: " + ", ".join(dangling[:4]);
     } elif not out["nodes"] {
