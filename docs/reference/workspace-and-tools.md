@@ -1,19 +1,19 @@
 # Workspace and tools
 
-By default, Sigil's file and shell tools work on the **real machine** — the same filesystem
-and the same installed programs you have. That default is deliberate: Sigil's job in chat
+By default, Sigil's file and shell tools work on the real machine: the same filesystem
+and the same installed programs you have. That default is deliberate — Sigil's job in chat
 mode is to drive what is already here (a build, a test suite, `git`, another agent's CLI),
 and containment would cut it off from exactly those. What guards the agent then is the
 exec-approval gate.
 
-Containment is a switch, not a fact — see [the sandbox](#the-sandbox) below.
+Containment is a switch, not a fact. See [the sandbox](#the-sandbox) below.
 
 ## The workspace
 
 The `workspace` (default `~/.sigil/workspace`, set with `configure workspace <path>`) is
-where **relative** paths resolve and where shell jobs start. With the sandbox off it is a
-default working directory, not a boundary: an absolute path — or a `cd` inside a shell
-command — reaches anywhere the operator can.
+where relative paths resolve and where shell jobs start. With the sandbox off it is a
+default working directory rather than a boundary: an absolute path, or a `cd` inside a
+shell command, reaches anywhere the operator can.
 
 - `ws_list(subdir)` — one level; `ws_tree(subdir, depth)` — recursive structure survey,
   skipping noise dirs (`.git`, `node_modules`, `__pycache__`, …), bounded in depth/entries.
@@ -36,11 +36,11 @@ contained:
 
 | Mode | File tools | Shell |
 |---|---|---|
-| `off` **(default)** | any path on the host; relative paths resolve in the workspace | runs directly, starting in the workspace |
-| `jail` | confined to the workspace — an escaping path is **refused**, not clamped | runs directly, starting in the workspace |
+| `off` (default) | any path on the host; relative paths resolve in the workspace | runs directly, starting in the workspace |
+| `jail` | confined to the workspace; an escaping path is refused, not clamped | runs directly, starting in the workspace |
 | `docker` | confined to the workspace | runs in a locked-down container (`--network none --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g`) with only the workspace mounted at `/work`. Requires Docker; set the image with `SIGIL_SANDBOX_IMAGE` (default `python:3.13-slim`) |
 
-Note that `jail` confines *paths*, not the shell — a command can still `cd` elsewhere,
+Note that `jail` confines *paths*, not the shell: a command can still `cd` elsewhere,
 which is why exec is approval-gated in every mode. To stop the agent running commands at
 all, set the exec policy to `deny` (`sigil approvals set deny always`) rather than reaching
 for a sandbox mode.
@@ -56,14 +56,14 @@ stricter of a security mode (`deny` / `allowlist` / `full`) and an ask mode (`of
 blocked. Manage this with `sigil approvals …` (`get` / `set` / `allow` / `approve` /
 `elevate` / `audit`).
 
-Because the shell is uncontained, this gate is the control that matters — run Sigil under
+Because the shell is uncontained, this gate is the control that matters. Run Sigil under
 a policy you would be comfortable giving any agent shell access with.
 
 ## Shell jobs are never killed on a timer
 
 A build, a test suite, or another agent CLI routinely outlives any deadline you would
 pick, and killing it throws the work away exactly when it was about to pay off. So
-`ws_exec` imposes no time limit at all. Every command runs as a **background job**
+`ws_exec` imposes no time limit at all. Every command runs as a background job
 spooling its merged stdout/stderr to a file; `ws_exec` waits `wait_seconds` (default 30)
 and then reports the output *so far*.
 
@@ -86,9 +86,9 @@ recognises a `sigil compile …` command line and routes it there automatically.
 
 ## Web egress
 
-`web_fetch` carries an **SSRF guard**: it refuses non-`http(s)` URLs and any loopback,
+`web_fetch` carries an SSRF guard: it refuses non-`http(s)` URLs and any loopback,
 private (`10.`, `192.168.`, `172.16–31.`), or link-local (`169.254.`, cloud metadata)
-host — so a tool cannot be tricked into reaching internal services.
+host, so a tool cannot be tricked into reaching internal services.
 
 ## Secrets
 

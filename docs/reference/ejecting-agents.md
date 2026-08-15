@@ -11,9 +11,39 @@ SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "…"    # any model can run it
 ```
 
 The skill's step graph plus the runtime helper library, in a single executable
-`.jac`. It runs the task and exits. Nothing persists — no memory of the last run,
-no schedule, no way to reach it. That is the point: it is a program, and it goes
-anywhere a `jac` binary goes.
+`.jac`. It runs the task and exits. Nothing persists: no memory of the last run,
+no schedule, no way to reach it. It is a program, and it goes anywhere a `jac`
+binary goes.
+
+### Binding typed inputs directly
+
+A task sentence is one way in. The artifact also takes each of its typed inputs
+as a flag, which is what you want when a caller already knows the values:
+
+```bash
+./agent.jac --src_csv=export.csv --out=clean.csv
+./agent.jac --src_csv=export.csv "and drop the trailing blank rows"
+```
+
+Each `--<input>=<value>` binds that input carry by name; the task text fills in
+any input a flag didn't cover. A call that passes flags and no sentence gets a
+default task rather than stopping to ask for one, so it works unattended.
+
+### Serving itself as an MCP tool
+
+```bash
+./agent.jac --mcp
+```
+
+The artifact becomes a stdio JSON-RPC server exposing itself as one tool. The
+tool schema comes from its own typed inputs and the description from the skill's
+imperative surface, so a calling agent sees a typed tool rather than a shell
+command. `tools/call` runs the skill in-process — warm calls land in
+~0.04–0.1s, against seconds for a fresh subprocess per call. The artifact's own
+prints go to stderr to keep the protocol channel clean.
+
+This is the same idea as `sigil mcp-serve` ([claude-code](claude-code.md)), minus
+Sigil: one file, one tool, no graph behind it.
 
 ## A whole agent
 
@@ -77,28 +107,6 @@ To change what it ships with, add the signatures you want:
 ```bash
 sigil eject-agent all ./myagent            # everything in the library
 ```
-
-### How it can exist
-
-Sigil is two things wearing one name: a compiler that authors skills and a
-runtime that owns an identity and runs them. They lived in one module, which
-made the runtime impossible to ship on its own — bundling cron meant bundling the
-whole AI front-end, because cron imported the hub and the hub imported the
-lowerer.
-
-The hub is split at that seam. `sigil_core.jac` is the runtime — the Soul, memory,
-model tiers, the skill library, tool policy, and executing a procedure that
-already exists. `sigil.jac` is the compiler — authoring one that does not. An
-ejected agent is the first half plus your skills.
-
-Two seams keep one set of capability modules serving both: `solve_task` and the
-tool-belt's `sigil_compile` resolve through a registry that the full Sigil fills
-in on import and an ejected runtime never does. So the same `cron.jac` runs in
-both, and only one of them can compile.
-
-A test asserts the negative property — that no module in the runtime closure
-imports the compiler — because that is the kind of thing that silently stops
-being true.
 
 ## A single binary
 
