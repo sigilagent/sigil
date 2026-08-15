@@ -683,6 +683,27 @@ walker:pub api_cron_list {
     can run with Root entry { report report_for("cron_list", {}); }
 }
 
+walker:pub api_cron_runs {
+    has name: str;
+    can run with Root entry { report report_for("cron_runs", {"name": self.name}); }
+}
+
+walker:pub api_cron_enable {
+    has name: str;
+    has on: bool = True;
+    can run with Root entry { report report_for("cron_enable", {"name": self.name, "on": self.on}); }
+}
+
+walker:pub api_cron_remove {
+    has name: str;
+    can run with Root entry { report report_for("cron_remove", {"name": self.name}); }
+}
+
+walker:pub api_skill_agir {
+    has signature: str;
+    can run with Root entry { report report_for("skill_agir", {"signature": self.signature}); }
+}
+
 walker:pub api_tasks {
     has n: int = 30;
     can run with Root entry { report report_for("tasks", {"n": self.n}); }

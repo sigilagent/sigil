@@ -37,7 +37,8 @@ glob API_NAMES: list[str] = [
     "soul", "graph", "library", "mcp", "observability", "recall", "teach",
     "configure", "solve", "register_skill", "add_mcp", "eval", "relearn",
     "forget", "chat", "models", "tools_invoke", "inbound", "cron_tick",
-    "cron_list", "tasks", "hooks", "channels", "approvals"
+    "cron_list", "cron_runs", "cron_enable", "cron_remove", "skill_agir",
+    "tasks", "hooks", "channels", "approvals"
 ];
 
 def in_child() -> bool {
