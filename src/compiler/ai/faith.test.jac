@@ -123,6 +123,33 @@ test "fold falls back to code nodes when the pipeline is fully deterministic" {
     assert [f.rule for f in check_completeness(spec, pir)] == [];
 }
 
+test "an unparseable IR ranks WORSE than a parseable one with real gaps" {
+    # The pptx failure: the authored IR did not parse, so its report carried one
+    # coherence finding and scored 1 — beating the repair round's parseable IR
+    # with 31 real gaps. The ladder "kept prior", lowering found no nodes, and
+    # the compile was reported as UNFAITHFUL 0/130 instead of uncompilable.
+    spec = RuleSet(rules=[
+        Rule(id="r1", quote="Parse the route table", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="Write the report", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    unparseable = faithfulness_report(spec, "not: [valid yaml at all");
+    assert not unparseable.parsed;
+    assert len(unparseable.dropped) == 1;          # one coherence finding ...
+    assert gap_score(unparseable) > 1000;          # ... but it must not score 1
+
+    # a PARSEABLE candidate that drops BOTH rules is still preferable
+    parseable_but_bad = faithfulness_report(spec, """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: x
+    type: GEN-RAW
+    doc: does something unrelated
+    traces_to: []
+""");
+    assert parseable_but_bad.parsed;
+    assert gap_score(parseable_but_bad) < gap_score(unparseable);
+}
+
 test "fold refuses non-constraint drops and unknown rules" {
     spec = RuleSet(rules=[
         Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY)

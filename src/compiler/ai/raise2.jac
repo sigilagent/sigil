@@ -27,7 +27,7 @@ Two things that differ from `lift()`:
 import time;
 import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default }
 import from .author_direct { author_direct, pin_direct_llm }
-import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions }
+import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
@@ -151,7 +151,7 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         irf: str = str(fold_untraced_prohibitions(ir, spec, ids));
         if irf {
             frf = faithfulness_report(spec, irf);
-            if (len(frf.dropped) + len(frf.added)) < (len(fr.dropped) + len(fr.added)) {
+            if gap_score(frf) < gap_score(fr) {
                 ir = irf; fr = frf;
                 repairs.append("autofix: folded " + str(len(ids))
                                + " untraced prohibition(s) into model-node docs");
@@ -161,7 +161,7 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
     # rule-scoped repair: the SAME coherent author closes exactly the gaps.
     while (not fr.ok) and (rounds < max_repair) {
         rounds += 1;
-        before = len(fr.dropped) + len(fr.added);
+        before = gap_score(fr);
         _t = time.time();
         _emit({"stage": "repair", "state": "start", "round": rounds,
                "issues": before, "target": "faithfulness"});
@@ -174,7 +174,7 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
             break;
         }
         fr2 = faithfulness_report(spec, ir2);
-        after = len(fr2.dropped) + len(fr2.added);
+        after = gap_score(fr2);
         _emit({"stage": "repair", "state": "done", "secs": time.time() - _t,
                "round": rounds, "before": before, "after": after, "adopted": after < before});
         # monotone: adopt only if it closes gaps without opening new ones.
@@ -195,7 +195,7 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         irf2: str = str(fold_untraced_prohibitions(ir, spec, ids2));
         if irf2 {
             frf2 = faithfulness_report(spec, irf2);
-            if (len(frf2.dropped) + len(frf2.added)) < (len(fr.dropped) + len(fr.added)) {
+            if gap_score(frf2) < gap_score(fr) {
                 ir = irf2; fr = frf2;
                 repairs.append("autofix: folded " + str(len(ids2))
                                + " untraced prohibition(s) into model-node docs");
