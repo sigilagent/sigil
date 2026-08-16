@@ -285,6 +285,120 @@ def _has_mand_marker(q: any) -> bool {
     return False;
 }
 
+# Code-STYLE guidance is a property of the code a node emits, not a step in the
+# procedure. Left as STEP/MANDATORY it acquires RealShape.NODE and demands its
+# own node — which no author can plausibly produce ("add a node realizing:
+# Avoid unnecessary print statements") — so the compile fails UNFAITHFUL on
+# rules that were never steps. Observed live on the SkillsBench xlsx skill:
+# 19/23 realized, and all four drops were style rules (r26 comment hardcoded
+# values, r89 concise code, r90 verbose variable names, r91 print statements).
+# Re-kinded to CONSTRAINT the guidance lands where it belongs: folded into the
+# docs of the nodes it governs, still reaching the artifact, no longer demanding
+# a step of its own.
+glob _STYLE_PATTERNS: list[str] = [
+    r"\b(avoid|no|without|minimi[sz]e)\b[^.]{0,40}\b(unnecessary|verbose|redundant|extraneous|superfluous)\b",
+    r"\bprint\s+statements?\b",
+    r"\b(variable|function|parameter)\s+names?\b",
+    r"\b(concise|minimal|readable|idiomatic|clean|tidy)\b[^.]{0,40}\bcode\b",
+    r"\bcode\b[^.]{0,40}\b(concise|minimal|readable|idiomatic|clean|tidy)\b",
+    r"\b(comment|docstring)s?\b",
+    r"\bpep\s?8\b|\blint(ing)?\b|\bcode\s+style\b|\bformatting\s+conventions?\b",
+];
+
+def rekind_style_rules(rs: RuleSet) -> list[str] {
+    changed: list[str] = [];
+    for r in rs.rules {
+        if r.kind != RuleKind.STEP { continue; }
+        if r.modality == Modality.DISCRETIONARY { continue; }
+        q = str(r.quote).lower();
+        hit = False;
+        for pat in _STYLE_PATTERNS {
+            if re.search(pat, q) { hit = True; break; }
+        }
+        if not hit { continue; }
+        r.kind = RuleKind.CONSTRAINT;
+        changed.append(r.id);
+    }
+    return changed;
+}
+
+
+# A section PREAMBLE announces the procedure the steps below it carry out
+# ("When editing slides you need to work with the raw OOXML format. This
+# involves unpacking the .pptx, editing the XML, and repacking it.") — and the
+# unpack/edit/pack steps are themselves extracted, as their own rules. Left as
+# STEP/MANDATORY the summary acquires RealShape.NODE and demands a node of its
+# own, which can only be a duplicate of the steps it introduces; the author
+# rightly declines and the compile fails UNFAITHFUL. Observed live on the
+# SkillsBench pptx skill: 22/24 realized, both drops preambles (r123 OOXML
+# workflow, r125 template duplicate-and-rearrange). It is reference material —
+# KNOWLEDGE — so it reaches the artifact carried verbatim, no longer demanding
+# a step that already exists.
+glob _PREAMBLE_OPENERS: list[str] = [
+    r"^\s*when\b[^.]{0,140}\byou(?:'ll| will)?\s+(?:need|have)\s+to\b",
+    r"\bthis involves\b",
+];
+# function words that carry no action, so they cannot evidence coverage
+glob _PREAMBLE_STOP: list[str] = [
+    "which", "these", "those", "their", "there", "where", "while", "would",
+    "could", "should", "before", "after", "using", "about", "other",
+    "existing", "following", "content", "context",
+];
+
+def _preamble_stems(quote: str) -> list[str] {
+    # the actions the sentence announces: gerunds ("unpacking") plus whatever
+    # follows "need to" ("duplicate and re-arrange..."), reduced to 5-char
+    # prefixes so unpacking/unpack.py and replacing/replacements both match
+    stems: list[str] = [];
+    words: list[str] = [];
+    for m in re.findall(r"\b([a-z][a-z-]{3,})ing\b", quote) { words.append(str(m)); }
+    tail = re.search(r"\bneed\s+to\b(.*)$", quote);
+    if tail {
+        for m in re.findall(r"\b([a-z][a-z-]{3,})\b", str(tail.group(1))) { words.append(str(m)); }
+    }
+    for w in words {
+        s = str(w).replace("-", "");
+        if s in _PREAMBLE_STOP { continue; }
+        if len(s) < 5 { continue; }
+        p = s[:5];
+        if p not in stems { stems.append(p); }
+    }
+    return stems;
+}
+
+def rekind_preamble_rules(rs: RuleSet) -> list[str] {
+    changed: list[str] = [];
+    for r in rs.rules {
+        if r.kind != RuleKind.STEP { continue; }
+        if r.modality == Modality.DISCRETIONARY { continue; }
+        q = str(r.quote).lower();
+        hit = False;
+        for pat in _PREAMBLE_OPENERS {
+            if re.search(pat, q) { hit = True; break; }
+        }
+        if not hit { continue; }
+        # Guard: only demote when the actions it announces are ALREADY covered
+        # by other rules. A lone "when you need to X, you'll need to Y" with no
+        # steps behind it is the only realization of Y and must stay a STEP.
+        stems = _preamble_stems(q);
+        covered: list[str] = [];
+        for s in stems {
+            for other in rs.rules {
+                if other.id == r.id { continue; }
+                if s in str(other.quote).lower().replace("-", "") {
+                    if s not in covered { covered.append(s); }
+                    break;
+                }
+            }
+        }
+        if len(covered) < 2 { continue; }
+        r.kind = RuleKind.KNOWLEDGE;
+        changed.append(r.id);
+    }
+    return changed;
+}
+
+
 def demote_examples(skill: str, rs: RuleSet) -> list[str] {
     fenced = _fenced_lines(skill);
     if not fenced { return []; }
@@ -523,6 +637,16 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
         # example code from MANDATORY to DISCRETIONARY (a 'maybe', not a 'Do').
         # Deterministic, fence-grounded — see demote_examples.
         demote_examples(skill, rs);
+        _styled = rekind_style_rules(rs);
+        if _styled {
+            _emit_spec({"phase": "style", "round": rnum, "rules": len(rs.rules),
+                        "restyled": len(_styled)});
+        }
+        _pre = rekind_preamble_rules(rs);
+        if _pre {
+            _emit_spec({"phase": "preamble", "round": rnum, "rules": len(rs.rules),
+                        "rekinded": len(_pre)});
+        }
 
         # dispose 2 — completeness: 3 lenses, self-filtered against the skill
         _emit_spec({"phase": "coverage", "round": rnum, "rules": len(rs.rules), "lenses": len(_LENSES)});

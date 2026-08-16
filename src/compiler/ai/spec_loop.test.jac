@@ -280,5 +280,81 @@ test "a human 'dont' on a KNOWLEDGE rule reclassifies it as a real prohibition" 
     assert any(["KNOWLEDGE -> CONSTRAINT" in n for n in notes]);
 }
 
+test "code-style guidance is re-kinded off STEP so it stops demanding a node" {
+    # the four live drops from the SkillsBench xlsx compile (19/23 realized)
+    rs = RuleSet(rules=[
+        Rule(id="r26", quote="Add a comment explaining any hardcoded value."),
+        Rule(id="r89", quote="Write concise code"),
+        Rule(id="r90", quote="Avoid verbose variable names and redundant operations"),
+        Rule(id="r91", quote="Avoid unnecessary print statements"),
+        Rule(id="r5", quote="Recalculate the workbook before saving.")
+    ]);
+    changed = rekind_style_rules(rs);
+    assert sorted(changed) == ["r26", "r89", "r90", "r91"];
+    by_id: dict[str, Rule] = {};
+    for r in rs.rules { by_id[r.id] = r; }
+    for rid in ["r26", "r89", "r90", "r91"] {
+        # CONSTRAINT is folded into the docs it governs — no node of its own
+        # (kind -> RealShape.CONSTRAINT is asserted in faith.test.jac)
+        assert by_id[rid].kind == RuleKind.CONSTRAINT;
+    }
+    # a genuine step is untouched
+    assert by_id["r5"].kind == RuleKind.STEP;
+}
+
+test "a section preamble is carried as knowledge, not demanded as a step" {
+    # the two live drops from the SkillsBench pptx compile (22/24 realized):
+    # both announce a workflow whose steps are extracted separately below them
+    rs = RuleSet(rules=[
+        Rule(id="r123", quote="When edit slides in an existing PowerPoint presentation, "
+             + "you need to work with the raw Office Open XML (OOXML) format. This involves "
+             + "unpacking the .pptx file, editing the XML content, and repacking it."),
+        Rule(id="r125", quote="When you need to create a presentation that follows an "
+             + "existing template's design, you'll need to duplicate and re-arrange template "
+             + "slides before then replacing placeholder context."),
+        # ... the steps themselves, which are what the preambles announce
+        Rule(id="r127", quote="Unpack the presentation: python ooxml/scripts/unpack.py"),
+        Rule(id="r128", quote="Edit the XML files (primarily ppt/slides/slideN.xml)"),
+        Rule(id="r129", quote="Pack the final presentation: python ooxml/scripts/pack.py"),
+        Rule(id="r130", quote="Duplicate, reorder, and delete slides using rearrange.py"),
+        Rule(id="r131", quote="Apply replacements using the replace.py script")
+    ]);
+    changed = rekind_preamble_rules(rs);
+    assert sorted(changed) == ["r123", "r125"];
+    by_id: dict[str, Rule] = {};
+    for r in rs.rules { by_id[r.id] = r; }
+    for rid in ["r123", "r125"] {
+        # KNOWLEDGE is carried verbatim (RealShape.EMBODIED_KNOWLEDGE) instead
+        # of demanding a node that would duplicate the steps it introduces
+        assert by_id[rid].kind == RuleKind.KNOWLEDGE;
+    }
+    for rid in ["r127", "r128", "r129", "r130", "r131"] {
+        assert by_id[rid].kind == RuleKind.STEP;
+    }
+}
+
+test "a preamble whose actions nothing else covers stays a STEP" {
+    # the guard: with no steps behind it, this sentence is the ONLY realization
+    # of the work it names — demoting it to knowledge would silently drop it
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="When you need to publish, you'll need to sign the bundle "
+             + "and then upload it to the registry."),
+        Rule(id="r2", quote="Read the manifest first.")
+    ]);
+    assert rekind_preamble_rules(rs) == [];
+    assert rs.rules[0].kind == RuleKind.STEP;
+}
+
+test "an explicitly optional preamble is left alone" {
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="When you need to convert, you'll need to export the sheet "
+             + "and then import it.", modality=Modality.DISCRETIONARY),
+        Rule(id="r2", quote="Export the sheet as CSV."),
+        Rule(id="r3", quote="Import it into the workbook.")
+    ]);
+    assert rekind_preamble_rules(rs) == [];
+    assert rs.rules[0].kind == RuleKind.STEP;
+}
+
 # NOTE: the MockLLM convergence run lives in scenarios/spec_loop.jac (run via
 # `jac run` in CI) — same runtime bug as above.
