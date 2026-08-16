@@ -251,17 +251,33 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
     if (not isinstance(ir, dict)) or (not ir.get("nodes")) { return ""; }
     by_id: dict = {};
     for r in spec.rules { by_id[r.id] = r; }
+    # Partition the slots ONCE. A prohibition rides the model-owned working
+    # nodes it governs — but a fully DETERMINISTIC pipeline owns every node as
+    # code, and skipping those left the fold with nowhere to write, so it
+    # returned "" and the gate stayed permanently unsatisfiable (azure-bgp:
+    # 5/6, one CONSTRAINT rule and no model node in the whole IR). CONSTRAINT is
+    # realized by any TRACED node — check_completeness reads traces_to and
+    # ignores owner — so fall back to the code nodes instead of folding nothing.
+    # TERMINAL is never a target either way: an end marker is not a slot a
+    # prohibition can govern.
+    model_nodes: list = [];
+    code_nodes: list = [];
+    for nd in list(ir.get("nodes") or []) {
+        if not isinstance(nd, dict) { continue; }
+        ntype = _ntype(nd.get("type"));
+        if ntype == "TERMINAL" { continue; }
+        owner = str(nd.get("owner", "model")).lower();
+        if (owner == "code") or (ntype == "CODE") { code_nodes.append(nd); }
+        else { model_nodes.append(nd); }
+    }
+    targets: list = model_nodes if model_nodes else code_nodes;
     touched = False;
     for rid in drop_ids {
         r = by_id.get(str(rid));
         if not r { continue; }
         text = (str(r.statement).strip() or str(r.quote).strip());
         if not text { continue; }
-        for nd in list(ir.get("nodes") or []) {
-            if not isinstance(nd, dict) { continue; }
-            ntype = _ntype(nd.get("type"));
-            owner = str(nd.get("owner", "model")).lower();
-            if (owner == "code") or (ntype in ["TERMINAL", "CODE"]) { continue; }
+        for nd in targets {
             doc = str(nd.get("doc") or "");
             nd["doc"] = doc + ("\n" if doc else "") + "PROHIBITION (" + str(rid) + "): " + text;
             tl = _slist(nd.get("traces_to"));
