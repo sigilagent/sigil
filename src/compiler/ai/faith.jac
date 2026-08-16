@@ -223,12 +223,32 @@ obj FaithFinding {
 
 obj FaithReport {
     has ok: bool = False;             # no faithfulness violations (dropped or added)
+    # False when the text did not parse to an IR at all. Such a report carries a
+    # SINGLE coherence finding, so by raw gap count it scores 1 — better than any
+    # genuine repair with real gaps. The repair ladder must never treat "did not
+    # parse" as "almost perfect"; see gap_score().
+    has parsed: bool = True;
     has rules_total: int = 0;
     has realized: int = 0;
     has dropped: list[FaithFinding] = [];    # completeness violations (rule -> nothing)
     has added: list[FaithFinding] = [];      # soundness violations (element -> no rule)
     has by_shape: dict[str, int] = {};       # realized count per shape (the breakdown)
 }
+
+# How far a candidate is from faithful, for ladder COMPARISONS.
+#
+# An unparseable IR carries ONE coherence finding, so by raw gap count it scores
+# 1 — better than any genuine repair with real gaps. That is exactly what sank
+# pptx: the authored IR did not parse (scored 1), the repair round produced a
+# PARSEABLE IR with 31 real gaps (scored 31), the ladder "kept prior", and the
+# unparseable text went to lowering, which found no nodes and reported the whole
+# compile as UNFAITHFUL 0/130. A candidate that does not parse must lose to any
+# candidate that does.
+def gap_score(fr: FaithReport) -> int {
+    if not fr.parsed { return 1000000 + fr.rules_total; }
+    return len(fr.dropped) + len(fr.added);
+}
+
 
 def classify(axis: str) -> str {
     # The reprioritization: faithfulness fails, coherence degrades.
@@ -477,7 +497,7 @@ def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     if not pir.ok {
         # No parseable IR at all is a coherence failure (G4 territory), not a
         # faithfulness verdict — report it honestly rather than as "all dropped".
-        fr = FaithReport(ok=False, rules_total=len(spec.rules));
+        fr = FaithReport(ok=False, rules_total=len(spec.rules), parsed=False);
         fr.dropped = [FaithFinding(axis="coherence", severity="error", rule="", shape="",
             message="IR did not parse — cannot verify faithfulness (fix the compile first)")];
         return fr;
