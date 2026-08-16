@@ -256,7 +256,15 @@ def _jac_type(tstr: any, types: any) -> list {
             m0 = members[0];
             return [base, f"{base}.{m0}"];
         }
-        return [base, f"{base}()"];
+        # Only enum and object types are DECLARED in the emitted module (see the
+        # type-emission pass). Any other kind names an external Python class the
+        # IR merely refers to — typing a carry with it emitted
+        #     has doc_in: DocxDocument = DocxDocument();
+        # against a name that exists nowhere in the module, so the walker died at
+        # instantiation with NameError and every cell scored 0 (offer-letter/docx,
+        # observed live). An undeclared type is `any`, exactly as an unknown one.
+        if kind == "object" { return [base, f"{base}()"]; }
+        return ["any", "None"];
     }
     me: any = re.match(r"enum\{(.+)\}", t);
     if me {
