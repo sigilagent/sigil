@@ -1185,6 +1185,9 @@ with entry:__main__ {
             }
             _HB["on"] = False;
             if _tty { _vb_close(); print(""); }
+            # The AG-IR is emitted on EVERY compile, and a failed compile is
+            # exactly when you need to read it — report the path in both branches.
+            if r.get("agir") { print("AG-IR: " + str(r["agir"])); }
             if not r["ok"] {
                 # the fix-forward exit note: what failed, what the ladder
                 # tried, and the next concrete step — never a bare issue dump.
