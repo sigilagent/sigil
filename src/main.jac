@@ -376,7 +376,9 @@ def _lint_spec_status(ev: dict) -> None {
             "coverage": "hunting for gaps (" + str(ev.get("lenses", 0)) + " lenses) · " + str(rules) + " so far",
             "modality": "auditing modal force · " + str(rules) + " rules",
             "round_done": str(rules) + " rules" + ((" · " + str(ev.get("uncovered", 0)) + " gaps left") if ev.get("uncovered", 0) else " · looks complete"),
-            "clarify": "flagging under-specified rules · " + str(rules) + " total"}.get(phase, phase);
+            "clarify": "flagging under-specified rules · " + str(rules) + " total",
+            "adjudicate": "answering " + str(ev.get("items", 0))
+                        + " under-specified rule(s) from the skill's own text"}.get(phase, phase);
     _CV["line"] = "  " + purple + chr(0x25D0) + rst + " lint  " + where + verb;
 }
 
@@ -1103,16 +1105,21 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--strict] [--agent|--legacy]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
             clarify = False; frontend = ""; lint_force = False; no_lint = False;
+            adjudicate = True;
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
                 if flg == "--agent" { agent_author = True; }
                 elif flg == "--strict" { strict = True; }
                 elif flg == "--clarify" { clarify = True; }
+                # opt OUT of the adjudicator: assume Maybe for every obligation the
+                # deterministic pass could not settle. One fewer model call, and a
+                # compile with no model-dependent decision in it at all.
+                elif flg == "--no-adjudicate" { adjudicate = False; }
                 elif flg == "--lint" { lint_force = True; }
                 elif flg == "--no-lint" { no_lint = True; }
                 elif flg == "--legacy" { frontend = "legacy"; }
@@ -1173,7 +1180,8 @@ with entry:__main__ {
             try {
                 r = compile_skill(src_text, eject, eject_path,
                                   _compile_ev if _tty else None, agent_author,
-                                  os.path.dirname(os.path.abspath(path)), strict, ask, frontend, pre_spec);
+                                  os.path.dirname(os.path.abspath(path)), strict, ask, frontend, pre_spec,
+                                  adjudicate);
             } except Exception as e {
                 # the frontier model died under the compile (bad name, key,
                 # network) — one sentence + the log, never a provider stack

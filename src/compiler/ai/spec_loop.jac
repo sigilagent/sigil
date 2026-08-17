@@ -735,10 +735,13 @@ glob _ANSWER_MODALITY: dict[str, Modality] = {
     "dont": Modality.FORBIDDEN, "don't": Modality.FORBIDDEN, "never": Modality.FORBIDDEN
 };
 
-def apply_clarifications(rs: RuleSet, answers: dict[str, str]) -> list[str] {
-    # The interactive tier: a human's answer to a clarify question BINDS the rule's
-    # modality directly (Do/Maybe/Don't -> MANDATORY/DISCRETIONARY/FORBIDDEN), the
-    # same way a run-time gate binds control flow. Unanswered rules are untouched.
+def apply_clarifications(rs: RuleSet, answers: dict[str, str], source: str = "human") -> list[str] {
+    # The binding tier: an answer to a clarify question BINDS the rule's modality
+    # directly (Do/Maybe/Don't -> MANDATORY/DISCRETIONARY/FORBIDDEN), the same way
+    # a run-time gate binds control flow. Unanswered rules are untouched.
+    # `source` is PROVENANCE, not policy — the binding is identical whether the
+    # answer came from the human (--clarify) or the adjudicator; only the note
+    # differs, so a reader of the warnings can always tell which decided.
     notes: list[str] = [];
     for r in rs.rules {
         a = str(answers.get(r.id, "")).strip().lower();
@@ -746,17 +749,256 @@ def apply_clarifications(rs: RuleSet, answers: dict[str, str]) -> list[str] {
         if a not in _ANSWER_MODALITY { notes.append("clarify '" + r.id + "': unrecognized answer '" + a + "' — left unchanged"); continue; }
         m = _ANSWER_MODALITY[a];
         if (m == Modality.FORBIDDEN) and (r.kind == RuleKind.KNOWLEDGE) {
-            # The human resolved a kind/modality conflict as a REAL prohibition:
-            # it stops being a fact to carry and becomes a constraint to trace.
-            notes.append("clarify '" + r.id + "': KNOWLEDGE -> CONSTRAINT (human: a real prohibition)");
+            # The kind/modality conflict resolved as a REAL prohibition: it stops
+            # being a fact to carry and becomes a constraint to trace.
+            notes.append("clarify '" + r.id + "': KNOWLEDGE -> CONSTRAINT (" + source + ": a real prohibition)");
             r.kind = RuleKind.CONSTRAINT;
         }
         if m != r.modality {
-            notes.append("clarify '" + r.id + "': " + r.modality.name + " -> " + m.name + " (human)");
+            notes.append("clarify '" + r.id + "': " + r.modality.name + " -> " + m.name + " (" + source + ")");
             r.modality = m;
         }
     }
     return notes;
+}
+
+# ---------------------------------------------------------------------------
+# The ADJUDICATOR — answering the clarify questions with no human present.
+#
+# Two tiers already stand between a flagged obligation and a guess:
+# apply_structural_modality settles the ones whose heading or list intro states
+# a force outright (deterministic, already applied by the time we get here), and
+# resolve_ambiguous_default assumes MAYBE for everything left. This tier sits
+# between them: it ANSWERS the residue — the obligations structure could not
+# settle and the author never marked — instead of demoting them all alike.
+#
+# It stands in for the human that --clarify would ask, and it is held to the
+# rules that human is not: the answer must be sourced from the document, and
+# code decides whether it counts.
+#
+#   THE MODEL PROPOSES               one batched call over every residual item,
+#                                    each carrying its deterministic evidence
+#                                    packet (heading chain, neighbouring lines,
+#                                    which of them state a force of their own)
+#
+#   CODE DISPOSES                    ground_adjudications drops any answer whose
+#                                    cited span is not verbatim in the skill, or
+#                                    which only restates the obligation, or which
+#                                    re-modalizes a rule nobody flagged
+#
+#   ANYTHING DROPPED                 falls through to the standing MAYBE default
+#
+# On the model dependence this introduces, honestly: it is real and it is NOT
+# eliminated. Two models can read one heading differently and both cite it
+# verbatim, so grounding constrains WHERE an answer may come from, never WHICH
+# answer it is. That is why the deterministic tier runs first and keeps as much
+# as possible out of here, why every decision is reported with the model that
+# made it and the span it came from, and why --no-adjudicate exists to skip the
+# tier entirely for a reproducible compile. What this tier must never do is
+# decide silently.
+# ---------------------------------------------------------------------------
+
+obj Adjudication {
+    has rule_id: str = "";
+    has answer: str = "";       # do | maybe | dont
+    has evidence: str = "";
+    has rationale: str = "";
+}
+sem Adjudication = "One underspecified obligation answered from the skill's own text.";
+sem Adjudication.rule_id = "The flagged obligation's id (r1, r2, ...) — exactly as given in the ITEM.";
+sem Adjudication.answer = "The modal force the DOCUMENT shows the author intended: 'do' (always), 'maybe' (only when the task calls for it), or 'dont' (never).";
+sem Adjudication.evidence = "A span copied VERBATIM from the skill, from somewhere OTHER than the obligation's own sentence, that shows this intent — the section heading it sits under, a neighbouring line whose modal force it shares, the intro line governing its list. Evidence that is not verbatim in the skill, or that merely restates the obligation, is mechanically dropped and the obligation falls back to MAYBE.";
+sem Adjudication.rationale = "One short line: how that evidence settles this obligation.";
+
+obj AdjudicationSet {
+    has kept: list[Adjudication] = [];
+    has dropped: list[str] = [];
+}
+
+# Its OWN model handle rather than lift_llm: byllm's `__call__` writes call_params
+# onto the shared instance, and the adjudicator is the one slot whose answer is a
+# DECISION rather than a proposal — keeping it separately pinnable means it can be
+# aimed at a different tier (or a MockLLM in tests) without disturbing extraction.
+glob adjudge_llm: any = Model(model_name="gpt-4o-mini");
+
+def pin_adjudge_llm(m: any) -> None { adjudge_llm = m; }
+
+def adjudge_model_name(m: any) -> str {
+    # Named in the report: a decision this tier makes is model-dependent, so the
+    # compile output must say WHICH model made it.
+    try { return str(m.model_name); } except Exception as e { return "unknown"; }
+}
+
+sem adjudicate_ambiguous = """You are standing in for the SKILL'S AUTHOR to answer
+questions their prose left open. For each ITEM, decide whether the skill means it
+as a DO (the agent always does this), a MAYBE (only when the task calls for it), or
+a DON'T (never).
+
+Answer from THIS DOCUMENT ALONE. You are not being asked what is good practice in
+general, what the wider ecosystem does, or what you would recommend — only what
+this skill's own text shows its author intended. Domain knowledge is NOT evidence
+here: an obligation hardened into a DO because it sounds like sensible practice
+forces the compiled agent to do something the author never required, and nothing
+downstream can detect that.
+
+Every answer MUST carry `evidence`: a span copied VERBATIM from the skill, from
+somewhere OTHER than the obligation's own sentence. The obligation was flagged
+precisely because its own sentence carries no modal force, so quoting it back
+settles nothing. Useful evidence looks like: the heading of the section it lives in
+('## Required steps' vs '## Examples'), a sibling line in the same list that DOES
+state a force, or an intro line governing that list ('Always do each of the
+following:').
+
+When the document does not settle an item, OMIT it entirely. Omission is the correct,
+safe answer — it falls back to MAYBE, which never forces the agent's hand. Returning
+five well-evidenced answers and omitting three is better than guessing at all
+eight.""";
+sem adjudicate_ambiguous.skill = "The full skill text — the only admissible evidence.";
+sem adjudicate_ambiguous.items = "The flagged obligations: for each, its id, its sentence, why it was flagged, and the deterministic in-document context (heading chain and neighbouring lines, with any modal markers already noted).";
+def adjudicate_ambiguous(skill: str, items: str) -> list[Adjudication] by adjudge_llm();
+
+def section_context(skill: str, quote: str, radius: int = 3) -> str {
+    # The deterministic evidence packet for one flagged obligation, built from the
+    # same document walk apply_structural_modality uses. Everything here is read
+    # off the markdown by code; the model only gets to INTERPRET it, never to
+    # supply it — and ground_adjudications then checks the interpretation cites
+    # something that is actually in the document.
+    lines = str(skill).splitlines();
+    at = _locate(lines, quote);
+    if at < 0 { return ""; }
+    chain = _heading_chain(lines, at);
+    lo = max(0, at - radius);
+    hi = min(len(lines), at + radius + 1);
+    sibs: list[str] = [];
+    for i in range(lo, hi) {
+        if i == at { continue; }
+        t = str(lines[i]).strip();
+        if not t { continue; }
+        f = _force_of(t);
+        mark = "";
+        if f == "do" { mark = "   [states a DO]"; }
+        elif f == "dont" { mark = "   [states a DON'T]"; }
+        elif f == "maybe" { mark = "   [states a MAYBE]"; }
+        sibs.append("    " + t[:140] + mark);
+    }
+    out: list[str] = ["SECTION: " + (" > ".join(chain) if chain else "(no heading)")];
+    if sibs {
+        out.append("NEIGHBOURING LINES:");
+        out = out + sibs;
+    }
+    return "\n".join(out);
+}
+
+def ground_adjudications(skill: str, clarify: list[ClarifyItem],
+                         adjs: list[Adjudication]) -> AdjudicationSet {
+    # CODE DISPOSES — the bar ground_rules holds the spec to, applied to the
+    # adjudicator's answers. An answer survives only if:
+    #   (1) it answers an obligation that was actually FLAGGED (no drive-by
+    #       re-modalizing of rules nobody asked about);
+    #   (2) its answer is in the Do/Maybe/Don't vocabulary;
+    #   (3) its evidence appears VERBATIM in the skill — sourcing the answer in
+    #       the document rather than in the model's world knowledge;
+    #   (4) that evidence is NOT inside the obligation's own sentence — the flag
+    #       fired because that sentence states no force, so quoting it back is a
+    #       restatement, not evidence.
+    # Everything else falls through to the assume-Maybe default. This cannot make
+    # the tier deterministic — see the header — but it does bound every answer to
+    # text the author actually wrote.
+    sn = _norm(skill);
+    by_id: dict = {};
+    for c in clarify { by_id[c.rule_id] = c; }
+    out = AdjudicationSet();
+    seen: list[str] = [];
+    for a in adjs {
+        rid = str(a.rule_id).strip();
+        ans = str(a.answer).strip().lower().replace("'", "");
+        if rid not in by_id {
+            out.dropped.append(rid + ": adjudicated but never flagged — ignored");
+            continue;
+        }
+        if rid in seen {
+            out.dropped.append(rid + ": duplicate adjudication — ignored");
+            continue;
+        }
+        if ans not in _ANSWER_MODALITY {
+            out.dropped.append(rid + ": unrecognized answer '" + str(a.answer)[:30] + "'");
+            continue;
+        }
+        ev = str(a.evidence).strip();
+        if not _in_skill(sn, ev) {
+            out.dropped.append(rid + ": evidence is not verbatim in the skill");
+            continue;
+        }
+        if _norm(ev) in _norm(by_id[rid].quote) {
+            out.dropped.append(rid + ": evidence only restates the obligation itself");
+            continue;
+        }
+        seen.append(rid);
+        out.kept.append(a);
+    }
+    return out;
+}
+
+def resolve_ambiguous_auto(rs: RuleSet, clarify: list[ClarifyItem],
+                           adjs: AdjudicationSet) -> list[str] {
+    # Bind what the adjudicator answered, default the rest, and REPORT both —
+    # naming the model, because a decision that depends on the model must say so.
+    answers: dict[str, str] = {};
+    for a in adjs.kept { answers[str(a.rule_id)] = str(a.answer).strip().lower().replace("'", ""); }
+    warns: list[str] = [];
+    if answers {
+        before: dict = {};
+        for r in rs.rules { before[r.id] = r.modality.name; }
+        notes = apply_clarifications(rs, answers, "adjudicator");
+        warns.append(str(len(answers)) + " underspecified obligation(s) ANSWERED by the adjudicator ("
+                     + adjudge_model_name(adjudge_llm) + ") from the skill's own text — re-run with --clarify"
+                     + " to answer them yourself, or --no-adjudicate to assume Maybe:");
+        for a in adjs.kept {
+            rid = str(a.rule_id);
+            now = "";
+            for r in rs.rules { if r.id == rid { now = r.modality.name; } }
+            warns.append("  ~ " + rid + ": " + str(before.get(rid, "?")) + " -> " + now
+                         + '  (skill evidence: "' + str(a.evidence).strip().replace(chr(10), " ")[:60] + '")');
+        }
+        # a kind change is a bigger move than a modality change — surface it plainly
+        for n in notes { if "CONSTRAINT" in n { warns.append("    " + n); } }
+    }
+    if adjs.dropped {
+        # No silent caps: the adjudicator answered these and was REFUSED, so they
+        # fall to the default below. Saying so is how a reader tells "the document
+        # settled nothing" apart from "the adjudicator was never asked".
+        warns.append(str(len(adjs.dropped)) + " adjudication(s) rejected by the grounding check"
+                     + " (falling back to Maybe):");
+        for d in adjs.dropped { warns.append("  x " + str(d)[:110]); }
+    }
+    left = [c for c in clarify if c.rule_id not in answers];
+    return warns + resolve_ambiguous_default(rs, left);
+}
+
+def adjudicate_spec(skill: str, sr: SpecResult) -> list[str] {
+    # The tier end to end. Note what it is NOT asked to answer: everything
+    # apply_structural_modality already settled deterministically is absent from
+    # sr.clarify by now, so the model only ever sees the genuine residue.
+    if not sr.clarify { return []; }
+    _emit_spec({"phase": "adjudicate", "items": len(sr.clarify)});
+    items: list[str] = [];
+    for c in sr.clarify {
+        ctx = section_context(skill, c.quote);
+        items.append("---\nID: " + c.rule_id
+                     + "\nOBLIGATION: " + str(c.quote)[:300]
+                     + "\nWHY FLAGGED: " + str(c.reason)
+                     + (chr(10) + ctx if ctx else ""));
+    }
+    adjs: list = [];
+    try { adjs = list(adjudicate_ambiguous(skill, "\n".join(items))); }
+    except Exception as e {
+        # The adjudicator is an IMPROVEMENT on the standing default, never a
+        # dependency of it: a failed call degrades to assume-Maybe + warn, which
+        # is exactly the behavior --no-adjudicate selects on purpose.
+        return ["adjudicator unavailable (" + str(e)[:60] + ") — assuming Maybe"]
+             + resolve_ambiguous_default(sr.spec, sr.clarify);
+    }
+    return resolve_ambiguous_auto(sr.spec, sr.clarify, ground_adjudications(skill, sr.clarify, adjs));
 }
 
 def _covered(rs: RuleSet, span: str) -> bool {
