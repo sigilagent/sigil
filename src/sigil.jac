@@ -318,11 +318,12 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
         lr = lift(source, sig, skill_dir=skill_dir);
     }
     issues = lr.spec_issues + lr.spine_issues + lr.assemble_issues + lr.gate_issues;
+    agir = _emit_agir(lr.ir_text, sig, eject_path if eject else "");
     if (lr.status == "failed") or ((strict or strict_mode()) and not lr.ok) {
         return {"ok": False, "status": lr.status, "signature": sig, "issues": issues,
                 "findings": lr.findings, "fixes": lr.fixes,
                 "compile_errors": lr.compile_errors, "repairs": lr.repairs,
-                "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
+                "agir": agir, "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
     }
     v = next_version(reg, sig);
     path = write_module(lr.module_src, sig, v, WORKDIR);
@@ -336,9 +337,38 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     }
     return {"ok": True, "status": lr.status, "signature": tg.signature, "module": tg.module,
             "issues": issues, "findings": lr.findings, "fixes": lr.fixes,
-            "repairs": lr.repairs, "eject": ejected,
+            "repairs": lr.repairs, "eject": ejected, "agir": agir,
             "env": lr.env_report, "par": lr.par_report, "explain": explain(lr)};
 }
+
+# The AG-IR is the compiler's real intermediate product, and it is most valuable
+# exactly when the compile FAILS: a dropped rule, an unlowerable module or a
+# faithfulness gap can only be diagnosed by reading the IR that produced it.
+# Until now it was persisted only on success, so every failed compile threw away
+# the one artifact that explains it. Emit it on every path, always.
+def _emit_agir(ir_text: str, sig: str, eject_path: str) -> str {
+    body = str(ir_text or "").strip();
+    if not body { return ""; }
+    # beside the ejected artifact when there is one (agent.jac -> agent.agir),
+    # otherwise in the workspace under the skill signature
+    p: str = "";
+    if eject_path {
+        base: str = str(eject_path);
+        if base.endswith(".jac") { base = str(base[0:len(base) - 4]); }
+        p = str(base) + ".agir";
+    } else {
+        p = str(os.path.join(WORKDIR, str(sig).replace("-", "_") + ".agir"));
+    }
+    try {
+        d = os.path.dirname(p);
+        if d { os.makedirs(d, exist_ok=True); }
+        with open(p, "w") as fh { fh.write(body); }
+        return p;
+    } except Exception as e {
+        return "";
+    }
+}
+
 
 def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_path: str,
                     progress: any, skill_dir: str, strict: bool, ask: any,
@@ -364,12 +394,13 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
         note = note + chr(10) + chr(10) + "skill quality:" + chr(10)
              + chr(10).join(["  " + str(w) for w in rr.warnings]);
     }
+    agir = _emit_agir(rr.ir_text, sig, eject_path if eject else "");
     if not ok {
         return {"ok": False, "status": rr.status, "signature": sig,
                 "issues": [str(f["message"]) for f in findings],
                 "findings": findings, "fixes": [], "repairs": rr.repairs,
                 "warnings": rr.warnings, "compile_errors": rr.compile_errors,
-                "env": [], "par": [], "explain": note};
+                "agir": agir, "env": [], "par": [], "explain": note};
     }
     path = write_module(rr.module_src, sig, version, WORKDIR);
     desc = skill_description(source);
@@ -383,7 +414,8 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     return {"ok": True, "status": rr.status, "signature": tg.signature, "module": tg.module,
             "version": tg.version, "origin": tg.origin,
             "issues": [], "findings": findings, "fixes": [], "repairs": rr.repairs,
-            "warnings": rr.warnings, "eject": ejected, "env": [], "par": [], "explain": note};
+            "warnings": rr.warnings, "eject": ejected, "agir": agir,
+            "env": [], "par": [], "explain": note};
 }
 
 
@@ -681,6 +713,27 @@ walker:pub api_observability {
 
 walker:pub api_cron_list {
     can run with Root entry { report report_for("cron_list", {}); }
+}
+
+walker:pub api_cron_runs {
+    has name: str;
+    can run with Root entry { report report_for("cron_runs", {"name": self.name}); }
+}
+
+walker:pub api_cron_enable {
+    has name: str;
+    has on: bool = True;
+    can run with Root entry { report report_for("cron_enable", {"name": self.name, "on": self.on}); }
+}
+
+walker:pub api_cron_remove {
+    has name: str;
+    can run with Root entry { report report_for("cron_remove", {"name": self.name}); }
+}
+
+walker:pub api_skill_agir {
+    has signature: str;
+    can run with Root entry { report report_for("skill_agir", {"signature": self.signature}); }
 }
 
 walker:pub api_tasks {

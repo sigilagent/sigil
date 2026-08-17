@@ -4,6 +4,7 @@ date: 2026-08-12
 author: Jayanaka Dantanarayana
 description: Reading a procedure is not the same as executing it. How Sigil compiles SKILL.md into a typed agent harness — and what that does to procedure compliance.
 hero: ../assets/blog/skill-compiler-banner.png
+discuss: https://news.ycombinator.com/item?id=49330488
 ---
 
 AI agents have become remarkably capable. They can write code, analyze documents, call APIs, search repositories, operate tools, and complete tasks that require several stages of reasoning.

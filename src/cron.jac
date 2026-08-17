@@ -23,7 +23,7 @@ import from .sigil_core { awaken, Soul }
 import from .agent { run_task }
 import from .hooks { fire_hooks }
 import from .channels { message_send }
-import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid }
+import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid, local_tz, describe_schedule }
 import from .sigil_api { report_for }
 import from .sigil_runtime {
     write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
@@ -38,7 +38,7 @@ node CronJob {
     has name: str;
     has kind: str = "at";          # at | every | cron
     has spec: str = "";            # at: epoch-ms ; every: seconds ; cron: expression
-    has tz: str = "UTC";
+    has tz: str = "";           # "" = the host's local wall clock; "UTC" is explicit
     has task: str = "";            # the system-event / prompt run when the job fires
     has channel: str = "";         # optional delivery target: "<channel>" or "<channel>:<peer>"
     has wake: bool = True;
@@ -89,7 +89,7 @@ def _jobs(soul: Soul) -> list[CronJob] {
 }
 
 def cron_add(name: str, kind: str, spec: str, task: str,
-             tz: str = "UTC", channel: str = "", delete_after_run: bool = False) -> dict {
+             tz: str = "", channel: str = "", delete_after_run: bool = False) -> dict {
     soul = awaken();
     resolved = spec;
     if kind == "at" { resolved = str(parse_at(spec)); }   # normalize to epoch-ms
@@ -122,6 +122,8 @@ def cron_list() -> list {
     out: list = [];
     for j in _jobs(soul) {
         out.append({"name": j.name, "kind": j.kind, "spec": j.spec, "enabled": j.enabled,
+                    "tz": j.tz, "zone": (j.tz or local_tz() or "local"),
+                    "schedule": describe_schedule(j.kind, j.spec, j.tz),
                     "next_run_ms": j.next_run_ms, "runs": j.runs, "errors": j.errors,
                     "last_status": j.last_status, "task": j.task[:60]});
     }

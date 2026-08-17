@@ -20,6 +20,7 @@ import sys;
 import time;
 import sqlite3;
 import threading;
+import signal;
 import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
@@ -49,6 +50,9 @@ import from src.sigil_runtime { _jac_bin, read_pid, project_root }
 import from src.sigil_errors { install_error_log, friendly_llm_error, log_error, error_log_path }
 import from src.sigil_api { JSON_MARKER }
 import from src.eject_agent { eject_agent, carries_compiler }
+import from src.sigil_serve {
+    serve_start, serve_stop, serve_status, serve_logs, mark_serving, unmark_serving
+}
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
     scheduler_running,
@@ -553,13 +557,31 @@ def serve_observatory(port: str) {
     # (8199 unless overridden) — claimed strictly via _claim_port, never
     # silently moved. jac.toml pins the server's SQLite store to
     # `.jac/data/sigil.db` (the CLI's project db); this handles the root side.
-    proj = os.path.dirname(os.path.abspath(__file__));
+    # project_root(), not this file's own directory: main.jac lives in src/, so
+    # __file__'s dirname is src/ and every path below would hang off it — the
+    # server would be started from src/observatory.jac (which does not exist)
+    # against src/.jac/data (an empty graph), silently.
+    proj = project_root();
     data = os.path.join(proj, ".jac", "data");
     port = str(port) if port else OBSERVATORY_PORT;
     if not _claim_port(port) { return; }
     aligned = _align_guest_root(data);
     cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac"), "--port", port];
     p = subprocess.Popen(cmdline, cwd=proj);
+    # Record ourselves as THE observatory, whether this is a terminal run or the
+    # detached child of `serve start` — otherwise `serve status` would only ever
+    # see servers started one particular way.
+    mark_serving(port);
+    # `serve stop` sends SIGTERM here, not to the jac child. Without a handler the
+    # default action kills this supervisor outright and leaves that child holding
+    # the port — the orphan `stop` would then have to hunt down. Reap it instead.
+    def _bye(signum: any, frame: any) -> None {
+        try { p.terminate(); } except Exception as _e { }
+        unmark_serving();
+        sys.exit(0);
+    }
+    try { signal.signal(int(signal.SIGTERM), _bye); }
+    except Exception as _sigerr { }
     try {
         # First-ever start: the server creates the auth store moments after
         # boot; align the guest root as soon as it lands so run #1 shares the
@@ -575,6 +597,7 @@ def serve_observatory(port: str) {
         p.terminate();
         p.wait();
     }
+    unmark_serving();
 }
 
 with entry:__main__ {
@@ -621,7 +644,42 @@ with entry:__main__ {
     }
 
     if (cmd == "serve") or (cmd == "observatory") {
-        serve_observatory(_arg(argv, 1));
+        # `serve [port]` still runs in the foreground (Ctrl-C to stop) — the
+        # subcommands below give it the daemon's lifecycle instead.
+        sub = _arg(argv, 1);
+        if sub == "start" {
+            r = serve_start(_arg(argv, 2));
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            if r.get("starting") {
+                print("observatory starting — pid " + str(r["pid"]) + ", " + str(r["url"]));
+                print("  building the web client; it answers in ~30s (sigil serve status)");
+            } else {
+                print("observatory started — pid " + str(r["pid"]) + ", " + str(r["url"]));
+            }
+            print("  log : " + str(r["log"]) + "   (sigil serve logs)");
+            print("  stop: sigil serve stop");
+        } elif sub == "stop" {
+            r = serve_stop();
+            if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
+            extra = ("  (also cleared orphan pid " + str(r["orphan"]) + ")") if ("orphan" in r) else "";
+            print("observatory stopped (pid " + str(r["pid"]) + ")" + extra);
+        } elif sub == "status" {
+            s = serve_status();
+            if s["running"] {
+                print("observatory: running — pid " + str(s["pid"]) + ", " + str(s["url"])
+                      + ("   (adopted: not started by `serve start`)" if s["adopted"] else ""));
+            } else {
+                print("observatory: NOT running   (sigil serve start)");
+            }
+            print("  port  : " + str(s["port"]));
+            print("  graph : " + str(s["graph"]));
+            print("  log   : " + str(s["log"]));
+            if s["owner"] { print("  owner : " + str(s["owner"])); }
+        } elif sub == "logs" {
+            print(serve_logs(_to_int(_arg(argv, 2), 40)));
+        } else {
+            serve_observatory(sub);
+        }
     } elif cmd == "solve" {
         task = _arg(argv, 1);
         skill = _arg(argv, 2);
@@ -764,7 +822,7 @@ with entry:__main__ {
         sub = _arg(argv, 1);
         if sub == "add" {
             r = cron_add(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5),
-                         _arg(argv, 6) if len(argv) > 6 else "UTC", _arg(argv, 7), False);
+                         _arg(argv, 6) if len(argv) > 6 else "", _arg(argv, 7), False);
             if not r.get("ok", True) {
                 print("xx " + str(r["error"]), file=sys.stderr);
                 sys.exit(1);
@@ -1000,6 +1058,15 @@ with entry:__main__ {
             }
             elif name == "cron_tick" { payload["data"] = cron_tick(); }
             elif name == "cron_list" { payload["data"] = cron_list(); }
+            elif name == "cron_runs" { payload["data"] = cron_runs(str(a.get("name", ""))); }
+            elif name == "cron_enable" {
+                payload["data"] = cron_enable(str(a.get("name", "")), bool(a.get("on", True)));
+            }
+            elif name == "cron_remove" { payload["data"] = cron_remove(str(a.get("name", ""))); }
+            elif name == "skill_agir" {
+                import from src.sigil_agir_view { skill_agir }
+                payload["data"] = skill_agir(str(a.get("signature", "")));
+            }
             elif name == "tasks" { payload["data"] = tasks_list(int(a.get("n", 20))); }
             elif name == "hooks" { payload["data"] = hook_list(); }
             elif name == "channels" { payload["data"] = channel_list(); }
@@ -1118,6 +1185,9 @@ with entry:__main__ {
             }
             _HB["on"] = False;
             if _tty { _vb_close(); print(""); }
+            # The AG-IR is emitted on EVERY compile, and a failed compile is
+            # exactly when you need to read it — report the path in both branches.
+            if r.get("agir") { print("AG-IR: " + str(r["agir"])); }
             if not r["ok"] {
                 # the fix-forward exit note: what failed, what the ladder
                 # tried, and the next concrete step — never a bare issue dump.

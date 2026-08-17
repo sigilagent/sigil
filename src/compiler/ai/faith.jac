@@ -223,12 +223,32 @@ obj FaithFinding {
 
 obj FaithReport {
     has ok: bool = False;             # no faithfulness violations (dropped or added)
+    # False when the text did not parse to an IR at all. Such a report carries a
+    # SINGLE coherence finding, so by raw gap count it scores 1 — better than any
+    # genuine repair with real gaps. The repair ladder must never treat "did not
+    # parse" as "almost perfect"; see gap_score().
+    has parsed: bool = True;
     has rules_total: int = 0;
     has realized: int = 0;
     has dropped: list[FaithFinding] = [];    # completeness violations (rule -> nothing)
     has added: list[FaithFinding] = [];      # soundness violations (element -> no rule)
     has by_shape: dict[str, int] = {};       # realized count per shape (the breakdown)
 }
+
+# How far a candidate is from faithful, for ladder COMPARISONS.
+#
+# An unparseable IR carries ONE coherence finding, so by raw gap count it scores
+# 1 — better than any genuine repair with real gaps. That is exactly what sank
+# pptx: the authored IR did not parse (scored 1), the repair round produced a
+# PARSEABLE IR with 31 real gaps (scored 31), the ladder "kept prior", and the
+# unparseable text went to lowering, which found no nodes and reported the whole
+# compile as UNFAITHFUL 0/130. A candidate that does not parse must lose to any
+# candidate that does.
+def gap_score(fr: FaithReport) -> int {
+    if not fr.parsed { return 1000000 + fr.rules_total; }
+    return len(fr.dropped) + len(fr.added);
+}
+
 
 def classify(axis: str) -> str {
     # The reprioritization: faithfulness fails, coherence degrades.
@@ -251,17 +271,33 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
     if (not isinstance(ir, dict)) or (not ir.get("nodes")) { return ""; }
     by_id: dict = {};
     for r in spec.rules { by_id[r.id] = r; }
+    # Partition the slots ONCE. A prohibition rides the model-owned working
+    # nodes it governs — but a fully DETERMINISTIC pipeline owns every node as
+    # code, and skipping those left the fold with nowhere to write, so it
+    # returned "" and the gate stayed permanently unsatisfiable (azure-bgp:
+    # 5/6, one CONSTRAINT rule and no model node in the whole IR). CONSTRAINT is
+    # realized by any TRACED node — check_completeness reads traces_to and
+    # ignores owner — so fall back to the code nodes instead of folding nothing.
+    # TERMINAL is never a target either way: an end marker is not a slot a
+    # prohibition can govern.
+    model_nodes: list = [];
+    code_nodes: list = [];
+    for nd in list(ir.get("nodes") or []) {
+        if not isinstance(nd, dict) { continue; }
+        ntype = _ntype(nd.get("type"));
+        if ntype == "TERMINAL" { continue; }
+        owner = str(nd.get("owner", "model")).lower();
+        if (owner == "code") or (ntype == "CODE") { code_nodes.append(nd); }
+        else { model_nodes.append(nd); }
+    }
+    targets: list = model_nodes if model_nodes else code_nodes;
     touched = False;
     for rid in drop_ids {
         r = by_id.get(str(rid));
         if not r { continue; }
         text = (str(r.statement).strip() or str(r.quote).strip());
         if not text { continue; }
-        for nd in list(ir.get("nodes") or []) {
-            if not isinstance(nd, dict) { continue; }
-            ntype = _ntype(nd.get("type"));
-            owner = str(nd.get("owner", "model")).lower();
-            if (owner == "code") or (ntype in ["TERMINAL", "CODE"]) { continue; }
+        for nd in targets {
             doc = str(nd.get("doc") or "");
             nd["doc"] = doc + ("\n" if doc else "") + "PROHIBITION (" + str(rid) + "): " + text;
             tl = _slist(nd.get("traces_to"));
@@ -461,7 +497,7 @@ def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     if not pir.ok {
         # No parseable IR at all is a coherence failure (G4 territory), not a
         # faithfulness verdict — report it honestly rather than as "all dropped".
-        fr = FaithReport(ok=False, rules_total=len(spec.rules));
+        fr = FaithReport(ok=False, rules_total=len(spec.rules), parsed=False);
         fr.dropped = [FaithFinding(axis="coherence", severity="error", rule="", shape="",
             message="IR did not parse — cannot verify faithfulness (fix the compile first)")];
         return fr;

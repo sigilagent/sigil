@@ -818,7 +818,7 @@ def observability_tail(n: int = 120) -> VObs {
 }
 
 # ---------------------------------------------------------------------------
-# Server-mode endpoints (`jac start src/observatory.jac`) — the OpenClaw-style drop-in: a
+# Server-mode endpoints (`jac start observatory.jac`) — the OpenClaw-style drop-in: a
 # channel adapter POSTs to these. Swap `:pub` -> `:priv` and each user gets an
 # isolated root graph (their own soul, skills, MCP servers) with JWT auth, for
 # free. `has` fields are the request body; `report` is the response.

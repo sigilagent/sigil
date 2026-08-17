@@ -117,6 +117,25 @@ footer{border-top:1px solid var(--line);margin-top:70px;padding:34px 24px 46px}
 .foot-inner{max-width:1080px;margin:0 auto;display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:14px}
 .foot-inner a{color:var(--muted)} .foot-inner a:hover{color:var(--text)}
 
+/* "Discuss on Hacker News" button, shown under the byline when a post's
+   front matter carries a `discuss:` link. HN orange so it reads as what it
+   is, in the site's own pill shape. The wrapper's negative top margin tucks
+   it under the byline, whose own bottom margin sets the gap below. */
+.post-actions{margin:-19px 0 34px}
+.discuss{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:13px;color:var(--text);
+  border:1px solid rgba(255,102,0,.42);background:rgba(255,102,0,.08);
+  padding:8px 15px 8px 11px;border-radius:100px;transition:.15s ease;
+}
+.discuss:hover{color:var(--text);border-color:#ff6600;background:rgba(255,102,0,.16)}
+.discuss .yc{
+  width:18px;height:18px;flex:0 0 auto;border-radius:4px;background:#ff6600;color:#fff;
+  font-weight:700;font-size:12px;display:inline-flex;align-items:center;justify-content:center;
+}
+.discuss .arrow{display:inline-block;color:var(--faint);transition:.15s ease}
+.discuss:hover .arrow{color:#ff6600;transform:translateX(2px)}
+
 /* in-article banner card: rendered natively (HTML/SVG) instead of a PNG,
    so it stays crisp, theme-matched, and the mark animates like the hero */
 .post-banner-wrap{margin:28px 0}
@@ -169,6 +188,14 @@ article .code pre .k{color:var(--violet)}
 article .code pre .s{color:#4ade80}
 article .code pre .p{color:#f5c451}
 """
+
+# rendered into a post's header when its front matter sets `discuss:`
+DISCUSS_BTN = (
+    '  <div class="post-actions"><a class="discuss" href="{url}" '
+    'target="_blank" rel="noopener">'
+    '<span class="yc">Y</span>Discuss on Hacker News'
+    '<span class="arrow">→</span></a></div>'
+)
 
 # fills the <!--LATEST_POST--> slot in the landing page hero, so publishing a
 # post advertises itself there instead of needing a hand-edit
@@ -289,6 +316,7 @@ article hr{{border:0;border-top:1px solid var(--line);margin:34px 0}}
     <span class="kicker">Blog</span>
     <h1 class="post-title">{title}</h1>
     <p class="post-meta">{date_display} · <b>{author}</b> · {readtime} min read</p>
+{discuss}
   </header>
   <article>
 {body}
@@ -384,6 +412,7 @@ def build_blog() -> int:
             "description": meta.get("description", ""),
             "author": meta.get("author", "The Sigil project"),
             "hero": meta.get("hero", ""),
+            "discuss": meta.get("discuss", ""),
             "date": d,
             "date_display": f"{d:%B} {d.day}, {d.year}",
             "readtime": max(1, round(len(body_md.split()) / 200)),
@@ -404,6 +433,7 @@ def build_blog() -> int:
             date_display=post["date_display"],
             author=esc(post["author"]),
             readtime=post["readtime"],
+            discuss=DISCUSS_BTN.format(url=esc(post["discuss"])) if post["discuss"] else "",
             body=post["body"],
         )
         (out_dir / f"{post['slug']}.html").write_text(

@@ -175,9 +175,10 @@ live web UI over the graph with token observability on every run.
 ## Layout
 
 ```
+observatory.jac          full-stack server entrypoint — API + web UI
+                         (root: jac derives the client entry from the basename)
 src/
   main.jac               CLI entrypoint (compile / solve / chat / serve / …)
-  observatory.jac        full-stack server entrypoint — API + web UI
   compiler/              THE COMPILER
     ai/                    LIFT: spec_loop · workflow · flows · assemble · gates · repair · eject
     mechanical/            LOWER: the AG-IR → OSP transpiler + runtime assets

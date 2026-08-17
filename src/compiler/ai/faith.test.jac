@@ -80,6 +80,76 @@ test "fold_untraced_prohibitions traces the prohibition on model nodes only" {
     assert [f.rule for f in d] == [];
 }
 
+glob ALL_CODE_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: parse
+    type: CODE
+    owner: code
+    doc: Parse the route table.
+    traces_to: [r_step]
+  - id: emit
+    type: CODE
+    owner: code
+    doc: Write the report.
+    traces_to: [r_write]
+  - id: done
+    type: TERMINAL
+""";
+
+test "fold falls back to code nodes when the pipeline is fully deterministic" {
+    # azure-bgp's shape: every node owner=code, one CONSTRAINT rule dropped.
+    # Model-only folding wrote nowhere and returned "", so the gate could never
+    # be satisfied and the compile failed at 5/6 with no autofix rung logged.
+    spec = RuleSet(rules=[
+        Rule(id="r_step", quote="Parse the route table", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r_write", quote="Write the report", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r_policy", quote="Fix problems using routing policy rather than changing topology",
+             statement="fix via routing policy, never by changing topology",
+             kind=RuleKind.CONSTRAINT, modality=Modality.MANDATORY)
+    ]);
+    folded = fold_untraced_prohibitions(ALL_CODE_IR, spec, ["r_policy"]);
+    assert folded;
+    pir = parse_ir(folded);
+    by_id: dict = {};
+    for n in pir.nodes { by_id[n.id] = n; }
+    assert "r_policy" in by_id["parse"].traces_to;
+    assert "r_policy" in by_id["emit"].traces_to;
+    assert "PROHIBITION (r_policy): fix via routing policy" in by_id["parse"].doc;
+    # the end marker is not a slot a prohibition can govern, fallback or not
+    assert "r_policy" not in by_id["done"].traces_to;
+    assert by_id["done"].doc == "";
+    # and the gate the compile stalled on is now closed
+    assert [f.rule for f in check_completeness(spec, pir)] == [];
+}
+
+test "an unparseable IR ranks WORSE than a parseable one with real gaps" {
+    # The pptx failure: the authored IR did not parse, so its report carried one
+    # coherence finding and scored 1 — beating the repair round's parseable IR
+    # with 31 real gaps. The ladder "kept prior", lowering found no nodes, and
+    # the compile was reported as UNFAITHFUL 0/130 instead of uncompilable.
+    spec = RuleSet(rules=[
+        Rule(id="r1", quote="Parse the route table", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="Write the report", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    unparseable = faithfulness_report(spec, "not: [valid yaml at all");
+    assert not unparseable.parsed;
+    assert len(unparseable.dropped) == 1;          # one coherence finding ...
+    assert gap_score(unparseable) > 1000;          # ... but it must not score 1
+
+    # a PARSEABLE candidate that drops BOTH rules is still preferable
+    parseable_but_bad = faithfulness_report(spec, """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: x
+    type: GEN-RAW
+    doc: does something unrelated
+    traces_to: []
+""");
+    assert parseable_but_bad.parsed;
+    assert gap_score(parseable_but_bad) < gap_score(unparseable);
+}
+
 test "fold refuses non-constraint drops and unknown rules" {
     spec = RuleSet(rules=[
         Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY)

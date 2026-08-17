@@ -19,7 +19,9 @@
 #   sigil daemon install               # start at login (launchd / systemd)
 #
 # Prefer a server + web dashboard? Start the gateway, then point at it:
-#   sigil serve                        # Observatory web UI + HTTP API
+#   sigil serve start                  # Observatory in the background, prompt returns
+#   sigil serve status | logs | stop
+#   sigil serve                        # ...or run it in this terminal (Ctrl-C to stop)
 #   export SIGIL_URL=http://localhost:8199   # route commands to that gateway
 #   sigil login                        # once — caches a JWT
 #
@@ -83,7 +85,11 @@ case "$cmd" in
   # aligns the server's guest root before the server boots. Exec'ing jac start
   # here skipped both, which is one of the reasons the Observatory showed an
   # empty agent.
-  serve)      exec "$JAC" run "$HERE/src/main.jac" -- serve "${SIGIL_PORT:-8199}" ;;
+  # `serve` alone is the foreground server on SIGIL_PORT; `serve start|stop|
+  # status|logs` are the lifecycle subcommands and must reach main.jac verbatim
+  # (passing SIGIL_PORT in their place is how `serve start` became `serve 8199`).
+  serve)      if [ "$#" -gt 0 ]; then exec "$JAC" run "$HERE/src/main.jac" -- serve "$@";
+              else exec "$JAC" run "$HERE/src/main.jac" -- serve "${SIGIL_PORT:-8199}"; fi ;;
   login)      login ;;
   update)     echo "Updating Sigil to the latest release…"
               exec bash -c 'curl -fsSL "${SIGIL_INSTALL_URL:-https://github.com/sigilagent/sigil/releases/latest/download/install.sh}" | bash' ;;
