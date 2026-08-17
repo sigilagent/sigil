@@ -158,6 +158,135 @@ test "apply_clarifications binds a human's Do/Maybe/Don't answer to the rule's m
     assert len(notes) == 2;                        # a and c changed; b did not
 }
 
+# ---------------------------------------------------------------------------
+# Structural inference — force stated ABOUT a span by its heading or list intro.
+# Every assertion below runs with no model in the process at all.
+# ---------------------------------------------------------------------------
+
+glob SKILL_SECTIONS: str = """# Release Guide
+
+## Required steps
+Run the validator before shipping.
+Update the changelog.
+
+## Examples
+Bump the minor version.
+
+## Cleanup
+You may optionally:
+- Prune stale release branches.
+- Archive the old tags.
+
+## Notes
+Delete the upstream remote.
+""";
+
+test "a heading's own modal marker governs the spans under it" {
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="Run the validator before shipping.", modality=Modality.DISCRETIONARY),
+        Rule(id="r2", quote="Update the changelog.", modality=Modality.DISCRETIONARY)
+    ]);
+    settled = apply_structural_modality(SKILL_SECTIONS, rs);
+    # '## Required steps' carries a mandatory marker; both spans inherit it
+    assert rs.rules[0].modality == Modality.MANDATORY;
+    assert rs.rules[1].modality == Modality.MANDATORY;
+    assert "Required steps" in settled["r1"];    # the binding names its own evidence
+    assert "Required steps" in settled["r2"];
+}
+
+test "an illustrative heading demotes an unmarked mandate to a maybe" {
+    rs = RuleSet(rules=[
+        Rule(id="r3", quote="Bump the minor version.", modality=Modality.MANDATORY)
+    ]);
+    apply_structural_modality(SKILL_SECTIONS, rs);
+    assert rs.rules[0].modality == Modality.DISCRETIONARY;
+}
+
+test "a list intro governs its items, and outranks the heading above it" {
+    rs = RuleSet(rules=[
+        Rule(id="r4", quote="Prune stale release branches.", modality=Modality.MANDATORY),
+        Rule(id="r5", quote="Archive the old tags.", modality=Modality.MANDATORY)
+    ]);
+    settled = apply_structural_modality(SKILL_SECTIONS, rs);
+    # 'You may optionally:' is the nearer scope; '## Cleanup' states no force anyway
+    assert rs.rules[0].modality == Modality.DISCRETIONARY;
+    assert rs.rules[1].modality == Modality.DISCRETIONARY;
+    assert "may optionally" in settled["r4"];
+}
+
+test "a span under a heading that states no force is left alone" {
+    # '## Notes' carries no marker and is not in the illustrative vocabulary —
+    # structure genuinely does not settle this one, so nothing is invented.
+    rs = RuleSet(rules=[
+        Rule(id="r6", quote="Delete the upstream remote.", modality=Modality.MANDATORY)
+    ]);
+    settled = apply_structural_modality(SKILL_SECTIONS, rs);
+    assert settled == {};
+    assert rs.rules[0].modality == Modality.MANDATORY;   # untouched, still flaggable
+}
+
+test "a span that states its own force is never overridden by its container" {
+    # 'Never force-push to main.' under '## Required steps' stays a Don't — the
+    # span's own marker always wins over the scope enclosing it.
+    skill = "## Required steps\nNever force-push to main.\n";
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="Never force-push to main.", modality=Modality.FORBIDDEN)
+    ]);
+    assert apply_structural_modality(skill, rs) == {};
+    assert rs.rules[0].modality == Modality.FORBIDDEN;
+}
+
+test "a conditional span keeps its own gate rather than the section's force" {
+    skill = "## Required steps\nIf the build is tagged, publish the artifact.\n";
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="If the build is tagged, publish the artifact.",
+             modality=Modality.MANDATORY, condition="If the build is tagged")
+    ]);
+    assert apply_structural_modality(skill, rs) == {};
+}
+
+test "structurally settled obligations are no longer flagged as underspecified" {
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="Run the validator before shipping.", modality=Modality.MANDATORY),
+        Rule(id="r6", quote="Delete the upstream remote.", modality=Modality.MANDATORY)
+    ]);
+    settled = apply_structural_modality(SKILL_SECTIONS, rs);
+    clar = flag_ambiguous(SKILL_SECTIONS, rs, settled);
+    ids = [c.rule_id for c in clar];
+    assert "r1" not in ids;      # '## Required steps' stated it
+    assert "r6" in ids;          # '## Notes' did not — still the author's call
+}
+
+test "the same skill produces the same bindings on every run" {
+    # The property the pass exists for: no model, no sampling, no tier — the
+    # frozen spec cannot vary with what is compiling it.
+    first: dict = {};
+    for _i in range(0, 5) {
+        rs = RuleSet(rules=[
+            Rule(id="r1", quote="Run the validator before shipping.", modality=Modality.DISCRETIONARY),
+            Rule(id="r3", quote="Bump the minor version.", modality=Modality.MANDATORY),
+            Rule(id="r4", quote="Prune stale release branches.", modality=Modality.MANDATORY)
+        ]);
+        got = apply_structural_modality(SKILL_SECTIONS, rs);
+        got["__mods"] = ",".join([r.modality.name for r in rs.rules]);
+        if not first { first = got; }
+        assert got == first;
+    }
+    assert first["__mods"] == "MANDATORY,DISCRETIONARY,DISCRETIONARY";
+}
+
+test "a descriptive fact under a prohibiting scope stays a fact" {
+    # KNOWLEDGE is not conscripted into a constraint by its container — that
+    # kind/modality call belongs to flag_ambiguous and the human, not here.
+    skill = "## Never do these\nThe harness refuses to guess.\n";
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="The harness refuses to guess.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.MANDATORY)
+    ]);
+    assert apply_structural_modality(skill, rs) == {};
+    assert rs.rules[0].kind == RuleKind.KNOWLEDGE;
+}
+
 glob FM_SKILL: str = """---
 name: csv-extractor
 description: >-

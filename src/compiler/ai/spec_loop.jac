@@ -83,6 +83,7 @@ obj SpecResult {
     has spec: RuleSet = RuleSet();
     has verdict: ExtractVerdict = ExtractVerdict();
     has clarify: list[ClarifyItem] = [];   # underspecified obligations (the skill-quality report)
+    has settled: dict = {};                # rule_id -> the heading/intro that stated its force
 }
 
 glob lift_llm: any = Model(model_name="gpt-4o-mini");
@@ -444,17 +445,190 @@ def _has_discr_marker(q: any) -> bool {
     return False;
 }
 
-def flag_ambiguous(skill: str, rs: RuleSet) -> list[ClarifyItem] {
+# ---------------------------------------------------------------------------
+# Structural inference — the modal force the document states ABOUT a span
+# rather than IN it.
+#
+# demote_examples already reads one structural signal (a ``` fence) and settles
+# the spans inside it. The same move generalizes: markdown puts obligations
+# under headings and inside lists, and either can carry a force the item itself
+# omits.
+#
+#     ## Required steps           <- the heading mandates its whole section
+#     Run the validator.          <- states no marker, but is not a maybe
+#
+#     You may optionally:         <- the intro governs the list under it
+#     - Bump the minor version.   <- states no marker, but is not a mandate
+#
+# This is DOCUMENT STRUCTURE, exactly like the fence: which heading encloses a
+# line and which intro opens a list are facts about the markdown, and the force
+# is then read with the SAME deontic marker tables the rest of the module uses.
+# No model is consulted anywhere in this pass.
+#
+# That last point is the requirement, not a bonus. The spec is the anchor every
+# later stage is audited against, so a decision here that varied with the model
+# doing the compiling would make the anchor itself model-dependent — and unlike
+# extraction, where ground_rules mechanically drops anything not verbatim, a
+# modality verdict has no such check behind it. Two models could read the same
+# heading oppositely and both pass every gate. Code has to own this or nothing
+# does.
+#
+# Deliberately narrow, for the same reason. Inheritance fires only when the
+# governing line states exactly one force under the standing precedence, and
+# only for a span that states none of its own. Open-vocabulary reading of
+# headings ('## Recipes', '## Common tasks') is NOT attempted — that is
+# interpretation, and interpretation is what --clarify and the standing
+# assume-Maybe default are for. Whatever structure cannot settle stays flagged
+# exactly as before, so this pass only ever shrinks the guesswork.
+# ---------------------------------------------------------------------------
+
+glob _LIST_ITEM: str = r"^\s*([-*+]|\d+[.)])\s+";
+
+# A CLOSED vocabulary of heading words that mark a section as demonstration.
+# Kept explicit and short on purpose: it is the same kind of table as
+# _MAND_MARKERS, auditable by reading it, and it does not grow by inference.
+glob _ILLUSTRATIVE_HEADINGS: list[str] = [
+    "example", "examples", "sample", "samples", "demo", "demos",
+    "demonstration", "demonstrations", "illustration", "illustrations"
+];
+
+def _force_of(line: any) -> str {
+    # The single force a line states, under the module's standing precedence: a
+    # prohibition outranks a mandate ("you must never" is a Don't), a mandate
+    # outranks discretion. "" when the line states none.
+    if _has_forbid_marker(line) { return "dont"; }
+    if _has_mand_marker(line) { return "do"; }
+    if _has_discr_marker(line) { return "maybe"; }
+    return "";
+}
+
+def _illustrative_heading(line: any) -> bool {
+    for w in _norm(str(line).lstrip("#")).split(" ") {
+        if w in _ILLUSTRATIVE_HEADINGS { return True; }
+    }
+    return False;
+}
+
+def _heading_chain(lines: list, upto: int) -> list[str] {
+    # The markdown heading stack governing line `upto`, outermost first.
+    stack: list = [];
+    for i in range(0, upto) {
+        m = re.match(r"^(#{1,6})\s+(.*)$", str(lines[i]).rstrip());
+        if not m { continue; }
+        lvl = len(str(m.group(1)));
+        while stack and (stack[-1][0] >= lvl) { stack.pop(); }
+        stack.append([lvl, str(m.group(2)).strip()]);
+    }
+    return [str(s[1]) for s in stack];
+}
+
+def _locate(lines: list, quote: str) -> int {
+    # Where a rule's span starts, matched under the SAME normalization grounding
+    # uses — so a quote that survived ground_rules is still findable here despite
+    # markdown decoration.
+    first = "";
+    for ln in str(quote).splitlines() {
+        if _norm(ln) { first = _norm(ln); break; }
+    }
+    if not first { return -1; }
+    for i in range(0, len(lines)) {
+        n = _norm(lines[i]);
+        if not n { continue; }
+        # a short line contained in the quote only evidences the right spot when
+        # it is substantial — otherwise a stray "ok" matches half the document
+        if (first in n) or ((n in first) and (len(n) >= 12)) { return i; }
+    }
+    return -1;
+}
+
+def _governing_lines(lines: list, at: int) -> list {
+    # The lines that can govern line `at`, NEAREST SCOPE FIRST: the intro that
+    # opens the list block it belongs to, then the nearest enclosing heading.
+    out: list = [];
+    if re.match(_LIST_ITEM, str(lines[at])) {
+        i = at - 1;
+        blanks = 0;
+        while i >= 0 {
+            t = str(lines[i]).strip();
+            if not t {
+                # one blank inside a list is normal; two means the block ended
+                # and whatever is above it governs something else
+                blanks += 1;
+                if blanks >= 2 { break; }
+                i -= 1;
+                continue;
+            }
+            if re.match(_LIST_ITEM, str(lines[i])) { i -= 1; continue; }
+            if t.startswith("#") { break; }        # a heading is not a list intro
+            # the intro must actually READ as one — a paragraph that happens to
+            # sit above a list is not governing it
+            if t.endswith(":") { out.append(["intro", t]); }
+            break;
+        }
+    }
+    chain = _heading_chain(lines, at);
+    if chain { out.append(["heading", str(chain[-1])]); }
+    return out;
+}
+
+def infer_modality(skill: str, rs: RuleSet) -> dict {
+    # {rule_id: [force, governing span]} for each rule whose force the DOCUMENT
+    # states even though the span itself does not. Reads only; the caller binds.
+    lines = str(skill).splitlines();
+    out: dict = {};
+    for r in rs.rules {
+        if r.condition.strip() { continue; }     # a 'When' already carries its gate
+        if _force_of(r.quote) { continue; }      # the span states its own force
+        at = _locate(lines, r.quote);
+        if at < 0 { continue; }
+        for g in _governing_lines(lines, at) {
+            f = _force_of(g[1]);
+            if (not f) and (g[0] == "heading") and _illustrative_heading(g[1]) { f = "maybe"; }
+            if not f { continue; }
+            out[r.id] = [f, str(g[1])];
+            break;                               # nearest governing scope wins
+        }
+    }
+    return out;
+}
+
+def apply_structural_modality(skill: str, rs: RuleSet) -> dict {
+    # Bind what structure settles, and report {rule_id: governing span} so the
+    # decision is never anonymous. Mirrors demote_examples: mutate, return ids.
+    settled: dict = {};
+    inferred = infer_modality(skill, rs);
+    for r in rs.rules {
+        if r.id not in inferred { continue; }
+        pair = inferred[r.id];
+        f = str(pair[0]);
+        m = Modality.DISCRETIONARY;
+        if f == "do" { m = Modality.MANDATORY; }
+        elif f == "dont" { m = Modality.FORBIDDEN; }
+        # A descriptive fact under a prohibiting heading is still a fact —
+        # the kind/modality conflict is flag_ambiguous's to raise, not this
+        # pass's to silently resolve.
+        if (m == Modality.FORBIDDEN) and (r.kind == RuleKind.KNOWLEDGE) { continue; }
+        r.modality = m;
+        settled[r.id] = str(pair[1]);
+    }
+    return settled;
+}
+
+def flag_ambiguous(skill: str, rs: RuleSet, settled: any = None) -> list[ClarifyItem] {
     # An obligation whose asserted modal force is NOT supported by the skill text is
-    # underspecified — surface it, don't guess. Two mirror cases:
+    # underspecified — surface it, don't guess. `settled` carries the rules whose
+    # force the document already stated structurally (heading or list intro); those
+    # are not underspecified and are not flagged. Two mirror cases:
     #   - a Do   (MANDATORY) with no modal signal at all (no must/always/never/may/if)
     #   - a Don't (FORBIDDEN) with no never/do-not marker (a prohibition the skill
     #     never actually forbade — usually a mis-tagged example or capability)
     # (A When has a condition; a real Do/Don't has its marker; a fenced demonstration
     # was already demoted to a Maybe.)
+    done = settled if settled else {};
     out: list = [];
     for r in rs.rules {
         q = str(r.quote).strip();
+        if r.id in done { continue; }   # the document stated this one structurally
         if r.modality == Modality.MANDATORY {
             if r.condition.strip() { continue; }
             if _has_mand_marker(r.quote) or _has_forbid_marker(r.quote) or _has_discr_marker(r.quote) { continue; }
@@ -491,12 +665,25 @@ def flag_ambiguous(skill: str, rs: RuleSet) -> list[ClarifyItem] {
     return out;
 }
 
+def _settled_lines(sr: SpecResult) -> list[str] {
+    # Structural bindings are REPORTED but never warned: the document did state
+    # the force, so this is the compiler reading correctly, not authoring debt —
+    # making it fatal under --strict would punish a well-organized skill.
+    if not sr.settled { return []; }
+    out: list[str] = [str(len(sr.settled)) + " obligation(s) took their force from the section"
+                      + " or list that governs them:"];
+    for rid in sr.settled.keys() {
+        out.append('  · ' + str(rid) + ' ← "' + str(sr.settled[rid]).replace(chr(10), " ")[:70] + '"');
+    }
+    return out;
+}
+
 def skill_quality_lines(sr: SpecResult) -> list[str] {
     # The linter output: the compiler telling the author their SKILL.md is unclear
     # BEFORE it ships a wrong agent.
     n = len(sr.clarify);
     if n == 0 {
-        return ["skill quality: CLEAR — every obligation states its modal force."];
+        return ["skill quality: CLEAR — every obligation states its modal force."] + _settled_lines(sr);
     }
     lines: list = ["skill quality: " + str(n) + " UNDERSPECIFIED obligation(s) — the skill gives"
                    + " no signal whether these are Do / Maybe / Don't:"];
@@ -505,7 +692,7 @@ def skill_quality_lines(sr: SpecResult) -> list[str] {
     }
     lines.append("  → make each explicit in SKILL.md ('always/must', 'may/optionally', or 'never'),"
                  + " or compile with --clarify to answer inline.");
-    return lines;
+    return lines + _settled_lines(sr);
 }
 
 def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[str] {
@@ -619,6 +806,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     verdict = ExtractVerdict();
     dry = 0;
     rounds = 0;
+    _settled: dict = {};   # survives the loop: the last round's structural bindings
     # auto budget (max_rounds=0): caps tuned on 5-rule toys starve gpt-5-scale
     # specs (40-140 rules) — scale with observed size, bounded.
     cap = max_rounds if (max_rounds > 0) else 5;
@@ -637,6 +825,14 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
         # example code from MANDATORY to DISCRETIONARY (a 'maybe', not a 'Do').
         # Deterministic, fence-grounded — see demote_examples.
         demote_examples(skill, rs);
+        # dispose 1.6 — the same structural read, one scope out: a heading or a
+        # list intro that states a force the item itself omits. Deterministic,
+        # so the frozen spec stays independent of which model compiled it.
+        _settled = apply_structural_modality(skill, rs);
+        if _settled {
+            _emit_spec({"phase": "structure", "round": rnum, "rules": len(rs.rules),
+                        "settled": len(_settled)});
+        }
         _styled = rekind_style_rules(rs);
         if _styled {
             _emit_spec({"phase": "style", "round": rnum, "rules": len(rs.rules),
@@ -683,7 +879,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     # skill-quality pass: surface obligations whose modal force the skill never
     # stated (underspecified authoring) — warned, not guessed.
     _emit_spec({"phase": "clarify", "rules": len(prior.rules)});
-    clar = flag_ambiguous(skill, prior);
-    return SpecResult(spec=prior, verdict=verdict, clarify=clar);
+    clar = flag_ambiguous(skill, prior, _settled);
+    return SpecResult(spec=prior, verdict=verdict, clarify=clar, settled=_settled);
 }
 
