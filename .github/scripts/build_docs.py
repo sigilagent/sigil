@@ -197,6 +197,16 @@ DISCUSS_BTN = (
     '<span class="arrow">→</span></a></div>'
 )
 
+# fills the <!--LATEST_POST--> slot in the landing page hero, so publishing a
+# post advertises itself there instead of needing a hand-edit
+LATEST_POST_CARD = (
+    '<a class="latest-post" href="blog/{slug}.html">'
+    '<span class="lp-tag">New post</span>'
+    '<span class="lp-title">{title}</span>'
+    '<span class="lp-go">Read it →</span>'
+    "</a>"
+)
+
 # copy-to-clipboard for the dressed code blocks; appended to post pages only
 COPY_JS = """<script>
 document.querySelectorAll('.code .copy-btn').forEach(function(btn){
@@ -443,7 +453,7 @@ def build_blog() -> int:
         for post in posts
     )
     (out_dir / "index.html").write_text(BLOG_INDEX_PAGE.format(css=BLOG_CSS, cards=cards))
-    return len(posts)
+    return posts
 
 
 def title_of(md_text: str, slug: str) -> str:
@@ -510,8 +520,19 @@ def main() -> None:
     print(f"built {len(pages) + 1} pages -> {SITE / 'reference'}")
 
     if BLOG.is_dir():
-        n = build_blog()
-        print(f"built {n + 1} pages -> {SITE / 'blog'}")
+        posts = build_blog()
+        print(f"built {len(posts) + 1} pages -> {SITE / 'blog'}")
+
+        # the hero card for the newest post; the slot is left empty when there
+        # are no posts rather than shipping a dangling placeholder
+        index = SITE / "index.html"
+        index_html = index.read_text()
+        if "<!--LATEST_POST-->" in index_html:
+            card = LATEST_POST_CARD.format(
+                slug=posts[0]["slug"], title=html_mod.escape(posts[0]["title"])
+            ) if posts else ""
+            index.write_text(index_html.replace("<!--LATEST_POST-->", card))
+            print(f"landing page latest-post card -> {posts[0]['slug'] if posts else 'none'}")
 
 
 if __name__ == "__main__":

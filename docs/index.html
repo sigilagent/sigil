@@ -137,6 +137,23 @@
   .btn-paper:hover{border-color:var(--gold);color:var(--gold) !important;background:rgba(245,196,81,.14)}
   .btn svg{width:17px;height:17px}
 
+  /* latest-post card in the hero: filled at build time from the newest
+     post's front matter, so publishing a post updates the landing page */
+  .latest-post{
+    display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:20px;
+    border:1px solid rgba(34,211,238,.3);background:rgba(34,211,238,.06);
+    border-radius:12px;padding:13px 16px;transition:.15s ease;
+  }
+  .latest-post:hover{border-color:var(--cyan);background:rgba(34,211,238,.11)}
+  .lp-tag{
+    flex:0 0 auto;font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--cyan);
+    border:1px solid rgba(34,211,238,.35);border-radius:100px;padding:4px 10px;
+  }
+  .lp-title{flex:1 1 260px;min-width:0;color:var(--text);font-weight:600;font-size:15.5px}
+  .lp-go{flex:0 0 auto;display:inline-block;font-family:var(--mono);font-size:13px;color:var(--cyan);transition:transform .15s ease}
+  .latest-post:hover .lp-go{transform:translateX(3px)}
+
   /* sigil mark */
   /* The mark is decoration, not a column: anchor it to the right edge of the
      hero and let the copy run full width underneath it. Non-interactive so it
@@ -444,6 +461,7 @@
           <h1 class="hero-title">Don't prompt the skill. <span class="em">Compile</span> it.</h1>
           <p class="hero-sub">You write a skill in plain Markdown. Sigil compiles it into a <strong>typed agent harness</strong>, a program the model runs <em>inside</em>, so every step, rule and check in the skill is <strong>enforced by structure, not hoped for in a prompt.</strong> Small and local models included.</p>
           <p class="hero-tag">SKILL.md → AG-IR → agent.jac · the whole gated pipeline, one command</p>
+          <!--LATEST_POST-->
       </div>
       <div class="sigil-wrap">
         <!-- animated sigil mark -->
