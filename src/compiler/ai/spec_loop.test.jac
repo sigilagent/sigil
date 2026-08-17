@@ -287,6 +287,96 @@ test "a descriptive fact under a prohibiting scope stays a fact" {
     assert rs.rules[0].kind == RuleKind.KNOWLEDGE;
 }
 
+# ---------------------------------------------------------------------------
+# The adjudicator — answering the residue the structural pass could not settle.
+# The model only ever proposes; everything below pins what CODE refuses.
+# ---------------------------------------------------------------------------
+
+test "section_context hands the model evidence it did not choose" {
+    ctx = section_context(SKILL_SECTIONS, "Update the changelog.");
+    assert "Release Guide" in ctx;          # outer heading
+    assert "Required steps" in ctx;         # the section that governs the span
+    assert "Run the validator before shipping." in ctx;   # a neighbour
+    assert "Update the changelog." not in ctx;            # never its own evidence
+}
+
+test "section_context is empty for a span that is not in the document" {
+    assert section_context(SKILL_SECTIONS, "Publish the artifact to npm.") == "";
+}
+
+test "ground_adjudications keeps only answers evidenced elsewhere in the skill" {
+    clar = [
+        ClarifyItem(rule_id="r1", quote="Run the validator before shipping."),
+        ClarifyItem(rule_id="r2", quote="Update the changelog."),
+        ClarifyItem(rule_id="r3", quote="Bump the minor version.")
+    ];
+    gs = ground_adjudications(SKILL_SECTIONS, clar, [
+        # grounded: cites a DIFFERENT line that is verbatim in the skill
+        Adjudication(rule_id="r1", answer="do", evidence="## Required steps"),
+        # invented evidence — the whole point of the gate
+        Adjudication(rule_id="r2", answer="do", evidence="Releases must always be validated."),
+        # evidence only restates the obligation the flag already saw
+        Adjudication(rule_id="r3", answer="do", evidence="Bump the minor version."),
+        # re-modalizing a rule nobody flagged
+        Adjudication(rule_id="r9", answer="do", evidence="## Required steps"),
+        # outside the Do/Maybe/Don't vocabulary
+        Adjudication(rule_id="r2", answer="sometimes", evidence="## Required steps")
+    ]);
+    assert len(gs.kept) == 1;
+    assert gs.kept[0].rule_id == "r1";
+    assert len(gs.dropped) == 4;
+    joined = " | ".join(gs.dropped);
+    assert "not verbatim" in joined;
+    assert "restates the obligation" in joined;
+    assert "never flagged" in joined;
+    assert "unrecognized answer" in joined;
+}
+
+test "an ungrounded answer cannot harden a rule into a Do" {
+    # The failure this gate exists for: a MAYBE silently upgraded to a mandate on
+    # reasoning the skill does not contain.
+    rs = RuleSet(rules=[Rule(id="r6", quote="Delete the upstream remote.", modality=Modality.MANDATORY)]);
+    clar = flag_ambiguous(SKILL_SECTIONS, rs);
+    gs = ground_adjudications(SKILL_SECTIONS, clar, [
+        Adjudication(rule_id="r6", answer="do",
+                     evidence="Removing stale remotes is standard git hygiene.")
+    ]);
+    warns = resolve_ambiguous_auto(rs, clar, gs);
+    assert rs.rules[0].modality == Modality.DISCRETIONARY;   # fell back to the safe default
+    assert any([("rejected by the grounding check" in w) for w in warns]);
+}
+
+test "resolve_ambiguous_auto binds answered obligations and defaults the rest" {
+    rs = RuleSet(rules=[
+        Rule(id="r6", quote="Delete the upstream remote.", modality=Modality.MANDATORY),
+        Rule(id="r7", quote="Notify the release channel.", modality=Modality.MANDATORY)
+    ]);
+    clar = [
+        ClarifyItem(rule_id="r6", quote="Delete the upstream remote."),
+        ClarifyItem(rule_id="r7", quote="Notify the release channel.")
+    ];
+    gs = ground_adjudications(SKILL_SECTIONS, clar, [
+        Adjudication(rule_id="r6", answer="dont", evidence="## Notes")
+    ]);
+    warns = resolve_ambiguous_auto(rs, clar, gs);
+    by_id: dict = {};
+    for r in rs.rules { by_id[r.id] = r.modality; }
+    assert by_id["r6"] == Modality.FORBIDDEN;        # answered
+    assert by_id["r7"] == Modality.DISCRETIONARY;    # unanswered -> standing default
+    assert any([("ANSWERED by the adjudicator" in w) for w in warns]);
+    assert any([("skill evidence" in w) for w in warns]);
+    assert any([("ASSUMED to be MAYBE" in w) for w in warns]);
+    # --strict keeps its teeth, and the report names the model that decided
+    assert any([(adjudge_model_name(adjudge_llm) in w) for w in warns]);
+}
+
+test "answers are labelled by provenance, not passed off as the human's" {
+    rs = RuleSet(rules=[Rule(id="a", quote="merge the PDFs", modality=Modality.MANDATORY)]);
+    assert "(adjudicator)" in apply_clarifications(rs, {"a": "dont"}, "adjudicator")[0];
+    rs2 = RuleSet(rules=[Rule(id="a", quote="merge the PDFs", modality=Modality.MANDATORY)]);
+    assert "(human)" in apply_clarifications(rs2, {"a": "dont"})[0];   # default unchanged
+}
+
 glob FM_SKILL: str = """---
 name: csv-extractor
 description: >-

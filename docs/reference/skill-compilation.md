@@ -119,18 +119,47 @@ and both pass every gate. Code has to own this decision or nothing does.
 
 It is deliberately narrow. Inheritance fires only when the governing line states
 exactly one force, and heading words are matched against explicit tables, not
-interpreted — `## Recipes` and `## Common tasks` settle nothing. Whatever
-structure cannot settle stays flagged and falls to the standing policy:
-
-| | How the obligation is settled |
-|---|---|
-| `--clarify` | you answer inline, one obligation at a time |
-| *(default)* | assumed a *maybe* — the safe reading — and **warned**, so `--strict` still fails on it |
+interpreted — `## Recipes` and `## Common tasks` settle nothing.
 
 Structural bindings are reported with the heading or intro they came from, so
 you can see what the document decided for you. They are *not* warnings: the
 skill did state the force, so failing `--strict` over it would punish a
-well-organized skill. Only genuinely underspecified obligations warn.
+well-organized skill.
+
+### The adjudicator
+
+Whatever structure cannot settle is the **residue** — obligations the author
+genuinely left open. Three tiers can answer those:
+
+| Tier | Who answers |
+|---|---|
+| `--clarify` | you do, inline, one at a time. Nothing outranks it |
+| *(default)* | **the adjudicator**, standing in for you, from the skill's own text |
+| `--no-adjudicate` | nobody — assumed a *maybe*, no model call at all |
+
+The adjudicator gets one batched call over the whole residue. Each item arrives
+with a deterministic evidence packet — its heading chain, its neighbouring
+lines, and which of those state a force of their own — all read off the
+markdown by code before the model sees anything.
+
+Every answer must cite a span that is **verbatim in the skill and outside the
+obligation's own sentence** (that sentence is what got flagged, so quoting it
+back settles nothing). Answers failing either check are dropped, along with
+unrecognized verdicts and any attempt to re-modalize a rule that was never
+flagged. Dropped answers fall back to *maybe*, and the rejections are reported
+rather than swallowed.
+
+**On model dependence, plainly:** this tier is model-dependent and the grounding
+check does not remove that. Two models can read one heading differently and both
+cite it verbatim — grounding bounds *where* an answer may come from, never
+*which* answer it is. That is why the deterministic pass runs first and keeps as
+much as possible out of here, why every decision is reported with the model that
+made it and the span it came from, and why `--no-adjudicate` exists. Use it when
+you need a compile with no model-dependent decision in it.
+
+What the adjudicator may never do is decide silently. Every answer lands in the
+compile's warnings, so `--strict` still fails on a skill that left the question
+open, no matter which tier resolved it.
 
 ## Using it
 
@@ -138,6 +167,7 @@ well-organized skill. Only genuinely underspecified obligations warn.
 sigil compile ./SKILL.md                 # compile → skill set on the graph
 sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runnable
 sigil compile ./SKILL.md --clarify       # answer underspecified obligations yourself
+sigil compile ./SKILL.md --no-adjudicate # assume 'maybe' instead; no model-dependent call
 ./agent.jac "extract the tables"         # runs on any model: SIGIL_MODEL=…
 sigil register-skill ./SKILL.md          # same gated compile as `compile`
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call

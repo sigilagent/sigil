@@ -25,7 +25,7 @@ Two things that differ from `lift()`:
 """
 
 import time;
-import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default }
+import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
@@ -51,6 +51,7 @@ obj RaiseResult {
 def pin_raise2_llms(m: any) -> None {
     pin_lift_llm(m);
     pin_direct_llm(m);
+    pin_adjudge_llm(m);
 }
 
 glob _DIRECTIVE_CAP: int = 20;
@@ -76,14 +77,22 @@ def _directives(fr: FaithReport) -> str {
     return "\n".join(lines);
 }
 
-def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask: any = None, pre: any = None) -> RaiseResult {
+def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask: any = None,
+           pre: any = None, adjudicate: bool = True) -> RaiseResult {
     # Full entry: extract the grounded spec, resolve any underspecified modality,
-    # then raise. The ambiguity policy:
+    # then raise. By the time we get here the spec loop's deterministic pass has
+    # already settled every obligation whose heading or list intro stated a force,
+    # so `sr.clarify` holds only what the document left genuinely open. The policy
+    # for THAT residue, in descending order of authority:
     #   ask given (--clarify)  -> HIL: ask the human, bind Do/Maybe/Don't per answer.
-    #   ask None (default)     -> assume MAYBE (optional) + WARN, so a runnable,
-    #                             faithful-to-what-was-stated agent is produced and
-    #                             the author is told exactly what to re-run with
-    #                             --clarify if an assumption is wrong.
+    #                             The author's own word; nothing outranks it.
+    #   adjudicate (DEFAULT)   -> answer each one from the skill's own text, with
+    #                             every answer required to cite a verbatim span;
+    #                             ungrounded answers are dropped to the line below.
+    #   adjudicate=False       -> (--no-adjudicate) assume MAYBE + WARN for all.
+    #                             No model in the loop: the reproducible choice.
+    # Every tier WARNS about what it decided, so --strict fails on an
+    # underspecified skill no matter which one ran.
     skill = strip_frontmatter(skill);
     # `pre`: a SpecResult the lint pre-pass already extracted from this same
     # (stripped) text — reuse it instead of paying for the spec loop twice.
@@ -105,6 +114,8 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
                 if resp.strip() { answers[c.rule_id] = resp.strip(); }
             }
             for n in apply_clarifications(sr.spec, answers) { warnings.append("clarified: " + n); }
+        } elif adjudicate {
+            warnings = adjudicate_spec(skill, sr);
         } else {
             warnings = resolve_ambiguous_default(sr.spec, sr.clarify);
         }
