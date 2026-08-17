@@ -84,11 +84,60 @@ sigil lint ./SKILL.md            # findings only
 sigil lint ./SKILL.md --fix      # findings, and apply the accepted rewrites
 ```
 
+## Underspecified obligations
+
+Plenty of skills state an obligation without ever saying how binding it is —
+`Run the validator before shipping.` is a sentence with no *must*, no *may*, no
+*never*. The extractor has to type it anyway, and whatever it picks is a guess.
+
+Often, though, the skill *did* say — one scope out. Markdown puts obligations
+under headings and inside lists, and either can carry a force the item itself
+omits:
+
+```markdown
+## Required steps           <- the heading mandates its whole section
+Run the validator.          <- states no marker, but is not a maybe
+
+You may optionally:         <- the intro governs the list under it
+- Bump the minor version.   <- states no marker, but is not a mandate
+```
+
+The spec loop reads that. Which heading encloses a line and which intro opens a
+list are facts about the markdown, and the force is then read with the same
+deontic marker tables the rest of the loop uses — the identical move that
+already demotes fenced example code to a *maybe*. An obligation whose container
+states a force inherits it, the nearest scope wins, and a span that states a
+force of its own is never overridden by what encloses it.
+
+**No model is involved.** That is a requirement rather than an optimization: the
+spec is the anchor every later stage is audited against, so a spec that varied
+with the model doing the compiling would not be an anchor. Extraction can afford
+a model because `ground_rules` mechanically drops any span not verbatim in the
+skill, so different models converge on the same document text. A modality
+verdict has no such check behind it — two models can read one heading oppositely
+and both pass every gate. Code has to own this decision or nothing does.
+
+It is deliberately narrow. Inheritance fires only when the governing line states
+exactly one force, and heading words are matched against explicit tables, not
+interpreted — `## Recipes` and `## Common tasks` settle nothing. Whatever
+structure cannot settle stays flagged and falls to the standing policy:
+
+| | How the obligation is settled |
+|---|---|
+| `--clarify` | you answer inline, one obligation at a time |
+| *(default)* | assumed a *maybe* — the safe reading — and **warned**, so `--strict` still fails on it |
+
+Structural bindings are reported with the heading or intro they came from, so
+you can see what the document decided for you. They are *not* warnings: the
+skill did state the force, so failing `--strict` over it would punish a
+well-organized skill. Only genuinely underspecified obligations warn.
+
 ## Using it
 
 ```bash
 sigil compile ./SKILL.md                 # compile → skill set on the graph
 sigil compile ./SKILL.md -e agent.jac    # …and eject ONE self-contained runnable
+sigil compile ./SKILL.md --clarify       # answer underspecified obligations yourself
 ./agent.jac "extract the tables"         # runs on any model: SIGIL_MODEL=…
 sigil register-skill ./SKILL.md          # same gated compile as `compile`
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
