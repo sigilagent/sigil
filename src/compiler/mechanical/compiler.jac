@@ -508,6 +508,21 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     # total, so it coerces the Unknown ::py:: return without risking a raise the
     # way int()/float() would on a None; those stay conservative below.
     if tt == "bool" { return f"        self.{_safe(str(tgt))} = bool({expr});"; }
+    # A dict carry is the same class as bool above, only worse when dropped: "carry
+    # keeps default" left `inputs`={} forever, so EVERY downstream node ran on empty
+    # input and the LLM slots hallucinated ungrounded prose (synthesize_requirement,
+    # observed live). _as_dict is total: real mapping, or a JSON-object string,
+    # otherwise the carry keeps its default — never a raise, never garbage.
+    # `dict(...)` wraps the helper the same way the str/list/bool arms wrap theirs: a
+    # py-block return is Unknown to the checker, and Unknown -> dict is E1001 (caught by
+    # `jac check` on the regenerated artifact). The extra call is a shallow copy.
+    if tt.startswith("dict") { return f"        self.{_safe(str(tgt))} = dict(_as_dict({expr}, self.{_safe(str(tgt))}));"; }
+    # int/float: same family as bool/dict above. Left unassigned, a counter carry keeps
+    # its default forever, so a route guarded on `rounds < N` either never fires or
+    # never stops. _as_num is total (parses a number out of an Unknown py return,
+    # else keeps the default) and the builtin wrap gives the checker a known type.
+    if tt == "int" { return f"        self.{_safe(str(tgt))} = int(_as_num({expr}, self.{_safe(str(tgt))}, True));"; }
+    if tt == "float" { return f"        self.{_safe(str(tgt))} = float(_as_num({expr}, self.{_safe(str(tgt))}, False));"; }
     return f"        {expr};  # -> {tgt} ({tt}); carry keeps default";
 }
 
@@ -890,8 +905,11 @@ def _emit_tools(ir: any) -> str {
                 body = f"return _run_program({runner}, {_q(tgt)}, {cpar2})";
             } elif cmd and pfx {
                 # RUNG 2: synthesize the bundle-command as a deterministic subprocess call.
+                # Args go as (raw-name, value) pairs so _run_cmd can substitute each value
+                # into its `{name}` placeholder in the command text (shell-quoted); values
+                # without a placeholder append at the end as before.
                 pfx_lit = "[" + _j(", ", [_q(x) for x in pfx]) + "]";
-                args_lit = "[" + _j(", ", [_safe(str(p)) for p in params]) + "]";
+                args_lit = "[" + _j(", ", [("(" + _q(str(p)) + ", " + _safe(str(p)) + ")") for p in params]) + "]";
                 body = f"return _run_cmd({pfx_lit}, {args_lit})";
             } elif surf.startswith("ACT") and ppar and cpar {
                 body = f"return _write_artifact(str({cpar}), _clean_path({ppar}))";
@@ -952,7 +970,22 @@ def _emit_tools(ir: any) -> str {
     if act_tools { out += _dispatcher_lines("_run_act", act_tools, arg_fields); }
     out.append(_shared_helpers());
     out.append("::py::");
-    return _j("\n", out);
+    # A py-block delimiter is NOT line-anchored: ANY occurrence of the marker inside
+    # the emitted python — a LIFT-authored tool body, a docstring, even a comment —
+    # closes the block early, so the rest of the module (the MCP shim, the entry
+    # point) gets parsed as Jac and the artifact dies with a syntax error nowhere
+    # near the cause (hit live while editing the runtime; a Jac-authoring skill whose
+    # body quotes the marker would hit it the same way). Neutralize every occurrence
+    # inside the block, keeping only the two delimiters this function just emitted.
+    return _seal_py_block(_j("\n", out));
+}
+
+# Keep exactly the outermost pair of py delimiters; defuse any marker between them.
+def _seal_py_block(src: str) -> str {
+    parts: list[str] = [str(p) for p in str(src).split("::py::")];
+    if len(parts) <= 3 { return str(src); }
+    inner: str = str(_j(":: py ::", parts[1:len(parts) - 1]));
+    return str(parts[0]) + "::py::" + inner + "::py::" + str(parts[len(parts) - 1]);
 }
 
 # Typed Jac wrappers + `sem` for the autonomy (ReAct) tools a GEN slot exposes.
@@ -1602,6 +1635,21 @@ def _emit_walker(ir: any) -> list {
                 } else {
                     body.append(f"        self.{_safe(tgt)} = {val};");
                     body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
+                    # MULTI-WRITE GEN slot: the IR may declare a model node that produces
+                    # SEVERAL carries (`writes: [selected_cluster, target_file]`), but only
+                    # writes[0] was ever assigned — every later carry kept its default
+                    # forever. Live consequence: migrate_residue's `target_file` stayed ""
+                    # and the apply_edits write it feeds became a silent no-op on an empty
+                    # path, so the agent "completed" a burn-down having edited nothing.
+                    # Resolve the rest from the slot's own return exactly as _assign_writes
+                    # does for a tool dispatch; _unwrap is total, so a carry that cannot be
+                    # recovered from the returned shape simply keeps its default.
+                    xi = 1;
+                    for xw in writes[1:] {
+                        if (str(xw) not in ckeys) or (str(xw) in list(code_owned)) { continue; }
+                        body.append(_assign_carry(str(xw), f"_unwrap(self.{_safe(tgt)}, {_q(str(xw))}, {xi}, False)", carries, types));
+                        xi += 1;
+                    }
                 }
                 # author+execute fold: a GEN-RAW that writes a `script` carry needs
                 # the authored code RUN so the deliverable is produced.
@@ -2014,6 +2062,14 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         # dropping IR data on the way to the walker.) Bind every such string
         # input to the task text, which is what the invocation actually carries.
         wcar = (ir.get("walker") or {}).get("carries");
+        # Entry-node reads gate the task-text fallback below: the invocation text is
+        # what the ENTRY node grounds from, so only an input the entry node consumes
+        # may inherit it. A later node's input (a reviewer decision, an audience) is
+        # runtime-supplied — binding the task there clobbered `reviewer_decision`
+        # with the task string, so a task phrased "approve …" would have silently
+        # satisfied the human-review gate (observed live, synthesize_requirement).
+        _ir_nodes = _list(ir.get("nodes"));
+        _entry_reads: list = [str(r) for r in _list((_ir_nodes[0] if _ir_nodes else {}).get("reads"))];
         extra_in: list = [];
         pkeys: list = [];
         for kv in _items(wcar) {
@@ -2032,7 +2088,15 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             # the lossy NL round-trip for callers that already hold the values.
             sk = _safe(k);
             pkeys.append(sk);
-            extra_in.append(f"{sk}=str(params.get('{sk}', task))");
+            # The task-text fallback (#85) is ONLY for the raw-`str` input the entry
+            # node reads — the subject of the invocation. A `path`-typed input is
+            # never the task prose (it lowered `target_dir` = the whole sentence,
+            # observed live, migrate_residue), and a non-entry input is not either.
+            if (str(meta.get("type") or "").strip() == "str") and (k in _entry_reads) {
+                extra_in.append(f"{sk}=str(params.get('{sk}', task))");
+            } else {
+                extra_in.append(f"{sk}=str(params.get('{sk}', ''))");
+            }
         }
         sargs = _j(", ", ["task=task"] + extra_in);
         out.insert(0, f"glob _EJ_PARAM_KEYS: list = {pkeys};");
