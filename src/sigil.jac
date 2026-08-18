@@ -381,6 +381,7 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     # provided by the CLI when --clarify is set). --strict additionally makes any
     # assumed-Maybe warning fatal (CI: force the author to make the skill specific).
     import from .compiler.ai.raise2 { raise2, explain2, pin_raise2_llms }
+    import from .compiler.ai.faith { vacuity_finding }
     import from .compiler.ai.eject { eject_program, write_program }
     import from .compiler.ai.report { strict_mode }
     pin_raise2_llms(cur_frontier());
@@ -389,6 +390,18 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     findings: list = [];
     for d in rr.proof.dropped { findings.append({"gate": "faith", "severity": "error", "message": str(d.message)}); }
     for a in rr.proof.added { findings.append({"gate": "faith", "severity": "error", "message": str(a.message)}); }
+    # Cognition preservation: reported, warn-level — it does not fail the compile
+    # until the rate on real skills is known.
+    for c in rr.proof.cohesion { findings.append({"gate": "cohesion", "severity": "warning", "message": str(c.message)}); }
+    # A VACUOUS verdict rides `warnings`, not only `findings`, so --strict and CI
+    # refuse a compile whose faithfulness proof is empty. The skill still compiles
+    # by default: the agent is runnable, it is the PROOF that is missing, and
+    # saying so plainly is the whole point.
+    if rr.proof.vacuous {
+        vf = vacuity_finding();
+        findings.append({"gate": "faith", "severity": "warning", "message": str(vf.message)});
+        rr.warnings = list(rr.warnings) + [str(vf.message)];
+    }
     hard_warn = (strict or strict_mode()) and (len(rr.warnings) > 0);
     ok = rr.ok and (not hard_warn);
     note = explain2(rr);

@@ -241,6 +241,10 @@ obj FaithReport {
     # failure would fail compiles that pass today on evidence we do not have.
     # Reported, counted, and one line away from being promoted.
     has cohesion: list[FaithFinding] = [];
+    # True when the spec HAD obligations but none survived modality resolution as
+    # required. A faithfulness verdict over an empty required set is a vacuous
+    # truth, not a proof — see vacuity_finding().
+    has vacuous: bool = False;
 }
 
 # How far a candidate is from faithful, for ladder COMPARISONS.
@@ -550,8 +554,19 @@ def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
         ok=(not dropped) and (not added),
         rules_total=len(required), realized=realized,
         dropped=dropped, added=added, by_shape=by_shape,
-        cohesion=check_cohesion(spec, pir)
+        cohesion=check_cohesion(spec, pir),
+        # A spec that arrived with obligations and leaves with nothing required
+        # cannot be violated, so `ok` says FAITHFUL about an agent the compiler
+        # guaranteed nothing about.
+        vacuous=(bool(spec.rules) and (not required))
     );
+}
+
+def vacuity_finding() -> FaithFinding {
+    return FaithFinding(axis="coherence", severity="warn", rule="", shape="",
+        message="every obligation resolved to optional — the faithfulness verdict is vacuous:"
+              + " nothing is required of the agent, so nothing can be violated."
+              + " Re-run with --clarify to state which of these are a Do.");
 }
 
 def proof_lines(fr: FaithReport) -> list[str] {
@@ -569,5 +584,8 @@ def proof_lines(fr: FaithReport) -> list[str] {
     for a in fr.added { lines.append("  ✗ ADD  " + a.message); }
     # Warn-level, so it rides the proof without changing the verdict above it.
     for c in fr.cohesion { lines.append("  ! SHRED " + c.message); }
+    if fr.vacuous {
+        lines.append("  ! VACUOUS " + vacuity_finding().message);
+    }
     return lines;
 }
