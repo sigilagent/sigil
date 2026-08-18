@@ -43,6 +43,36 @@ edges:
   - {from: draft, to: done, modality: mandatory}
 """;
 
+# The OTHER shape the same pass has to absorb, seen on a fresh compile of
+# skillsbench constraint-parser: a typed carry inside a flow map, where `[`
+# opens a flow sequence YAML never sees closed.
+glob MALFORMED_SEQ_IR: str = """---
+name: constraint-parser
+description: Extract scheduling constraints.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: ConstraintAgent
+  carries:
+    task:        { type: str,       role: input }
+    constraints: { type: list[str], produced_by: extract }
+nodes:
+  - id: extract
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [constraints]
+    doc: "Extract the constraints."
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: extract, to: done, modality: mandatory}
+""";
+
 glob CLEAN_IR: str = """---
 name: note-writer
 description: Write a short note to a file.
@@ -199,4 +229,23 @@ test "canonicalizing changes the IR's form and NOT its meaning" {
     after = compile_gate(r.ir_text, "note_writer_id_b", False);
     assert before.ok and after.ok;
     assert before.module_src == after.module_src;
+}
+
+test "the other malformation shape — list[str] in a flow map — canonicalizes too" {
+    assert not strict_parses(MALFORMED_SEQ_IR);
+    r = pass_canonicalize(MALFORMED_SEQ_IR, _spec(), "constraint_seq1");
+    assert r.changed;
+    assert strict_parses(r.ir_text);
+    # the typed carry survives as a type, not as a mangled string
+    c = _load_ir(r.ir_text).get("walker").get("carries");
+    assert c["constraints"]["produced_by"] == "extract";
+    assert "list" in str(c["constraints"]["type"]);
+}
+
+test "and it too changes only the form — same module out" {
+    r = pass_canonicalize(MALFORMED_SEQ_IR, _spec(), "constraint_seq2");
+    a = compile_gate(MALFORMED_SEQ_IR, "constraint_seq_a", False);
+    b = compile_gate(r.ir_text, "constraint_seq_b", False);
+    assert a.ok and b.ok;
+    assert a.module_src == b.module_src;
 }
