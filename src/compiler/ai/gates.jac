@@ -20,6 +20,7 @@ import yaml;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
 import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
+import from src.sigil_agir_yaml { dump_agir }
 import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest }
 import from src.compiler.mechanical.concurrency { extract_concurrency }
 import from src.compiler.mechanical.toolib { builtin }
@@ -629,16 +630,7 @@ def autofix_carry_types(ir_text: str) -> dict {
             + "' -> '" + want + "' (required by tool '" + str(dm[0][0]) + "' param '" + str(dm[0][1]) + "')");
     }
     if not fixes { return {"ir_text": ir_text, "fixes": []}; }
-    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
-    body: dict = {};
-    for k in ir {
-        if str(k) != "_frontmatter" { body[k] = ir[k]; }
-    }
-    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
-    if fm {
-        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
-    }
-    return {"ir_text": out, "fixes": fixes};
+    return {"ir_text": dump_agir(ir), "fixes": fixes};
 }
 
 # ---------------------------------------------------------------------------

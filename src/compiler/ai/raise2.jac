@@ -29,6 +29,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_fron
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
+import from .autofix { canonicalize_ir }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
@@ -212,6 +213,17 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
                                + " untraced prohibition(s) into model-node docs");
             }
         }
+    }
+
+    # Mechanical rung, LAST before the gate: if the authored document only parsed
+    # because load_agir relaxed it, persist the canonical form instead. Nothing
+    # about the graph changes — canonicalize_ir refuses unless the lowering is
+    # byte-identical — but the artifact the TaskGraph keeps stops being a YAML
+    # document that is not YAML.
+    irc: str = str(canonicalize_ir(ir, name));
+    if irc {
+        ir = irc;
+        repairs.append("autofix: authored YAML parsed only via the relaxer — re-emitted as strict YAML");
     }
 
     # Coherence gate LAST — faithfulness first, compilability second (the inverse of

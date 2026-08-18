@@ -130,3 +130,69 @@ def load_agir(text: str) -> dict {
     if "_frontmatter" not in ir { ir["_frontmatter"] = fm; }
     return ir;
 }
+
+
+# ---------------------------------------------------------------------------
+# Writing an AG-IR document — the inverse of load_agir.
+#
+# Four modules grew the same parse -> mutate -> re-serialize idiom independently
+# (autofix._dump_ir, gates.autofix_carry_types, faith.fold_untraced_prohibitions,
+# assemble), so the frontmatter split-and-rejoin was written four times and could
+# drift four ways. It belongs next to the reader that defines what "parses".
+#
+# The block-scalar presenter is not cosmetic. A tool body round-trips through
+# yaml.safe_dump as one escaped line ("def f(x):\n    return x\n"), and the AG-IR
+# is the artifact a human reads when a compile goes wrong — the provenance the
+# TaskGraph persists. Emitting multi-line strings as `|` blocks keeps an IR that
+# survived a pass looking like the IR the author wrote.
+# ---------------------------------------------------------------------------
+
+class _BlockDumper(yaml.SafeDumper) {}
+
+def _block_str(dumper: any, data: any) -> any {
+    # Multi-line -> literal block. PyYAML falls back to a quoted style on its own
+    # when the scalar cannot be a block (trailing spaces on a line, stray \r), so
+    # asking for '|' is safe rather than a correctness gamble.
+    s = str(data);
+    if ("\n" in s) and ("\r" not in s) {
+        return dumper.represent_scalar("tag:yaml.org,2002:str", s, style="|");
+    }
+    return dumper.represent_scalar("tag:yaml.org,2002:str", s);
+}
+
+with entry {
+    # Registered on the subclass, never on yaml.SafeDumper itself: a global
+    # representer would silently change every other safe_dump in the process.
+    yaml.add_representer(str, _block_str, Dumper=_BlockDumper);
+}
+
+def dump_agir(ir: any, block_scalars: bool = True) -> str {
+    # An AG-IR mapping -> its document text, `_frontmatter` re-emitted as the
+    # `--- … ---` prelude the authored form carries. sort_keys=False is
+    # load-bearing: key order IS the pipeline order the back-end lowers.
+    if not isinstance(ir, dict) { return ""; }
+    dumper = _BlockDumper if block_scalars else yaml.SafeDumper;
+    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
+    body: dict = {};
+    for k in ir {
+        if str(k) != "_frontmatter" { body[k] = ir[k]; }
+    }
+    out = str(yaml.dump(body, Dumper=dumper, sort_keys=False, allow_unicode=True, default_flow_style=False));
+    if fm {
+        out = ("---\n"
+               + str(yaml.dump(fm, Dumper=dumper, sort_keys=False, allow_unicode=True, default_flow_style=False))
+               + "---\n" + out);
+    }
+    return out;
+}
+
+def strict_parses(text: str) -> bool {
+    # Does the BODY of this document parse as strict YAML, with no relaxation?
+    # The relaxer exists because authored YAML often does not — this is how a
+    # caller finds out whether it is leaning on that safety net.
+    parts = split_document(str(text or ""));
+    try {
+        yaml.safe_load(str(parts[1]));
+        return True;
+    } except Exception { return False; }
+}
