@@ -37,7 +37,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_fron
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
-import from .passes { run_passes, phase2_selection }
+import from .passes { run_passes }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
