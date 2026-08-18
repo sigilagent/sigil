@@ -16,7 +16,7 @@ src/compiler/
     flows.jac          Stage 3: IO/Context/Knowledge/HIL flows — flow/wait SPAWN fan-out
     assemble.jac       Stage 4: the rule-id join + reflexive 5d -> AG-IR YAML
     gates.jac          G1 standalone · G4 compile oracle · G5 STRUCT-COV
-    autofix.jac        mechanical fix-forward: lanes / pointer inlining / hollow re-own
+    autofix.jac        mechanical fix-forward: lanes / pointer inlining / hollow re-own / canonicalize
     repair.jac         per-error-class repair (view repair + scoped repair_ir loop)
     report.jac         severity classification · status (failed|degraded|fixed|clean) · explain
     lift.jac           the public entrypoint: lift(skill, name, skill_dir) -> LiftResult
@@ -50,6 +50,20 @@ SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # pick the execution model
 `eject.jac` packages the compiled module (which already embeds the full runtime
 helper library) with a `jac run` shebang + a CLI shim — one file, no sigil, no
 session, no graph needed to run it. The AG-IR provenance stays on the graph.
+
+**Authored AG-IR is TEXT, and text can be malformed.** The staged front-end
+emitted *data* (`yaml.safe_dump`) and so was well-formed by construction; the
+direct author writes the document itself, and a real shipped IR in this repo
+carries `pdftotext_command:{ type: str, ... }` — a column-aligned key that
+swallowed the space after its colon. It compiles only because `load_agir`
+relaxes, and `load_agir` never raises, so nothing downstream ever says the
+persisted provenance is not actually YAML.
+
+`autofix.canonicalize_ir` is the rung that closes this: it fires ONLY when the
+document needed the relaxer, and it refuses unless the lowered module is
+byte-identical — the relaxer already understood the text, so an identical module
+is the proof that the canonical reading is the reading the compiler was going to
+use anyway. Measured at 1 in 8 fresh compiles; the other 7 are returned untouched.
 
 **The mechanical half** lowers an AG-IR exactly as written — every IR construct
 has one Jac form; if lowering ever needs a judgment call, the IR was
