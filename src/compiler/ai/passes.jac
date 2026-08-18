@@ -108,6 +108,19 @@ def pass_canonicalize(ir_text: str, spec: RuleSet, name: str) -> PassResult {
     # relaxer, the document was broken in a way this pass does not understand —
     # keep the original rather than trade one malformation for another.
     if (not out.strip()) or (not strict_parses(out)) { return r; }
+    # The pass's OWN correctness criterion, checked at runtime rather than only
+    # in tests: re-emitting may change the document's form and must not change
+    # what it lowers to. The relaxer already understood this text, so an
+    # identical module is the proof that the canonical reading IS the reading
+    # the compiler was going to use anyway. If they differ, the round-trip
+    # reinterpreted something — decline, and leave the original text for a human
+    # to look at rather than persist a changed meaning.
+    a = compile_gate(ir_text, name + "__canon_a", False);
+    b = compile_gate(out, name + "__canon_b", False);
+    if (not a.ok) or (not b.ok) or (a.module_src != b.module_src) {
+        r.notes = ["canonicalize: declined — re-emitting this document would change what it lowers to"];
+        return r;
+    }
     r.ir_text = out;
     r.changed = True;
     r.notes = ["canonicalize: authored YAML parsed only via the relaxer — re-emitted as strict YAML"];

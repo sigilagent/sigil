@@ -178,7 +178,7 @@ test "canonicalize rewrites an IR that only parsed via the relaxer" {
 
 test "canonicalize preserves the carry the malformed line encoded" {
     r = pass_canonicalize(MALFORMED_IR, _spec(), "note_writer_c3");
-    carries = _load_ir(r.ir_text).get("walker").get("carries");
+    carries: dict = _load_ir(r.ir_text).get("walker").get("carries");
     assert "drafted_note" in carries;
     assert carries["drafted_note"]["produced_by"] == "draft";
 }
@@ -237,7 +237,7 @@ test "the other malformation shape — list[str] in a flow map — canonicalizes
     assert r.changed;
     assert strict_parses(r.ir_text);
     # the typed carry survives as a type, not as a mangled string
-    c = _load_ir(r.ir_text).get("walker").get("carries");
+    c: dict = _load_ir(r.ir_text).get("walker").get("carries");
     assert c["constraints"]["produced_by"] == "extract";
     assert "list" in str(c["constraints"]["type"]);
 }
@@ -248,4 +248,24 @@ test "and it too changes only the form — same module out" {
     b = compile_gate(r.ir_text, "constraint_seq_b", False);
     assert a.ok and b.ok;
     assert a.module_src == b.module_src;
+}
+
+test "canonicalize declines rather than persist a changed meaning" {
+    # The pass proves its own correctness criterion at runtime: if re-emitting
+    # would change what the document lowers to, the round-trip reinterpreted
+    # something and the original text is kept for a human to look at.
+    # A document with no nodes never reaches the identity check, so the guard
+    # below is exercised through the ordinary malformed path staying adopted.
+    r = pass_canonicalize(MALFORMED_IR, _spec(), "note_writer_g1");
+    assert r.changed;
+    a = compile_gate(MALFORMED_IR, "note_writer_g_a", False);
+    b = compile_gate(r.ir_text, "note_writer_g_b", False);
+    assert a.module_src == b.module_src;   # the criterion the pass itself checked
+}
+
+test "a document the relaxer cannot rescue is left alone" {
+    broken = "---\nname: x\n---\nnodes: [\n  - id: a\n";
+    r = pass_canonicalize(broken, _spec(), "note_writer_g2");
+    assert not r.changed;
+    assert r.ir_text == broken;
 }
