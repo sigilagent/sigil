@@ -26,7 +26,8 @@ import signal;
 import subprocess;
 import from pathlib { Path }
 import from .sigil_runtime {
-    read_pid, write_pidfile, clear_pidfile, pid_alive, log_dir, run_dir, project_root, store_path
+    read_pid, write_pidfile, clear_pidfile, pid_alive, log_dir, run_dir, project_root, store_path,
+    _lock_acquire, _lock_release
 }
 
 glob SERVE_PID: str = "observatory";     # pidfile name under $SIGIL_HOME/run
@@ -105,6 +106,10 @@ def serve_start(port: str = "", ready_timeout_s: int = 5) -> dict {
     # wait only long enough to catch the failure that matters (a process that
     # dies on import) and otherwise report honestly that it is still coming up.
     import from .sigil_runtime { _jac_bin, entry_script }
+    # An explicit start is consent: it lifts a previous deliberate stop and the
+    # autostart backoff.
+    clear_serve_stopped();
+    try { os.remove(_serve_attempt_path()); } except Exception as _e { }
     prt = str(port or DEFAULT_PORT);
     if serve_running() {
         return {"ok": False, "error": "already running (pid " + str(read_pid(SERVE_PID))
@@ -152,7 +157,125 @@ def serve_start(port: str = "", ready_timeout_s: int = 5) -> dict {
             "starting": True};
 }
 
+# ---------------------------------------------------------------------------
+# Auto-start, same contract as the scheduler's (see sigil_daemon.ensure_daemon):
+# a deliberate `serve stop` sticks, the check-then-spawn is atomic across
+# parallel terminals, and a server that will not boot is retried once per
+# backoff window rather than once per command.
+#
+# The Observatory is a heavier thing to start than the daemon — it binds a port
+# and rebuilds the web client, ~25s cold — so this NEVER waits for it to listen.
+# It waits only long enough for the supervisor to claim the pidfile, which is
+# what stops a sibling command from starting a second one.
+# ---------------------------------------------------------------------------
+glob SERVE_STOPPED: str = "observatory.stopped";
+glob SERVE_ATTEMPT: str = "observatory.attempt";
+glob SERVE_BACKOFF_S: int = 300;
+
+def _serve_stopped_path() -> str { return os.path.join(run_dir(), SERVE_STOPPED); }
+def _serve_attempt_path() -> str { return os.path.join(run_dir(), SERVE_ATTEMPT); }
+
+def serve_optout() -> bool { return os.path.exists(_serve_stopped_path()); }
+
+def mark_serve_stopped() -> None {
+    try { Path(_serve_stopped_path()).write_text(str(int(time.time() * 1000))); }
+    except Exception as e { }
+    return None;
+}
+
+def clear_serve_stopped() -> None {
+    try { os.remove(_serve_stopped_path()); } except Exception as e { }
+    return None;
+}
+
+def _serve_backoff_ok() -> bool {
+    try {
+        p = _serve_attempt_path();
+        if os.path.exists(p) {
+            last = int(str(Path(p).read_text() or "0").strip() or "0");
+            if (int(time.time() * 1000) - last) < (SERVE_BACKOFF_S * 1000) { return False; }
+        }
+    } except Exception as e { }
+    return True;
+}
+
+def serve_starting() -> bool {
+    # A supervisor spawned moments ago has NOT claimed the pidfile yet — it has
+    # its own several seconds of imports to get through first, well past any
+    # wait an interactive command should impose. So "no pidfile" right after an
+    # autostart means COMING UP, not down, and the report has to say so or it
+    # calls a server it just started "not running".
+    try {
+        p = _serve_attempt_path();
+        if not os.path.exists(p) { return False; }
+        last = int(str(Path(p).read_text() or "0").strip() or "0");
+        return (int(time.time() * 1000) - last) < 90000;
+    } except Exception as e { return False; }
+}
+
+def ensure_server(port: str = "", wait_s: float = 2.0) -> dict {
+    if str(os.environ.get("SIGIL_NO_SERVE") or "") == "1" {
+        return {"started": False, "reason": "SIGIL_NO_SERVE"};
+    }
+    if str(os.environ.get("SIGIL_API_CHILD") or "") == "1" {
+        return {"started": False, "reason": "api child"};
+    }
+    # Work the daemon fired re-enters main.jac as an ordinary command; without
+    # this every tick spawns another Observatory (see sigil_daemon.daemon_run).
+    if str(os.environ.get("SIGIL_CHILD") or "") == "1" {
+        return {"started": False, "reason": "internal child"};
+    }
+    if serve_running() { return {"started": False, "reason": "already running"}; }
+    if serve_optout() { return {"started": False, "reason": "stopped deliberately"}; }
+    prt = str(port or DEFAULT_PORT);
+    # Something else on the port is somebody's server. Never race it, never
+    # signal it — just decline, the way `serve start` already does.
+    owner = _port_owner(prt);
+    if owner {
+        return {"started": False, "reason": "port " + prt + " held by pid " + str(owner[0])};
+    }
+    if not _serve_backoff_ok() { return {"started": False, "reason": "backoff"}; }
+    fh = _lock_acquire(os.path.join(run_dir(), "observatory.lock"), 5.0);
+    if fh is None { return {"started": False, "reason": "another process is starting it"}; }
+    if serve_running() {
+        _lock_release(fh);
+        return {"started": False, "reason": "already running"};
+    }
+    try { Path(_serve_attempt_path()).write_text(str(int(time.time() * 1000))); }
+    except Exception as e { }
+    try {
+        handle = open(serve_log_path(), "a");
+        import from .sigil_runtime { _jac_bin, entry_script }
+        proc = subprocess.Popen(
+            [_jac_bin(), "run", entry_script(), "--", "serve", prt],
+            cwd=project_root(), stdout=handle, stderr=handle,
+            stdin=subprocess.DEVNULL, start_new_session=True);
+    } except Exception as ex {
+        _lock_release(fh);
+        return {"started": False, "reason": "spawn failed: " + str(ex)[:120]};
+    }
+    waited = 0.0;
+    while waited < float(wait_s) {
+        if serve_running() {
+            _lock_release(fh);
+            return {"started": True, "reason": "", "port": prt};
+        }
+        if proc.poll() is not None {
+            _lock_release(fh);
+            return {"started": False, "reason": "exited rc=" + str(proc.returncode)};
+        }
+        time.sleep(0.1);
+        waited += 0.1;
+    }
+    _lock_release(fh);
+    # Alive but not listening yet: the normal cold-build path, not a failure.
+    return {"started": True, "reason": "still coming up", "port": prt};
+}
+
 def serve_stop(timeout_s: int = 30) -> dict {
+    # Marked first, and marked even when nothing was running — `serve stop`
+    # means "stay stopped", or the next CLI command starts it straight back up.
+    mark_serve_stopped();
     prt = serve_port();
     pid = read_pid(SERVE_PID);
     signalled: list = [];
