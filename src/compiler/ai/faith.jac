@@ -29,7 +29,8 @@ a free pass.
 
 import yaml;
 import from src.compiler.mechanical.compiler { _load_ir }
-import from .lift_types { Modality, RuleKind }
+import from src.sigil_agir_yaml { dump_agir }
+import from .lift_types { Cohesion, Modality, RuleKind }
 import from .spec_loop { Rule, RuleSet }
 
 # ---------------------------------------------------------------------------
@@ -233,6 +234,13 @@ obj FaithReport {
     has dropped: list[FaithFinding] = [];    # completeness violations (rule -> nothing)
     has added: list[FaithFinding] = [];      # soundness violations (element -> no rule)
     has by_shape: dict[str, int] = {};       # realized count per shape (the breakdown)
+    # Cognition-preservation notes. Deliberately NOT folded into `ok` or
+    # gap_score: shredding an INVOKE_UNIT rule is a real faithfulness problem,
+    # but it has never been measured on the raise2 path (enforcement lived only
+    # in the staged front-end's spine validator), and landing it as a hard
+    # failure would fail compiles that pass today on evidence we do not have.
+    # Reported, counted, and one line away from being promoted.
+    has cohesion: list[FaithFinding] = [];
 }
 
 # How far a candidate is from faithful, for ladder COMPARISONS.
@@ -307,17 +315,7 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
         }
     }
     if not touched { return ""; }
-    # body + frontmatter re-serialization, the same shape autofix's _dump_ir uses
-    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
-    body: dict = {};
-    for k in ir {
-        if str(k) != "_frontmatter" { body[k] = ir[k]; }
-    }
-    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
-    if fm {
-        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
-    }
-    return out;
+    return dump_agir(ir);
 }
 
 # ---------------------------------------------------------------------------
@@ -492,6 +490,38 @@ def check_soundness(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
 # The closure — the strategy-independent verification core.
 # ---------------------------------------------------------------------------
 
+glob _MIND_TYPES: list[str] = ["GEN_RAW", "GEN_ENUM", "GEN_FILL", "GEN_EDIT"];
+
+def check_cohesion(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
+    # Cognition preservation (anti-shred). An INVOKE_UNIT rule is an adaptive
+    # tool-using activity — "explore ...", "iterate until ..." — and its value is
+    # the observe-and-adapt loop. Split across fixed nodes, the loop is gone even
+    # though every fragment traces back to the rule and the closure reads it as
+    # realized. Ported from workflow.jac's spine validator, which only the staged
+    # front-end ever ran, so the default path had no check at all.
+    out: list[FaithFinding] = [];
+    for r in spec.rules {
+        if r.cohesion != Cohesion.INVOKE_UNIT { continue; }
+        owners = [n for n in pir.nodes if r.id in n.traces_to];
+        if len(owners) > 1 {
+            frag = ", ".join([str(n.id) for n in owners]);
+            out.append(FaithFinding(axis="coherence", severity="warn", rule=str(r.id),
+                shape="INVOKE_UNIT",
+                message="INVOKE_UNIT rule '" + str(r.id) + "' shredded across nodes ["
+                        + frag + "] — keep it ONE adaptive node with a tool-belt"));
+        } elif len(owners) == 1 {
+            n3 = owners[0];
+            if (str(n3.owner).lower() != "model") or (str(n3.ntype) not in _MIND_TYPES) {
+                out.append(FaithFinding(axis="coherence", severity="warn", rule=str(r.id),
+                    shape="INVOKE_UNIT",
+                    message="INVOKE_UNIT rule '" + str(r.id) + "' lowered to the non-cognitive node '"
+                            + str(n3.id) + "' — it needs a model-owned Mind node with an autonomy tool-belt"));
+            }
+        }
+    }
+    return out;
+}
+
 def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     pir = parse_ir(ir_text);
     if not pir.ok {
@@ -519,7 +549,8 @@ def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     return FaithReport(
         ok=(not dropped) and (not added),
         rules_total=len(required), realized=realized,
-        dropped=dropped, added=added, by_shape=by_shape
+        dropped=dropped, added=added, by_shape=by_shape,
+        cohesion=check_cohesion(spec, pir)
     );
 }
 
@@ -536,5 +567,7 @@ def proof_lines(fr: FaithReport) -> list[str] {
     }
     for d in fr.dropped { lines.append("  ✗ DROP " + d.message); }
     for a in fr.added { lines.append("  ✗ ADD  " + a.message); }
+    # Warn-level, so it rides the proof without changing the verdict above it.
+    for c in fr.cohesion { lines.append("  ! SHRED " + c.message); }
     return lines;
 }

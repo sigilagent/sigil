@@ -355,3 +355,102 @@ test "faithfulness_report is FAITHFUL when every required rule is realized" {
     assert fr.realized == 2;
     assert "FAITHFUL" in proof_lines(fr)[0];
 }
+
+# ---------------------------------------------------------------------------
+# cognition preservation — the check the default path never had
+# ---------------------------------------------------------------------------
+
+glob _SHRED_IR: str = """---
+name: explorer
+---
+agir_version: 0.1
+shape: pipeline
+walker:
+  name: ExplorerAgent
+  carries:
+    task: { type: str, role: input }
+nodes:
+  - id: look
+    type: GEN-RAW
+    owner: model
+    traces_to: [r1]
+  - id: decide
+    type: GEN-ENUM
+    owner: model
+    traces_to: [r1]
+edges: []
+""";
+
+glob _WHOLE_IR: str = """---
+name: explorer
+---
+agir_version: 0.1
+shape: pipeline
+walker:
+  name: ExplorerAgent
+  carries:
+    task: { type: str, role: input }
+nodes:
+  - id: explore
+    type: GEN-RAW
+    owner: model
+    traces_to: [r1]
+edges: []
+""";
+
+glob _CODE_IR: str = """---
+name: explorer
+---
+agir_version: 0.1
+shape: pipeline
+walker:
+  name: ExplorerAgent
+  carries:
+    task: { type: str, role: input }
+nodes:
+  - id: explore
+    type: CODE
+    owner: code
+    traces_to: [r1]
+edges: []
+""";
+
+def _invoke_spec() -> RuleSet {
+    return RuleSet(skill_name="explorer", rules=[
+        Rule(id="r1", quote="Use the tools to explore the repo until you understand it.",
+             kind=RuleKind.STEP, modality=Modality.MANDATORY, cohesion=Cohesion.INVOKE_UNIT)
+    ]);
+}
+
+test "an INVOKE_UNIT rule split across nodes is flagged as shredded" {
+    c = check_cohesion(_invoke_spec(), parse_ir(_SHRED_IR));
+    assert len(c) == 1;
+    assert "shredded" in c[0].message;
+    assert "'r1'" in c[0].message;
+}
+
+test "an INVOKE_UNIT rule kept as one adaptive model node is clean" {
+    assert check_cohesion(_invoke_spec(), parse_ir(_WHOLE_IR)) == [];
+}
+
+test "an INVOKE_UNIT rule lowered to a code node loses its loop" {
+    c = check_cohesion(_invoke_spec(), parse_ir(_CODE_IR));
+    assert len(c) == 1;
+    assert "non-cognitive" in c[0].message;
+}
+
+test "an ATOMIC rule is never subject to the anti-shred check" {
+    spec = RuleSet(skill_name="explorer", rules=[
+        Rule(id="r1", quote="Write the file.", kind=RuleKind.STEP,
+             modality=Modality.MANDATORY, cohesion=Cohesion.ATOMIC)
+    ]);
+    assert check_cohesion(spec, parse_ir(_SHRED_IR)) == [];
+}
+
+test "shredding is reported but does NOT flip the faithfulness verdict" {
+    fr = faithfulness_report(_invoke_spec(), _SHRED_IR);
+    assert len(fr.cohesion) == 1;
+    # warn-level: it rides the proof, it does not fail the compile
+    assert gap_score(fr) == len(fr.dropped) + len(fr.added);
+    assert "SHRED" in " ".join(proof_lines(fr));
+}
