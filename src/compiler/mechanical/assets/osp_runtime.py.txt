@@ -24,6 +24,12 @@ def _ensure_path():
                   os.path.realpath(os.environ.get("TMPDIR", "/nonexistent")).rstrip("/")}
     if os.path.realpath(here or "/nonexistent").rstrip("/") in _tmp_roots:
         return
+    # A git root is never a skill bundle: an eject living in a real repo (e.g.
+    # ~/.sigil/app) would stage the WHOLE repo into the invoking cwd (observed
+    # live: a fresh sandbox swallowed the entire sigil checkout). Bundle dirs
+    # (skill folders with core/, scripts/, templates/) have no .git of their own.
+    if here and os.path.isdir(os.path.join(here, ".git")):
+        return
     if here and here != cwd and os.path.isdir(here):
         _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
                  "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
@@ -372,19 +378,75 @@ def _run_program(runner, target_file, content):
 
 def _run_cmd(prefix, args):
     # EMBODIMENT LADDER rung 2: the tool's IR carried a `command` (a bundle-script/CLI
-    # invocation) but no inline body. Run it deterministically (owner=code) — prefix is the
-    # fixed executable+script, args are the tool's params threaded in order. Non-raising;
-    # returns combined stdout+stderr so a downstream verify can read it.
-    argv = list(prefix) + [str(a) for a in args if a is not None]
-    _tui_sub("$", _C, _fmt_val(" ".join(argv), 88))
+    # invocation) but no inline body. Run it deterministically (owner=code) THROUGH THE
+    # SHELL: authored commands carry `&&`/`|` and `{param}` placeholders, and argv
+    # execution turned those into literal tokens (observed live: `/usr/bin/cd` ran with
+    # `&&` as an argument and `{target_dir}` never substituted). args are (name, value)
+    # pairs: a value substitutes shell-quoted into its `{name}` placeholder; values with
+    # no placeholder append at the end; a missing value leaves ''. Bare (un-named) args
+    # still append, so older call shapes keep working. Non-raising; returns combined
+    # stdout+stderr so a downstream verify can read it.
+    import shlex
+    cmd = " ".join(str(x) for x in prefix) if isinstance(prefix, (list, tuple)) else str(prefix)
+    extra = []
+    for a in (args or []):
+        k, v = (a if isinstance(a, (list, tuple)) and len(a) == 2 else (None, a))
+        ph = ("{%s}" % k) if k else None
+        if ph and ph in cmd:
+            cmd = cmd.replace(ph, shlex.quote(str(v)) if v is not None else "''")
+        elif v is not None:
+            extra.append(shlex.quote(str(v)))
+    if extra:
+        cmd = cmd + " " + " ".join(extra)
+    _tui_sub("$", _C, _fmt_val(cmd, 88))
     try:
-        r = _subprocess.run(argv, capture_output=True, text=True, timeout=180)
+        r = _subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
         out = ((r.stdout or "") + (r.stderr or "")).strip()
         _tui_sub("↳", _D, _fmt_val(out), "exit %s" % r.returncode)
         return out
     except Exception as e:
         _tui_sub("✗", "\033[31m", _fmt_val(e, 56))
-        return "[cmd %s failed: %s]" % (" ".join(str(x) for x in prefix), str(e)[:200])
+        return "[cmd %s failed: %s]" % (cmd[:120], str(e)[:200])
+
+_re_num = __import__("re").compile(r"-?\d+(?:\.\d+)?")
+
+def _as_num(v, dflt, want_int=True):
+    # Total coercion for an int/float carry — the same class as _as_dict. int()/float()
+    # raise on None and on "" , which is why these carries were left at "carry keeps
+    # default"; but dropping them silently breaks any counter or budget a route guards
+    # on (a burn-down loop can never terminate, or never start). Parse what is
+    # parseable, keep the default otherwise, never raise.
+    try:
+        if isinstance(v, bool):
+            n = int(v)
+        elif isinstance(v, (int, float)):
+            n = v
+        else:
+            s = str(v).strip()
+            m = _re_num.search(s)
+            if not m:
+                return dflt
+            n = float(m.group(0))
+        return int(n) if want_int else float(n)
+    except Exception:
+        return dflt
+
+def _as_dict(v, dflt):
+    # Total coercion for a dict-typed carry. An Unknown py-block return must not clobber
+    # the carry with garbage — but silently KEEPING the default severed the whole
+    # downstream dataflow (observed live: synthesize_requirement ran every node on
+    # inputs={} and hallucinated ungrounded prose). Accept a real mapping, parse a
+    # JSON-object string, otherwise keep the default.
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str):
+        try:
+            p = _json.loads(v)
+        except Exception:
+            p = None
+        if isinstance(p, dict):
+            return p
+    return dflt
 
 def _live_tool(name, args):
     # EMBODIMENT LADDER rung 0: a live-integration tool (reads the outside world) has no

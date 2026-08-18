@@ -73,10 +73,11 @@ jobs:
         run: printf '/exit\n' | jac run src/main.jac -s "$RUNNER_TEMP/ci.session" -- chat
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
-      # test (present and future) automatically; report_fix_tests.jac is a standalone
-      # regression suite (non-annex name), so it is named explicitly.
+      # test (present and future) automatically; report_fix_tests.jac and
+      # lowering_fix_tests.jac are standalone regression suites (non-annex names),
+      # so they are named explicitly.
       - name: Run test suite
-        run: jac test src/*.test.jac src/report_fix_tests.jac
+        run: jac test src/*.test.jac src/report_fix_tests.jac src/lowering_fix_tests.jac
       # SEPARATE process on purpose: loading these annexes in the same jac test
       # invocation as another src module resets the by-llm slot's __globals__
       # (py3.14 lazy-annotation eval then dies with NameError on the slot's own
