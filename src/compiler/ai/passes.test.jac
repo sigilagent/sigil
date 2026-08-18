@@ -183,3 +183,20 @@ test "an unlowerable IR cannot be made worse — the phase declines or no-ops" {
     assert ph.ir_text == "::: not yaml {{{";
     assert ph.adopted == [];
 }
+
+# ---------------------------------------------------------------------------
+# the property the whole phase rests on
+# ---------------------------------------------------------------------------
+
+test "canonicalizing changes the IR's form and NOT its meaning" {
+    # The lowered module must be byte-identical: the relaxer already understood
+    # the malformed text, so re-emitting it canonically may not move a single
+    # line of generated Jac. Verified against a real shipped IR (the pdf skill's
+    # `pdftotext_command:{...}`) and pinned here on the same defect shape.
+    r = pass_canonicalize(MALFORMED_IR, _spec(), "note_writer_id1");
+    assert r.changed;
+    before = compile_gate(MALFORMED_IR, "note_writer_id_a", False);
+    after = compile_gate(r.ir_text, "note_writer_id_b", False);
+    assert before.ok and after.ok;
+    assert before.module_src == after.module_src;
+}
