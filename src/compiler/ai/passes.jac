@@ -182,7 +182,14 @@ def run_passes(ir_text: str, spec: RuleSet, name: str, phase2: str = "") -> Phas
             out.notes.append(str(pn) + ": pass raised, skipped — " + str(e)[:160]);
             continue;
         }
-        if (not cand.changed) or (str(cand.ir_text).strip() == cur.strip()) { continue; }
+        if (not cand.changed) or (str(cand.ir_text).strip() == cur.strip()) {
+            # A pass that produced nothing is usually silent, but one that
+            # DECLINED its own candidate has a reason worth keeping — otherwise
+            # "canonicalize would have changed the meaning" vanishes and the
+            # compile looks like the pass simply had nothing to do.
+            for n in cand.notes { out.notes.append(str(n)); }
+            continue;
+        }
         before_score = gap_score(faithfulness_report(spec, cur));
         if _accepts(str(cand.ir_text), spec, name, before_score) {
             cur = str(cand.ir_text);

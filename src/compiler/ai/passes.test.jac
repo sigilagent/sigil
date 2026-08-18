@@ -269,3 +269,18 @@ test "a document the relaxer cannot rescue is left alone" {
     assert not r.changed;
     assert r.ir_text == broken;
 }
+
+test "a pass that declines its own candidate says why" {
+    # A no-op pass is silent; a pass that had a candidate and rejected it must
+    # not look like it simply had nothing to do.
+    r = PassResult(pass_name="canonicalize", ir_text=CLEAN_IR,
+                   notes=["canonicalize: declined — would change what it lowers to"]);
+    assert not r.changed;
+    assert r.notes;
+}
+
+test "a clean IR produces no notes at all" {
+    ph = run_passes(CLEAN_IR, _spec(), "note_writer_n1", "canonicalize");
+    assert ph.notes == [];
+    assert ph.adopted == [];
+}
