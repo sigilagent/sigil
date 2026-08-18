@@ -6,6 +6,8 @@ The pipeline, faithfulness-first:
                         ▲                                │
                         └──── rule-scoped repair ◀───────┘  (same author, close exactly the gaps)
                                                          │
+                                    phase 2: refinement passes  (whole-IR, monotone)
+                                                         │
                                        coherence gate (G4) ── a typed PROOF, not just a module
 
 Two things that differ from `lift()`:
@@ -22,6 +24,12 @@ Two things that differ from `lift()`:
    back the exact unrealized rule ids + fixes; the author closes only those. One
    author still writes every cross-reference, so coherence is preserved WHILE the
    gap is closed — the property `lift()` could not get from one front-end.
+
+3. Authoring stays ONE call, but refinement is staged after it (`passes.jac`).
+   The staged front-end cut the *artifact* by view and had to reconcile the
+   cross-references afterward; phase 2 cuts by *dimension* instead — each pass
+   sees the whole IR and improves one property. Gated: `--no-phase2` /
+   `SIGIL_PHASE2=0` restores the exact pre-phase-2 pipeline.
 """
 
 import time;
@@ -29,6 +37,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_fron
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
+import from .passes { run_passes, phase2_selection }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
@@ -78,7 +87,7 @@ def _directives(fr: FaithReport) -> str {
 }
 
 def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask: any = None,
-           pre: any = None, adjudicate: bool = True) -> RaiseResult {
+           pre: any = None, adjudicate: bool = True, phase2: str = "") -> RaiseResult {
     # Full entry: extract the grounded spec, resolve any underspecified modality,
     # then raise. By the time we get here the spec loop's deterministic pass has
     # already settled every obligation whose heading or list intro stated a force,
@@ -120,10 +129,14 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
             warnings = resolve_ambiguous_default(sr.spec, sr.clarify);
         }
     }
-    rr = raise_from_spec(skill, name, sr.spec, max_repair);
+    rr = raise_from_spec(skill, name, sr.spec, max_repair, phase2);
     rr.warnings = warnings;
     rr.clarify = sr.clarify;
     return rr;
+}
+
+def _j_names(xs: list[str]) -> str {
+    return ", ".join([str(x) for x in xs]);
 }
 
 def _constraint_drop_ids(fr: FaithReport) -> list[str] {
@@ -134,7 +147,8 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
     return out;
 }
 
-def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
+def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
+                    phase2: str = "") -> RaiseResult {
     _t = time.time();
     _emit({"stage": "author", "state": "start"});
     au = author_direct(skill, spec, name);
@@ -214,11 +228,34 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         }
     }
 
+    # PHASE 2 — refinement passes over the whole IR. Each is adopted only if it
+    # still lowers and does not regress faithfulness, so the phase is pure upside
+    # per pass; the revert below makes the PHASE as a whole equally safe.
+    ir_pre_phase2: str = ir;
+    ph = run_passes(ir, spec, name, phase2);
+    ir = str(ph.ir_text);
+    for n in ph.notes { repairs.append(str(n)); }
+    if ph.adopted { fr = faithfulness_report(spec, ir); }
+
     # Coherence gate LAST — faithfulness first, compilability second (the inverse of
     # today's _finalize, which compiles before it checks coverage).
     _t = time.time();
     _emit({"stage": "gates", "state": "start"});
     v = compile_gate(ir, name);
+    if (not v.ok) and ph.adopted {
+        # Per-pass acceptance uses the cheap structural lowering; the real
+        # `jac check` runs only here. If the full gate rejects what the phase
+        # produced, fall back to the pre-phase IR rather than let a refinement
+        # cost us a runnable module — phase 2 must never be why a compile fails.
+        v_pre = compile_gate(ir_pre_phase2, name);
+        if v_pre.ok {
+            repairs.append("phase2: reverted " + _j_names(ph.adopted)
+                           + " — the full compile gate rejected the refined IR");
+            ir = ir_pre_phase2;
+            fr = faithfulness_report(spec, ir);
+            v = v_pre;
+        }
+    }
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t,
            "g4": v.ok, "g1_issues": 0, "repairs": 0});
     if not fr.ok { status = "unfaithful"; }

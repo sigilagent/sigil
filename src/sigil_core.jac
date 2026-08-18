@@ -927,7 +927,8 @@ glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
                             "flows": "annotator flows", "assemble": "assemble",
                             "gates": "gates", "repair": "repair",
                             "author": "authoring", "autofix": "mechanical fixes",
-                            "faith": "faithfulness", "bind": "env/par bind"};
+                            "faith": "faithfulness", "bind": "env/par bind",
+                            "passes": "refine passes"};
 
 def compile_stage_label(stage: str) -> str {
     return str(_STAGE_LABELS.get(stage, stage));
@@ -961,6 +962,15 @@ def compile_stage_line(ev: dict) -> str {
     } elif s == "autofix" {
         n_fx = int(ev.get("fixes", 0));
         return (str(n_fx) + " fix(es) applied") if n_fx else "nothing to fix";
+    } elif s == "passes" {
+        # phase 2: how many whole-IR refinements were offered, taken, and refused
+        ad = int(ev.get("adopted", 0));
+        dc = int(ev.get("declined", 0));
+        if (not ad) and (not dc) { return "nothing to refine"; }
+        out2: list = [];
+        if ad { out2.append(str(ad) + " adopted"); }
+        if dc { out2.append(str(dc) + " declined"); }
+        return " · ".join(out2);
     } elif s == "bind" {
         # the SkillRT-inspired mechanical passes: G7 env binding + G8 concurrency
         g7 = int(ev.get("g7_issues", 0));

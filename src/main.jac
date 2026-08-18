@@ -1105,11 +1105,11 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
+            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy] [--no-phase2|--passes <a,b|all>]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
             clarify = False; frontend = ""; lint_force = False; no_lint = False;
-            adjudicate = True;
+            adjudicate = True; phase2 = "";
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
@@ -1124,6 +1124,16 @@ with entry:__main__ {
                 elif flg == "--no-lint" { no_lint = True; }
                 elif flg == "--legacy" { frontend = "legacy"; }
                 elif flg == "--staged" { frontend = "staged"; }
+                # phase 2 (raise2's whole-IR refinement passes) is on by default.
+                # --no-phase2 restores the exact pre-phase-2 pipeline; --passes
+                # picks a subset (or `all`, including non-default passes) so an
+                # implementation can be switched or bisected without a rebuild.
+                elif flg == "--no-phase2" { phase2 = "off"; }
+                elif flg == "--phase2" { phase2 = "all"; }
+                elif flg == "--passes" {
+                    nxt2 = _arg(argv, i + 1);
+                    if nxt2 and (not nxt2.startswith("-")) { phase2 = nxt2; i += 1; }
+                }
                 elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
@@ -1181,7 +1191,7 @@ with entry:__main__ {
                 r = compile_skill(src_text, eject, eject_path,
                                   _compile_ev if _tty else None, agent_author,
                                   os.path.dirname(os.path.abspath(path)), strict, ask, frontend, pre_spec,
-                                  adjudicate);
+                                  adjudicate, phase2);
             } except Exception as e {
                 # the frontier model died under the compile (bad name, key,
                 # network) — one sentence + the log, never a provider stack

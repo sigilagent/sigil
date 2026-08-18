@@ -279,7 +279,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False,
                   skill_dir: str = "", strict: bool = False,
                   ask: any = None, frontend: str = "", pre_spec: any = None,
-                  adjudicate: bool = True) -> dict {
+                  adjudicate: bool = True, phase2: str = "") -> dict {
     # `sigil compile SKILL.md [-e [out.jac]]` — the fix-forward AI lift:
     # spec loop -> spine -> flows -> assemble -> autofix chain + gates +
     # bounded repair. Only `failed` (no runnable module) refuses to persist —
@@ -304,7 +304,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     fe = frontend if frontend else os.environ.get("SIGIL_FRONTEND", "");
     if (not agent) and (fe not in ["legacy", "lift", "staged"]) {
         return _compile_raise2(source, sig, reg, eject, eject_path, progress, skill_dir, strict, ask, pre_spec,
-                               next_version(reg, sig), adjudicate=adjudicate);
+                               next_version(reg, sig), adjudicate=adjudicate, phase2=phase2);
     }
     pin_all_lift_llms(cur_frontier());
     if fe == "staged" { os.environ["SIGIL_STAGED"] = "1"; }
@@ -374,7 +374,7 @@ def _emit_agir(ir_text: str, sig: str, eject_path: str) -> str {
 def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_path: str,
                     progress: any, skill_dir: str, strict: bool, ask: any,
                     pre_spec: any = None, version: int = 1, origin: str = "compiled-skill-raise2",
-                    adjudicate: bool = True) -> dict {
+                    adjudicate: bool = True, phase2: str = "") -> dict {
     # The DEFAULT front-end: the faithfulness-first raise. Faithfulness FAILS the
     # compile (an agent that violates the skill is not a success); underspecified
     # modality is assumed MAYBE + warned, or asked inline via the TUI asker (`ask`,
@@ -384,11 +384,15 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     import from .compiler.ai.eject { eject_program, write_program }
     import from .compiler.ai.report { strict_mode }
     pin_raise2_llms(cur_frontier());
-    rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec, adjudicate=adjudicate);
+    rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec, adjudicate=adjudicate,
+                phase2=phase2);
 
     findings: list = [];
     for d in rr.proof.dropped { findings.append({"gate": "faith", "severity": "error", "message": str(d.message)}); }
     for a in rr.proof.added { findings.append({"gate": "faith", "severity": "error", "message": str(a.message)}); }
+    # Cognition preservation: reported, but warn-level — it does not fail the
+    # compile until we have measured how often it fires on real skills.
+    for c in rr.proof.cohesion { findings.append({"gate": "cohesion", "severity": "warning", "message": str(c.message)}); }
     hard_warn = (strict or strict_mode()) and (len(rr.warnings) > 0);
     ok = rr.ok and (not hard_warn);
     note = explain2(rr);

@@ -10,6 +10,7 @@ src/compiler/
     assets/            runtime helpers injected verbatim into generated modules
   ai/                the LIFT front-end — authors the AG-IR under a faithfulness constraint
     lift_types.jac     Rule / RuleSet / verdicts — the typed vocabulary
+    passes.jac         PHASE 2: whole-IR refinement passes after the coherent author
     ir_views.jac       the four AG-IR views (nodes/edges, carries, residency, tools, HIL)
     spec_loop.jac      Stage 1: SKILL.md -> frozen RuleSet (the convergence loop)
     workflow.jac       Stage 2: the WorkFlow spine (CFG view) + its code validator
@@ -50,6 +51,31 @@ SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # pick the execution model
 `eject.jac` packages the compiled module (which already embeds the full runtime
 helper library) with a `jac run` shebang + a CLI shim — one file, no sigil, no
 session, no graph needed to run it. The AG-IR provenance stays on the graph.
+
+**Authoring is one call; refinement is staged after it.** `author_direct` writes
+the whole AG-IR in a single frontier pass, because the IR is a mutually
+referential graph — carries, edges, `traces_to`, tool→node bindings — and the old
+staged front-end, which cut the *artifact* by view (spine → flows → assemble), had
+to reconcile those cross-references mechanically afterward. That cut maximized
+coupling; the seams were the cut expressing itself, not a bug in it.
+
+What one-call authoring gave up is that the staged pipeline emitted *data*
+(`yaml.safe_dump`) and so was well-formed by construction, while a single author
+emits *text* — and text can be malformed. `passes.jac` recovers that without
+re-staging the authoring: phase 2 cuts by **dimension** instead of by view, so each
+pass sees the whole IR and improves one property of it, the way a compiler pass
+sees the whole program rather than a shard.
+
+```
+author (one coherent call) → faith → repair ladder → PHASE 2 passes → G4
+```
+
+A pass is adopted only if its output still lowers AND does not regress
+faithfulness, and the phase as a whole reverts if the full `jac check` gate rejects
+what it produced. So a pass is pure upside or a no-op; it can never be why a
+compile fails. Switchable end to end — `--no-phase2` / `SIGIL_PHASE2=0` restores
+the exact pre-phase-2 pipeline, `--passes <a,b|all>` / `SIGIL_PASSES` runs a chosen
+subset.
 
 **The mechanical half** lowers an AG-IR exactly as written — every IR construct
 has one Jac form; if lowering ever needs a judgment call, the IR was
