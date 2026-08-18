@@ -36,7 +36,8 @@ import subprocess;
 import from pathlib { Path }
 import from .sigil_runtime {
     sigil_home, run_dir, log_dir, pid_path, read_pid, pid_alive, write_pidfile,
-    clear_pidfile, process_running, project_root, entry_script, _jac_bin, store_path
+    clear_pidfile, process_running, project_root, entry_script, _jac_bin, store_path,
+    _lock_acquire, _lock_release
 }
 import from .cron { tick_isolated, next_due_ms, cron_list, cron_daemon_running }
 import from .channels { channel_list as cron_channel_list }
@@ -194,6 +195,15 @@ def _supervise_children() -> None {
 
 def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict {
     # The supervisor. Blocks. `sigil daemon start` runs this detached.
+    #
+    # Every unit of work runs in a fresh `jac run main.jac -- <cmd>` child, and
+    # those commands are ordinary ones (`cron tick`, a fired job) — so without
+    # this they would take the CLI's autostart and each tick would spawn ANOTHER
+    # Observatory. Measured before the flag: one `sigil daemon start` left two
+    # supervisors racing for port 8199, and `serve stop` knows only one pidfile,
+    # so the surplus could not be cleaned up. Set it in the environment, once,
+    # here: every child the daemon ever spawns inherits it.
+    os.environ["SIGIL_CHILD"] = "1";
     _STOP["now"] = False;
     _install_stop_handlers();
     write_pidfile(DAEMON_PID);
@@ -254,10 +264,125 @@ def scheduler_running() -> bool {
     return daemon_running() or cron_daemon_running();
 }
 
+# ---------------------------------------------------------------------------
+# Auto-start. A schedule someone set should run because they set it, not
+# because they also remembered `sigil daemon start` — so any ordinary CLI
+# command brings the scheduler up if it is not up.
+#
+# Three things make that safe rather than annoying:
+#
+#   · a deliberate `daemon stop` STICKS. Otherwise the next command resurrects
+#     it and there is no way to run the CLI with the scheduler off at all.
+#   · the check-then-spawn is atomic. Eight parallel terminals reaching this at
+#     once must produce ONE daemon, not eight — the same race the graph lock
+#     exists for, one level up.
+#   · a daemon that dies on import is retried once per backoff window, not once
+#     per command, so a broken scheduler cannot make every command pay a spawn.
+#
+# Every path out is a no-op that never raises: a CLI command must not fail
+# because the daemon would not start.
+# ---------------------------------------------------------------------------
+glob DAEMON_STOPPED: str = "daemon.stopped";     # deliberate-stop marker
+glob DAEMON_ATTEMPT: str = "daemon.attempt";     # last autostart attempt (ms)
+glob AUTOSTART_BACKOFF_S: int = 120;
+
+def _stopped_path() -> str { return os.path.join(run_dir(), DAEMON_STOPPED); }
+def _attempt_path() -> str { return os.path.join(run_dir(), DAEMON_ATTEMPT); }
+
+def daemon_optout() -> bool {
+    # True when the scheduler was stopped on purpose and must stay stopped.
+    return os.path.exists(_stopped_path());
+}
+
+def mark_stopped() -> None {
+    try { Path(_stopped_path()).write_text(str(now_ms())); } except Exception as e { }
+    return None;
+}
+
+def clear_stopped() -> None {
+    try { os.remove(_stopped_path()); } except Exception as e { }
+    return None;
+}
+
+def _backoff_ok() -> bool {
+    try {
+        p = _attempt_path();
+        if os.path.exists(p) {
+            last = int(str(Path(p).read_text() or "0").strip() or "0");
+            if (now_ms() - last) < (AUTOSTART_BACKOFF_S * 1000) { return False; }
+        }
+    } except Exception as e { }
+    return True;
+}
+
+def _note_attempt() -> None {
+    try { Path(_attempt_path()).write_text(str(now_ms())); } except Exception as e { }
+    return None;
+}
+
+def ensure_daemon(interval_s: int = 30, wait_s: float = 3.0) -> dict {
+    # Returns {"started": bool, "reason": str} — the reason is why NOT, so a
+    # `--verbose` surface (and the tests) can tell "already up" from "declined".
+    if str(os.environ.get("SIGIL_NO_DAEMON") or "") == "1" {
+        return {"started": False, "reason": "SIGIL_NO_DAEMON"};
+    }
+    # An api_call child is spawned once per HTTP request; each one starting a
+    # scheduler would fork the daemon per request.
+    if str(os.environ.get("SIGIL_API_CHILD") or "") == "1" {
+        return {"started": False, "reason": "api child"};
+    }
+    # Work the daemon fired: internal re-entry, not somebody at a prompt.
+    if str(os.environ.get("SIGIL_CHILD") or "") == "1" {
+        return {"started": False, "reason": "internal child"};
+    }
+    if daemon_running() { return {"started": False, "reason": "already running"}; }
+    if daemon_optout() { return {"started": False, "reason": "stopped deliberately"}; }
+    if not _backoff_ok() { return {"started": False, "reason": "backoff"}; }
+    fh = _lock_acquire(os.path.join(run_dir(), "daemon.lock"), 5.0);
+    if fh is None { return {"started": False, "reason": "another process is starting it"}; }
+    if daemon_running() {
+        _lock_release(fh);
+        return {"started": False, "reason": "already running"};
+    }
+    _note_attempt();
+    try {
+        handle = open(log_path(), "a");
+        proc = subprocess.Popen(
+            [_jac_bin(), "run", entry_script(), "--", "daemon", "run", str(interval_s)],
+            cwd=project_root(), stdout=handle, stderr=handle,
+            stdin=subprocess.DEVNULL, start_new_session=True);
+    } except Exception as ex {
+        _lock_release(fh);
+        return {"started": False, "reason": "spawn failed: " + str(ex)[:120]};
+    }
+    # Hold the claim only until the child takes the pidfile: long enough that a
+    # sibling command sees a running daemon instead of starting a second one,
+    # short enough not to read as a stall.
+    waited = 0.0;
+    while waited < float(wait_s) {
+        if daemon_running() {
+            _lock_release(fh);
+            return {"started": True, "reason": ""};
+        }
+        if proc.poll() is not None {
+            _lock_release(fh);
+            return {"started": False, "reason": "exited rc=" + str(proc.returncode)};
+        }
+        time.sleep(0.1);
+        waited += 0.1;
+    }
+    _lock_release(fh);
+    return {"started": True, "reason": "still coming up"};
+}
+
 def daemon_start(interval_s: int = 30) -> dict {
     if daemon_running() {
         return {"ok": False, "error": "already running (pid " + str(read_pid(DAEMON_PID)) + ")"};
     }
+    # An explicit start is consent: it lifts a previous deliberate stop, and
+    # clears the autostart backoff so a fixed daemon comes back immediately.
+    clear_stopped();
+    try { os.remove(_attempt_path()); } except Exception as _e { }
     argv = [_jac_bin(), "run", entry_script(), "--", "daemon", "run", str(interval_s)];
     try {
         handle = open(log_path(), "a");
@@ -292,6 +417,10 @@ def daemon_start(interval_s: int = 30) -> dict {
 }
 
 def daemon_stop(timeout_s: int = 30) -> dict {
+    # Marked FIRST, and marked even when nothing was running: `sigil daemon stop`
+    # means "stay stopped", and without the marker the very next CLI command
+    # would start it straight back up.
+    mark_stopped();
     pid = read_pid(DAEMON_PID);
     if (pid <= 0) or (not pid_alive(pid)) {
         clear_pidfile(DAEMON_PID);
