@@ -129,11 +129,13 @@ sem remember_fact = "Store a durable fact in long-term memory to recall in futur
 sem remember_fact.fact = "The fact to remember.";
 def remember_fact(fact: str) -> str {
     _trace("remember", fact);
-    out = teach(fact, "fact");
-    # Committed NOW: a fact only held in this process's exit commit is a fact
-    # that silently vanishes when that commit loses a race with a daemon tick.
-    warn = commit_now("remember_fact");
-    return (out + "\nWARNING: " + warn) if warn else out;
+    # teach() now runs its read-mutate-commit as a serialized critical section
+    # and commits before it returns, so the fact is durable the moment this
+    # does — no separate commit_now, and no window for a daemon tick to
+    # discard it. A failed write comes back as the tool's RESULT so the model
+    # can say so, rather than breaking the turn.
+    try { return teach(fact, "fact"); }
+    except Exception as e { return "could not remember that: " + str(e)[:200]; }
 }
 
 sem recall_memory = "Search long-term memory for facts relevant to a query.";

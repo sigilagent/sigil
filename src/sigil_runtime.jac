@@ -16,6 +16,7 @@ execution a fresh, disposable ``root`` — Sigil keeps only the compiled
 import os;
 import re;
 import sys;
+import time;
 import shutil;
 import subprocess;
 import from pathlib { Path }
@@ -94,6 +95,38 @@ def project_root() -> str {
 
 def entry_script() -> str {
     return str(_here() / "main.jac");
+}
+
+def project_name(fallback: str = "sigil") -> str {
+    # [project] name from jac.toml — the store name jac uses for a root entry.
+    t = os.path.join(project_root(), "jac.toml");
+    try {
+        import tomllib;
+        with open(t, "rb") as fh {
+            return str(dict(tomllib.load(fh)).get("project", {}).get("name", fallback) or fallback);
+        }
+    } except Exception as e { return fallback; }
+}
+
+def store_path() -> str {
+    # The .db this agent actually reads and writes.
+    #
+    # Measured on jac 0.34.5: an entry script sitting at the PROJECT ROOT keys
+    # its store to the [project] name from jac.toml; an entry in a SUBDIRECTORY
+    # keys it to that script's own filename. sigil enters through src/main.jac
+    # and the Observatory through root-level observatory.jac, so the two doors
+    # resolve to DIFFERENT files — .jac/data/main.db and .jac/data/sigil.db.
+    #
+    # This used to be hardcoded to sigil.db, which stopped being true when
+    # main.jac moved into src/ (#153): `sigil where` — the one command whose
+    # whole job is answering "which agent am I talking to?" — then named a
+    # store the CLI had not written to since.
+    data = os.path.join(project_root(), ".jac", "data");
+    entry = Path(entry_script());
+    try { at_root = (str(entry.parent.resolve()) == str(Path(project_root()).resolve())); }
+    except Exception as e { at_root = False; }
+    stem = project_name() if at_root else entry.stem;
+    return os.path.join(data, stem + ".db");
 }
 
 # ---------------------------------------------------------------------------
@@ -341,6 +374,91 @@ def commit_now(context: str = "") -> str {
         return "";
     }
     return "";
+}
+
+# ---------------------------------------------------------------------------
+# Cross-process write serialization.
+#
+# Every sigil surface is a separate OS process against ONE store: the CLI, each
+# daemon-fired job, each api_call subprocess, and every parallel terminal a user
+# has open. jac's per-anchor optimistic versioning is what keeps them honest,
+# but honest here means LOSING: when two processes read the Soul and both
+# commit, the second raises WriteConflict and its ENTIRE changeset is rolled
+# back. Measured on this repo: 8 concurrent `sigil teach` -> 3 died on
+# "anchor <soul> changed concurrently (expected v3, found v4)", after each had
+# already printed its success line.
+#
+# Retrying the commit cannot fix that on its own — the changeset was built from
+# a read that is now stale, so a retry re-commits stale data or conflicts again.
+# The fix is to not have the race: a mutation runs as a critical section that
+# spans its READ and its COMMIT, serialized across processes by an advisory
+# lock on the store directory. The lock is held for the length of one
+# read-modify-commit (sub-second), never for the length of a command — a
+# `compile` still runs its model calls fully in parallel with every other
+# process, and only its final graph write is ordered.
+# ---------------------------------------------------------------------------
+glob GRAPH_LOCK_NAME: str = ".write.lock";
+
+def graph_lock_path() -> str {
+    # Beside the store itself, so one lock covers exactly one graph: a second
+    # project (or ~/.sigil/app vs a checkout) has its own store and its own lock.
+    d = os.path.join(project_root(), ".jac", "data");
+    try { Path(d).mkdir(parents=True, exist_ok=True); } except Exception as e { }
+    return os.path.join(d, GRAPH_LOCK_NAME);
+}
+
+def _lock_acquire(timeout_s: float = 60.0) -> any {
+    # Exclusive advisory lock, polled so a wedged holder cannot block forever.
+    # Returns the open handle (the lock lives as long as it does), or None when
+    # locking is unavailable — in which case the caller proceeds UNSERIALIZED
+    # rather than refusing to work, exactly as it behaved before this existed.
+    try { import fcntl; } except Exception as e { return None; }
+    try { fh = open(graph_lock_path(), "a+"); } except Exception as e2 { return None; }
+    waited = 0.0;
+    while waited < float(timeout_s) {
+        try {
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB);
+            return fh;
+        } except Exception as e3 {
+            time.sleep(0.05);
+            waited += 0.05;
+        }
+    }
+    try { fh.close(); } except Exception as e4 { }
+    return None;
+}
+
+def _lock_release(fh: any) -> None {
+    if fh is None { return None; }
+    try {
+        import fcntl;
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN);
+    } except Exception as e { }
+    try { fh.close(); } except Exception as e2 { }
+    return None;
+}
+
+def graph_write(mutate: any, context: str = "") -> dict {
+    # Run `mutate` — a zero-arg callable that READS the graph and mutates it —
+    # as a serialized critical section, then commit it. Returns
+    # {"ok": bool, "data": <mutate's return>, "error": str}; never raises, so
+    # callers decide how loud a failed write should be.
+    #
+    # The read MUST happen inside `mutate`, not before the call: a value read
+    # outside the lock is exactly the stale anchor this exists to prevent.
+    fh = _lock_acquire();
+    out: any = None;
+    try {
+        out = mutate();
+    } except Exception as e {
+        _lock_release(fh);
+        import from .sigil_errors { log_error }
+        log_error("graph_write(" + str(context) + ")", e);
+        return {"ok": False, "data": None, "error": str(e)[:300]};
+    }
+    err = commit_now(context);
+    _lock_release(fh);
+    return {"ok": (err == ""), "data": out, "error": err};
 }
 
 # Run a compiled module in an isolated ``jac run`` subprocess. Returns
