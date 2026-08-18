@@ -25,23 +25,47 @@ Three passes, straight from the 33-skill batch's failure classes:
 import os;
 import re;
 import yaml;
-import from src.compiler.mechanical.compiler { _load_ir }
+import from src.compiler.mechanical.compiler { _load_ir, transpile_ir }
+import from src.sigil_agir_yaml { dump_agir, strict_parses }
 
 glob _POINTER_PREFIXES: list = ["see ", "refer to ", "read ", "as described in ",
                                 "per the skill", "from the skill", "consult "];
 glob _INLINE_CAP: int = 120000;
 
 def _dump_ir(ir: any) -> str {
-    # body + frontmatter, the same re-serialization autofix_carry_types uses.
-    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
-    body: dict = {};
-    for k in ir {
-        if str(k) != "_frontmatter" { body[k] = ir[k]; }
-    }
-    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
-    if fm {
-        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
-    }
+    # Kept as a local name so the pass bodies read unchanged; the serialization
+    # itself lives beside load_agir, which decides what "parses" in the first place.
+    return dump_agir(ir);
+}
+
+def canonicalize_ir(ir_text: str, name: str) -> str {
+    # Authored AG-IR is TEXT, and text can be malformed. `load_agir` relaxes a
+    # document that is not strict YAML — a column-aligned key that swallowed the
+    # space after its colon, a `list[str]` whose `[` opens a flow sequence YAML
+    # never sees closed — and it never raises, so nothing downstream ever says
+    # the artifact is not actually YAML. That artifact is the skill's persisted
+    # provenance: what a human opens when a compile goes wrong, and what
+    # `sigil gate` and `sigil relearn` re-read.
+    #
+    # Fires ONLY when the document needed the relaxer, so a well-formed IR is
+    # untouched and the blast radius is exactly the defect class. Returns ""
+    # when it does not fire — the same sentinel fold_untraced_prohibitions uses.
+    if strict_parses(ir_text) { return ""; }
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return ""; }
+    if (not isinstance(ir, dict)) or (not ir.get("nodes")) { return ""; }
+    out = str(dump_agir(ir));
+    # Re-emitting must actually fix it. A canonical form that STILL needs the
+    # relaxer means the document is broken in a way this does not understand.
+    if (not out.strip()) or (not strict_parses(out)) { return ""; }
+    # And it must change the document's FORM without changing what it lowers to.
+    # The relaxer already understood this text, so an identical module is the
+    # proof that the canonical reading IS the reading the compiler was going to
+    # use. If they differ, the round-trip reinterpreted something, and the
+    # original text is worth more to a human than a silently changed meaning.
+    try {
+        if str(transpile_ir(ir_text, name)) != str(transpile_ir(out, name)) { return ""; }
+    } except Exception { return ""; }
     return out;
 }
 

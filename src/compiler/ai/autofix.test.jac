@@ -109,3 +109,142 @@ test "a clean IR passes through byte-identical" {
     assert r["fixes"] == [];
     assert str(r["ir_text"]) == ir;
 }
+
+
+# ---------------------------------------------------------------------------
+# canonicalize — authored TEXT that is not strict YAML
+# ---------------------------------------------------------------------------
+
+# The real defect: a column-aligned carry whose key ran long enough to swallow
+# the space after its colon. Seen in a shipped `pdf` IR.
+glob MALFORMED_MAP_IR: str = """---
+name: note-writer
+description: Write a short note to a file.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: NoteAgent
+  carries:
+    task:       { type: str, role: input }
+    drafted_note:{ type: str, produced_by: draft }
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [drafted_note]
+    doc: "Write the note the task asks for."
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: draft, to: done, modality: mandatory}
+""";
+
+# The other shape, from a fresh compile of skillsbench constraint-parser: a typed
+# carry inside a flow map, where `[` opens a sequence YAML never sees closed.
+glob MALFORMED_SEQ_IR: str = """---
+name: constraint-parser
+description: Extract scheduling constraints.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: ConstraintAgent
+  carries:
+    task:        { type: str,       role: input }
+    constraints: { type: list[str], produced_by: extract }
+nodes:
+  - id: extract
+    type: GEN-FILL
+    owner: model
+    reads: [task]
+    writes: [constraints]
+    doc: "Extract the constraints."
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: extract, to: done, modality: mandatory}
+""";
+
+glob CLEAN_IR: str = """---
+name: note-writer
+description: Write a short note to a file.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: NoteAgent
+  carries:
+    task:
+      type: str
+      role: input
+    drafted_note:
+      type: str
+      produced_by: draft
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [drafted_note]
+    doc: "Write the note the task asks for."
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: draft, to: done, modality: mandatory}
+""";
+
+test "an IR that is already strict YAML is left alone" {
+    assert strict_parses(CLEAN_IR);
+    assert canonicalize_ir(CLEAN_IR, "canon_clean") == "";
+}
+
+test "the column-aligned flow map is not strict YAML, and canonicalizes" {
+    assert not strict_parses(MALFORMED_MAP_IR);
+    out = canonicalize_ir(MALFORMED_MAP_IR, "canon_map");
+    assert out;
+    assert strict_parses(out);
+}
+
+test "the unclosed-sequence shape canonicalizes too" {
+    assert not strict_parses(MALFORMED_SEQ_IR);
+    out = canonicalize_ir(MALFORMED_SEQ_IR, "canon_seq");
+    assert out;
+    assert strict_parses(out);
+}
+
+test "canonicalizing preserves the carry the malformed line encoded" {
+    out = canonicalize_ir(MALFORMED_MAP_IR, "canon_carry");
+    c: dict = _load_ir(out).get("walker").get("carries");
+    assert "drafted_note" in c;
+    assert c["drafted_note"]["produced_by"] == "draft";
+}
+
+test "canonicalizing changes the IR's form and NOT what it lowers to" {
+    # The rung refuses unless this holds — the relaxer already understood the
+    # text, so re-emitting it canonically may not move a line of generated Jac.
+    for src in [MALFORMED_MAP_IR, MALFORMED_SEQ_IR] {
+        out = canonicalize_ir(src, "canon_id");
+        assert out;
+        assert str(transpile_ir(src, "canon_id")) == str(transpile_ir(out, "canon_id"));
+    }
+}
+
+test "a document the relaxer cannot rescue is left alone" {
+    broken = "---\nname: x\n---\nnodes: [\n  - id: a\n";
+    assert canonicalize_ir(broken, "canon_broken") == "";
+}
+
+test "an IR with no nodes is not canonicalized" {
+    assert canonicalize_ir("---\nname: x\n---\nshape: pipeline\n", "canon_empty") == "";
+}
