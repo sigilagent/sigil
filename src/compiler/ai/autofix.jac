@@ -26,23 +26,16 @@ import os;
 import re;
 import yaml;
 import from src.compiler.mechanical.compiler { _load_ir }
+import from src.sigil_agir_yaml { dump_agir }
 
 glob _POINTER_PREFIXES: list = ["see ", "refer to ", "read ", "as described in ",
                                 "per the skill", "from the skill", "consult "];
 glob _INLINE_CAP: int = 120000;
 
 def _dump_ir(ir: any) -> str {
-    # body + frontmatter, the same re-serialization autofix_carry_types uses.
-    fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
-    body: dict = {};
-    for k in ir {
-        if str(k) != "_frontmatter" { body[k] = ir[k]; }
-    }
-    out = str(yaml.safe_dump(body, sort_keys=False, allow_unicode=True));
-    if fm {
-        out = "---\n" + str(yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)) + "---\n" + out;
-    }
-    return out;
+    # Kept as a local name so the pass bodies read unchanged; the serialization
+    # itself lives beside load_agir, which decides what "parses" in the first place.
+    return dump_agir(ir);
 }
 
 def _skill_file(skill_dir: str, ref: str) -> str {
