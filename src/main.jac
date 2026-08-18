@@ -51,12 +51,13 @@ import from src.sigil_errors { install_error_log, friendly_llm_error, log_error,
 import from src.sigil_api { JSON_MARKER }
 import from src.eject_agent { eject_agent, carries_compiler }
 import from src.sigil_serve {
-    serve_start, serve_stop, serve_status, serve_logs, mark_serving, unmark_serving
+    serve_start, serve_stop, serve_status, serve_logs, mark_serving, unmark_serving,
+    ensure_server
 }
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
     scheduler_running,
-    service_install, service_uninstall, log_path, graph_path
+    service_install, service_uninstall, log_path, graph_path, ensure_daemon
 }
 import from src.sigil_sessions { session_note, session_show, session_reset, session_list }
 
@@ -613,6 +614,31 @@ with entry:__main__ {
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
+    # The scheduler and the Observatory come up because you used the CLI, not
+    # because you also remembered to start them. A schedule someone set should
+    # run; a dashboard someone expects should answer.
+    #
+    # Not for `daemon` / `serve` themselves: those subcommands ARE the lifecycle,
+    # and auto-starting underneath `daemon stop` would race the very thing it is
+    # trying to stop. Not for `api` either — that is the per-request child an
+    # endpoint spawned, and one scheduler per HTTP request is not a scheduler.
+    # `help` does no work and should stay instant.
+    #
+    # Both calls are non-blocking, never raise, and no-op when the service is
+    # already up, was stopped deliberately, or failed recently (see
+    # sigil_daemon.ensure_daemon). Opt out per-service with SIGIL_NO_DAEMON=1 /
+    # SIGIL_NO_SERVE=1.
+    # `observatory` with no subcommand is a REPORT, so it takes the auto-start
+    # like any other command and then tells you where to look. With a
+    # subcommand it is lifecycle (`observatory stop`), and starting underneath
+    # that would race the thing being stopped.
+    _lifecycle = (cmd in ["daemon", "serve", "start", "kill"])
+                 or ((cmd == "observatory") and (_arg(argv, 1) != ""));
+    if (cmd not in ["api", "help", ""]) and (not _lifecycle) {
+        try { ensure_daemon(); } except Exception as _dstart { }
+        try { ensure_server(); } except Exception as _sstart { }
+    }
+
     # `--claude` is a per-invocation flag, but the daemon's work happens in
     # CHILD processes — every tick, every channel message. A flag that stopped at
     # the process boundary would mean background jobs ran on a provider key the
@@ -649,6 +675,32 @@ with entry:__main__ {
         # `serve [port]` still runs in the foreground (Ctrl-C to stop) — the
         # subcommands below give it the daemon's lifecycle instead.
         sub = _arg(argv, 1);
+        if (cmd == "observatory") and (not sub) {
+            # Where to look, not how to start. The Observatory comes up behind
+            # the scenes with every CLI command (ensure_server), so by the time
+            # anyone types this it is already coming up — this reports the link
+            # and whether it is answering yet, and starts nothing itself.
+            _st = serve_status();
+            _own = _st["owner"];
+            print("observatory: " + str(_st["url"]));
+            if _own {
+                print("  status : answering" + ("   (adopted: not started by sigil)" if _st["adopted"] else ""));
+            } elif _st["running"] {
+                print("  status : starting — the web client is still building, ~25s");
+            } else {
+                import from src.sigil_serve { serve_optout, serve_starting }
+                if serve_optout() {
+                    print("  status : stopped deliberately — `sigil serve start` to bring it back");
+                } elif serve_starting() {
+                    print("  status : starting — the web client is still building, ~25s");
+                } else {
+                    print("  status : not running — see " + str(_st["log"]));
+                }
+            }
+            print("  graph  : " + str(_st["graph"]));
+            print("  log    : " + str(_st["log"]) + "   (sigil serve logs)");
+            sys.exit(0);
+        }
         if sub == "start" {
             r = serve_start(_arg(argv, 2));
             if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
@@ -883,6 +935,41 @@ with entry:__main__ {
             }
             cron_daemon(iv);
         } else { print("usage: cron add|list|show|runs|rm|enable|disable|tick|run|daemon ..."); }
+    } elif (cmd == "start") or (cmd == "kill") {
+        # One switch for the whole agent. `start` brings the scheduler and the
+        # Observatory up; `kill` puts both down and KEEPS them down — each
+        # service's stop writes the deliberate-stop marker that autostart
+        # honours, so `kill` is not undone by the next command anyone types.
+        # No new mechanism: these are the two per-service lifecycles together,
+        # because "is my agent up?" is the question people actually have.
+        if cmd == "kill" {
+            d = daemon_stop();
+            v = serve_stop();
+            print("scheduler   : " + ("stopped (pid " + str(d["pid"]) + ")" if d["ok"] else str(d["error"])));
+            print("observatory : " + ("stopped (pid " + str(v["pid"]) + ")" if v["ok"] else str(v["error"])));
+            print("");
+            print("both stay down until `sigil start` — ordinary commands will not revive them.");
+        } else {
+            iv = _to_int(_arg(argv, 1), 30);
+            d = daemon_start(iv);
+            v = serve_start();
+            print("scheduler   : " + ("running (pid " + str(d["pid"]) + ", every " + str(iv) + "s)"
+                                      if d["ok"] else str(d["error"])));
+            if v["ok"] {
+                print("observatory : " + str(v["url"])
+                      + ("   (still building the web client, ~25s)" if v.get("starting") else ""));
+            } else {
+                print("observatory : " + str(v["error"]));
+            }
+            print("");
+            print("  graph : " + graph_path());
+            print("  logs  : sigil daemon logs · sigil serve logs");
+            # Already-running is success for a command whose job is "make it so",
+            # so only a real failure to come up is worth a non-zero exit.
+            _hard = (not d["ok"]) and ("already running" not in str(d["error"]));
+            _hards = (not v["ok"]) and ("already running" not in str(v["error"]));
+            if _hard or _hards { sys.exit(1); }
+        }
     } elif cmd == "daemon" {
         # daemon start [interval] | stop | restart [interval] | status | logs [n]
         #        | run [interval]  (foreground supervisor — what start spawns)
@@ -1552,7 +1639,11 @@ with entry:__main__ {
         print("");
         print("use it");
         print("  chat                                conversational tool-using REPL — the whole agent from one conversation");
-        print("  serve [port]                        REST API + Observatory web UI on the CLI's graph (alias: observatory; own port 8199, claimed strictly — never falls back)");
+        print("  start | kill                        bring the scheduler + Observatory up, or put both down and keep them down");
+        print("  observatory                         where to open the web UI — the scheduler and server come up on their own");
+        print("  serve [port]                        run the Observatory in THIS terminal instead (own port 8199, claimed strictly — never falls back)");
+        print("                                        serve start|stop|status|logs · daemon start|stop|status|logs");
+        print("                                        a deliberate stop sticks; SIGIL_NO_DAEMON=1 / SIGIL_NO_SERVE=1 opt out entirely");
         print("  channel setup <kind>                how to connect discord|telegram|whatsapp|slack");
         print("  channel connect <name> <kind>       register a channel + its token secret, print next steps");
         print("");

@@ -407,13 +407,15 @@ def graph_lock_path() -> str {
     return os.path.join(d, GRAPH_LOCK_NAME);
 }
 
-def _lock_acquire(timeout_s: float = 60.0) -> any {
+def _lock_acquire(path: str = "", timeout_s: float = 60.0) -> any {
     # Exclusive advisory lock, polled so a wedged holder cannot block forever.
     # Returns the open handle (the lock lives as long as it does), or None when
     # locking is unavailable — in which case the caller proceeds UNSERIALIZED
     # rather than refusing to work, exactly as it behaved before this existed.
+    # `path` defaults to the graph lock; the daemon's single-spawn claim passes
+    # its own, so a slow daemon start cannot block a graph write.
     try { import fcntl; } except Exception as e { return None; }
-    try { fh = open(graph_lock_path(), "a+"); } except Exception as e2 { return None; }
+    try { fh = open(str(path) if path else graph_lock_path(), "a+"); } except Exception as e2 { return None; }
     waited = 0.0;
     while waited < float(timeout_s) {
         try {
