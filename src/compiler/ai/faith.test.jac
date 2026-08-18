@@ -11,6 +11,8 @@ lock in the two properties the rearchitecture turns on:
      ships green today.
 """
 
+import from .spec_loop { flag_ambiguous, resolve_ambiguous_default }
+
 # --- Layer 0: the required-realization table ------------------------------
 
 test "required_shape covers every rule kind; force never outranks KNOWLEDGE" {
@@ -453,4 +455,100 @@ test "shredding is reported but does NOT flip the faithfulness verdict" {
     # warn-level: it rides the proof, it does not fail the compile
     assert gap_score(fr) == len(fr.dropped) + len(fr.added);
     assert "SHRED" in " ".join(proof_lines(fr));
+}
+
+# ---------------------------------------------------------------------------
+# vacuity — a faithfulness verdict over an empty required set
+# ---------------------------------------------------------------------------
+
+glob _TOY_SKILL: str = "# Toy\n\nLoad the rows from data.csv.\nYou must always emit a CSV with a header row.\n";
+
+# Realizes r2 only — no loading step. This is the gpt-5 arm in pilot/RESULTS.md:
+# "emitted no loading at all".
+glob _IR_NO_LOADING: str = """---
+name: toy
+---
+agir_version: 0.1
+shape: pipeline
+tools:
+  emit_csv:
+    sig: "(task) -> str"
+    surface: ACT·artifact
+    serves: [emit]
+    traces_to: [r2]
+    body: |
+      def emit_csv(task):
+          return "col_a\\n1\\n"
+walker:
+  name: ToyAgent
+  carries:
+    task: { type: str, role: input }
+    out:  { type: str, produced_by: emit }
+nodes:
+  - id: emit
+    type: ACT
+    owner: code
+    op: emit_csv
+    tool: emit_csv
+    reads: [task]
+    writes: [out]
+    doc: "Always emit a CSV with a header row."
+    traces_to: [r2]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: emit, to: done, modality: mandatory}
+""";
+
+def _toy_spec() -> RuleSet {
+    return RuleSet(skill_name="toy", rules=[
+        Rule(id="r1", quote="Load the rows from data.csv.",
+             kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="You must always emit a CSV with a header row.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+}
+
+test "an unmarked imperative is demoted, and the missing step stops being checked" {
+    # This is the compiler-layer gap: the SAME agent, which never loads its
+    # input, flips from unfaithful to faithful because the modal-force fallback
+    # assumed the loading step was optional.
+    before = faithfulness_report(_toy_spec(), _IR_NO_LOADING);
+    assert not before.ok;
+    assert len(before.dropped) == 1;
+    assert "'r1'" in before.dropped[0].message;
+
+    spec = _toy_spec();
+    resolve_ambiguous_default(spec, flag_ambiguous(_TOY_SKILL, spec));
+    after = faithfulness_report(spec, _IR_NO_LOADING);
+    assert after.ok;                      # the gap, pinned
+    assert len(after.dropped) == 0;
+    assert after.rules_total == 1;        # r1 is no longer required of anyone
+}
+
+test "a spec whose every obligation resolved to optional is reported VACUOUS" {
+    # search-cities is the real case: its one MANDATORY rule carries no modal
+    # marker, so after the fallback nothing at all is required and the verdict
+    # is a vacuous truth rather than a proof.
+    spec = RuleSet(skill_name="cities", rules=[
+        Rule(id="r1", quote="Map states to their cities from the background text file.",
+             kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    skill = "# Search Cities\n\nMap states to their cities from the background text file.\n";
+    resolve_ambiguous_default(spec, flag_ambiguous(skill, spec));
+    fr = faithfulness_report(spec, _IR_NO_LOADING);
+    assert fr.rules_total == 0;
+    assert fr.vacuous;
+    assert "vacuous" in " ".join(proof_lines(fr));
+}
+
+test "a spec that still requires something is NOT vacuous" {
+    fr = faithfulness_report(_toy_spec(), _IR_NO_LOADING);
+    assert fr.rules_total == 2;
+    assert not fr.vacuous;
+}
+
+test "an empty spec is not vacuous — there was nothing to lose" {
+    fr = faithfulness_report(RuleSet(skill_name="none", rules=[]), _IR_NO_LOADING);
+    assert not fr.vacuous;
 }
