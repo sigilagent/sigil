@@ -458,7 +458,14 @@ def _handle_slash(console: any, cmd: str) -> bool {
         else { console.print("[dim]  usage: /sandbox <off|jail|docker>   (currently " + str(workspace_info()["sandbox"]) + ")[/dim]"); }
     }
     elif verb in ["/remember", "/teach"] {
-        if rest { console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]"); _commit_ui(console, "/remember"); }
+        if rest {
+            try {
+                console.print("[green]  ✓[/green] [dim]" + str(teach(rest, "fact")) + "[/dim]");
+                _commit_ui(console, "/remember");
+            } except Exception as _rerr {
+                console.print("[red]  ✖[/red] [dim]" + str(_rerr)[:200] + "[/dim]");
+            }
+        }
         else { console.print("[dim]  usage: /remember <fact>[/dim]"); }
     }
     elif verb == "/recall" {

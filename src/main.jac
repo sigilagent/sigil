@@ -758,7 +758,16 @@ with entry:__main__ {
     } elif cmd == "teach" {
         fact = _arg(argv, 1);
         if not fact { print("usage: teach \"<fact>\""); }
-        else { print(teach(fact, "fact")); }
+        else {
+            # A write that did not land must not read like one that did: print
+            # the confirmation only after the commit, and leave a non-zero exit
+            # code behind for whatever scripted this.
+            try { print(teach(fact, "fact")); }
+            except Exception as _terr {
+                print(str(_terr));
+                sys.exit(1);
+            }
+        }
     } elif cmd == "recall" {
         q = _arg(argv, 1);
         for m in recollect(q, 8) { print("  (" + m["kind"] + ") " + m["content"]); }

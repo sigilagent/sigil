@@ -59,7 +59,10 @@ def _run_action(h: Hook, payload: str) -> str {
             return "shell: " + str(p.stdout)[:200];
         } except Exception as e { return "shell-err: " + str(e)[:120]; }
     }
-    if h.action_kind == "memory" { teach(h.action, "fact"); return "remembered"; }
+    if h.action_kind == "memory" {
+        try { teach(h.action, "fact"); return "remembered"; }
+        except Exception as e { return "memory-err: " + str(e)[:120]; }
+    }
     if h.action_kind == "webhook" {
         try {
             req = Request(h.action, data=payload.encode("utf-8"), headers={"Content-Type": "text/plain"});

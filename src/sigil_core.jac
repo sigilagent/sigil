@@ -24,7 +24,7 @@ import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
-    skill_description
+    skill_description, graph_write
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
@@ -716,9 +716,23 @@ def forget(signature: str) -> dict {
 
 def teach(fact: str, kind: str = "fact") -> str {
     # Write a durable memory directly onto the graph.
-    soul = awaken();
-    remember(soul, fact, kind);
-    return "remembered (" + kind + "): " + fact;
+    #
+    # The read (`awaken`) lives INSIDE the critical section on purpose: reading
+    # the Soul out here and mutating in there is the stale-anchor race itself.
+    # On a failed write this RAISES rather than returning its success sentence —
+    # `teach` used to print "remembered" and then die in the exit commit, so a
+    # write that never landed reported success on stdout and failure only in
+    # the exit code.
+    def _do() -> str {
+        soul = awaken();
+        remember(soul, fact, kind);
+        return "remembered (" + kind + "): " + fact;
+    }
+    r = graph_write(_do, "teach");
+    if not r["ok"] {
+        raise RuntimeError("could not remember that: " + str(r["error"]));
+    }
+    return str(r["data"]);
 }
 
 def recollect(query: str, k: int = 8) -> list {

@@ -61,3 +61,52 @@ test "the compiled-module driver installs the claude-cc provider when needed" {
     assert "sigil_claude_cc.is_claude_cc(model_name)" in drv;
     assert "config=cfg" in drv;
 }
+
+# --- cross-process write serialization -------------------------------------
+# 8 concurrent `sigil teach` used to leave 3 processes dead in
+# "WriteConflict: anchor <soul> changed concurrently (expected v3, found v4)"
+# — each having already printed its success line. These cover the seam that
+# ended it; the race itself is only reproducible across real processes.
+
+test "the graph lock sits beside the store, so one lock covers one graph" {
+    p = graph_lock_path();
+    assert p.endswith(".write.lock");
+    assert ".jac/data/" in p.replace("\\", "/");
+    assert p.startswith(project_root());
+}
+
+test "the write lock is exclusive against a second holder" {
+    a = _lock_acquire();
+    assert a is not None;              # nothing else holds it during a test run
+    # flock is keyed to the open file description, so a second open() in this
+    # same process contends exactly the way another sigil process would.
+    b = _lock_acquire(timeout_s=0.3);
+    assert b is None;                  # ...and gives up rather than hanging
+    _lock_release(a);
+    c = _lock_acquire(timeout_s=2.0);
+    assert c is not None;              # released cleanly, not leaked
+    _lock_release(c);
+}
+
+test "graph_write reports the mutation's value and releases the lock" {
+    def _ok() -> int { return 41 + 1; }
+    r = graph_write(_ok, "unit");
+    assert r["ok"] == True;
+    assert r["data"] == 42;
+    assert r["error"] == "";
+    # the critical section must not outlive the call
+    h = _lock_acquire(timeout_s=2.0);
+    assert h is not None;
+    _lock_release(h);
+}
+
+test "a mutation that raises is a failed write, not a crash or a lost lock" {
+    def _boom() -> str { raise ValueError("nope"); }
+    r = graph_write(_boom, "unit-fail");
+    assert r["ok"] == False;
+    assert r["data"] is None;
+    assert "nope" in r["error"];
+    h = _lock_acquire(timeout_s=2.0);
+    assert h is not None;              # released on the failure path too
+    _lock_release(h);
+}
