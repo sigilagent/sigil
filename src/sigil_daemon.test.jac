@@ -6,8 +6,14 @@
 import os;
 
 test "the daemon reports the same graph the CLI uses" {
+    # This asserted `sigil.db` by name and so kept passing while it was false:
+    # jac keys a SUBDIRECTORY entry's store to that script's filename, and
+    # sigil enters through src/main.jac, so the CLI has been writing main.db
+    # since main.jac moved out of the root. The invariant is that the daemon
+    # names whatever the entry script actually resolves to — not a fixed name.
     g = graph_path();
-    assert g.endswith(os.path.join(".jac", "data", "sigil.db")), g;
+    assert g == store_path(), g;
+    assert g.endswith(os.path.basename(entry_script()).replace(".jac", ".db")), g;
     assert g.startswith(project_root()), "the graph must live under the project, not the caller's cwd";
 }
 

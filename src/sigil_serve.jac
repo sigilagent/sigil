@@ -26,7 +26,7 @@ import signal;
 import subprocess;
 import from pathlib { Path }
 import from .sigil_runtime {
-    read_pid, write_pidfile, clear_pidfile, pid_alive, log_dir, run_dir, project_root
+    read_pid, write_pidfile, clear_pidfile, pid_alive, log_dir, run_dir, project_root, store_path
 }
 
 glob SERVE_PID: str = "observatory";     # pidfile name under $SIGIL_HOME/run
@@ -229,7 +229,7 @@ def serve_status() -> dict {
         "port": prt,
         "url": "http://localhost:" + prt,
         "log": serve_log_path(),
-        "graph": os.path.join(project_root(), ".jac", "data", "sigil.db"),
+        "graph": store_path(),
         "owner": (str(owner[1])[:140] if owner else ""),
         # a listener we did not start (or an orphan we lost the pidfile for)
         "adopted": bool(owner) and (pid <= 0)

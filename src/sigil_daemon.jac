@@ -36,7 +36,7 @@ import subprocess;
 import from pathlib { Path }
 import from .sigil_runtime {
     sigil_home, run_dir, log_dir, pid_path, read_pid, pid_alive, write_pidfile,
-    clear_pidfile, process_running, project_root, entry_script, _jac_bin
+    clear_pidfile, process_running, project_root, entry_script, _jac_bin, store_path
 }
 import from .cron { tick_isolated, next_due_ms, cron_list, cron_daemon_running }
 import from .channels { channel_list as cron_channel_list }
@@ -63,8 +63,10 @@ def state_path() -> str {
 
 def graph_path() -> str {
     # The store the CLI and the daemon share. jac resolves it relative to the
-    # working directory, which is why every entry path pins cwd to the project.
-    return os.path.join(project_root(), ".jac", "data", "sigil.db");
+    # working directory, which is why every entry path pins cwd to the project —
+    # and to the entry SCRIPT, which is why the name is resolved rather than
+    # spelled out here (see sigil_runtime.store_path).
+    return store_path();
 }
 
 def _write_state(interval_s: int) -> None {

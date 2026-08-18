@@ -35,17 +35,28 @@ httpx = "latest"
 [plugins.byllm.model]
 default_model = "gpt-4o-mini"
 
-# One graph, two doors: `jac run src/main.jac` (CLI) persists to .jac/data/sigil.db
-# (the project-name default), and this points `jac start observatory.jac` at the
-# SAME file — so skills taught in the CLI show up live in the Observatory.
-# Overridden by MONGODB_URI if set (both sides then need it).
-[plugins.scale.database]
+# NOTE the section name: jac-scale reads `[scale.*]`, NOT `[plugins.scale.*]`.
+# Both keys below sat under the `plugins.` prefix and were therefore SILENTLY
+# IGNORED — shelf_db_path fell back to jac-scale's own `.jac/data/anchor_store.db`
+# default, which is where the running Observatory's (empty) graph went. The
+# jac-scale docs bundled in the runtime closure show the `[plugins.scale.…]`
+# form, so this is a docs bug rather than a typo here; verified by A/B on jac
+# 0.34.5 (`[scale.database]` applies the pin, `[plugins.scale.database]` does not).
+#
+# The two doors are NOT one graph, and this pin cannot make them one: jac keys a
+# ROOT entry's store to the [project] name and a SUBDIRECTORY entry's to that
+# script's filename, so `jac run src/main.jac` (the CLI) resolves to
+# .jac/data/main.db while `jac start observatory.jac` resolves to sigil.db. What
+# makes the Observatory show the CLI's agent is src/sigil_api.jac: every endpoint
+# runs its request in a fresh `jac run` against the CLI's store. This pin only
+# names the server's OWN store. Overridden by MONGODB_URI if set.
+[scale.database]
 shelf_db_path = ".jac/data/sigil.db"
 
 # The client's `sv import from src.sigil` makes `jac start` auto-detect a
 # microservice split (gateway + src.sigil subprocess). Sigil is one agent on one
 # graph — force the single-process server so the Observatory and API share it.
-[plugins.scale.microservices]
+[scale.microservices]
 enabled = false
 
 [dependencies.npm]

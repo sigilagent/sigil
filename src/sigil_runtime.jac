@@ -97,6 +97,38 @@ def entry_script() -> str {
     return str(_here() / "main.jac");
 }
 
+def project_name(fallback: str = "sigil") -> str {
+    # [project] name from jac.toml — the store name jac uses for a root entry.
+    t = os.path.join(project_root(), "jac.toml");
+    try {
+        import tomllib;
+        with open(t, "rb") as fh {
+            return str(dict(tomllib.load(fh)).get("project", {}).get("name", fallback) or fallback);
+        }
+    } except Exception as e { return fallback; }
+}
+
+def store_path() -> str {
+    # The .db this agent actually reads and writes.
+    #
+    # Measured on jac 0.34.5: an entry script sitting at the PROJECT ROOT keys
+    # its store to the [project] name from jac.toml; an entry in a SUBDIRECTORY
+    # keys it to that script's own filename. sigil enters through src/main.jac
+    # and the Observatory through root-level observatory.jac, so the two doors
+    # resolve to DIFFERENT files — .jac/data/main.db and .jac/data/sigil.db.
+    #
+    # This used to be hardcoded to sigil.db, which stopped being true when
+    # main.jac moved into src/ (#153): `sigil where` — the one command whose
+    # whole job is answering "which agent am I talking to?" — then named a
+    # store the CLI had not written to since.
+    data = os.path.join(project_root(), ".jac", "data");
+    entry = Path(entry_script());
+    try { at_root = (str(entry.parent.resolve()) == str(Path(project_root()).resolve())); }
+    except Exception as e { at_root = False; }
+    stem = project_name() if at_root else entry.stem;
+    return os.path.join(data, stem + ".db");
+}
+
 # ---------------------------------------------------------------------------
 # Process bookkeeping. Anything that runs longer than one command — the cron
 # loop today, the full daemon next — leaves a pidfile under `$SIGIL_HOME/run`,
