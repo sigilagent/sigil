@@ -657,3 +657,56 @@ test "resolve_ambiguous_default keeps a procedural step MANDATORY but still demo
     assert rs.rules[1].modality == Modality.MANDATORY;
     assert rs.rules[2].modality == Modality.DISCRETIONARY;
 }
+
+# ---------------------------------------------------------------------------
+# ...and the tier that reading has to happen at. Settling a procedural step in
+# resolve_ambiguous_default only protects the ones the adjudicator declined to
+# answer: a grounded "maybe" (evidence "**Process:**" — verbatim, and outside the
+# obligation's own sentence, so it clears every check in ground_adjudications)
+# demoted the step before the guard ever ran, and two identical steps in one list
+# could land MANDATORY and DISCRETIONARY depending on which the model answered.
+# Settling in infer_modality closes it: flag_ambiguous skips a settled rule, so
+# the step is never a clarify item and the adjudicator is never asked.
+# ---------------------------------------------------------------------------
+
+test "procedural steps are settled by structure, so they never reach the adjudicator" {
+    rs = RuleSet(skill_name="proc", rules=[
+        Rule(id="r1", quote="Search all systems for personal data", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="Contain the breach", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r3", quote="Most reliable evidence", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    settled = apply_structural_modality(PROC_SKILL, rs);
+    assert "r1" in settled;
+    assert "r2" in settled;
+    # a LABEL in the same neighbourhood — under a bold list-introducer, but not an
+    # imperative — is not a step, and structure settles nothing about it
+    assert "r3" not in settled;
+    # the binding CITES the header that claimed it — never an anonymous decision
+    assert "Process" in str(settled["r1"]);
+    assert "Step 1" in str(settled["r2"]);
+    assert rs.rules[0].modality == Modality.MANDATORY;
+    assert rs.rules[1].modality == Modality.MANDATORY;
+    # and the payoff: only the genuinely underspecified line is put to the adjudicator
+    assert [c.rule_id for c in flag_ambiguous(PROC_SKILL, rs, settled)] == ["r3"];
+}
+
+glob PROC_UNDER_EXAMPLES: str = """# Release Guide
+
+## Examples
+
+**Process:**
+1. Run the validator before shipping
+""";
+
+test "an explicit governing force still outranks the procedural read" {
+    # the step is under '**Process:**', but the section is a demonstration —
+    # the nearest governing scope wins and the procedural fallback never fires
+    assert _is_procedural_step_line(PROC_UNDER_EXAMPLES, "Run the validator before shipping");
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="Run the validator before shipping", kind=RuleKind.STEP,
+             modality=Modality.MANDATORY)
+    ]);
+    settled = apply_structural_modality(PROC_UNDER_EXAMPLES, rs);
+    assert "Examples" in str(settled["r1"]);
+    assert rs.rules[0].modality == Modality.DISCRETIONARY;
+}
