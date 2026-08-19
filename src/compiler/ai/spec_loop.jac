@@ -222,8 +222,18 @@ def _in_skill(skill_norm: str, span: any) -> bool {
 #       restatement of its outcome.
 # Measured: dpe AMC 50% (vs hand-authored OSP 80%) -> 100% once every procedural
 # step had its own node; iso27001 40 -> 80; soc2 70 -> 100.
-# _is_procedural_step_line is the shared detector; promote_procedural_aliases
-# fixes (2); the guard in resolve_ambiguous_default fixes (1).
+# _procedural_step_header is the shared detector (_is_procedural_step_line is the
+# bool view of it); promote_procedural_aliases fixes (2).
+#
+# (1) is fixed at TWO points, and which one carries it matters. The reading is
+# structural inference — the same class of fact as a heading or a list intro —
+# so it belongs in infer_modality, alongside them, where apply_structural_modality
+# binds it and records it in `settled`. That is what makes it hold: flag_ambiguous
+# skips a settled rule, so the step never becomes a clarify item, the adjudicator
+# is never asked about it, and no model answer can demote it. The guard in
+# resolve_ambiguous_default stays as a BACKSTOP for the residue — a rule whose
+# quote drifted between rounds, or one flagged for a different reason — but it is
+# no longer the only thing standing between a procedural step and a MAYBE.
 glob _SKILL_FOR_RESOLVE: str = "";
 # a step line that starts with one of these is a label/descriptor, not an imperative
 glob _NON_IMPERATIVE_STARTS: list = ["most", "least", "the", "a", "an", "this", "that", "these", "those", "four-column", "four", "three", "two", "one", "gdpr", "ccpa", "iso", "soc", "all", "any", "some", "no", "non", "key", "main", "common", "typical", "example", "examples", "note", "notes", "tip", "tips", "optional", "optionally", "consider", "maybe", "if", "when", "unless", "for", "in", "on", "at", "with", "without", "e.g.", "i.e.", "see", "also"];
@@ -238,16 +248,24 @@ glob _PROC_HEADER_RX: list = [
 def set_skill_for_resolve(skill: str) -> None { _SKILL_FOR_RESOLVE = skill; }
 
 def _is_procedural_step_line(skill: str, span: str) -> bool {
-    # The span must be (a) a list item ("2. …", "- …", "* …") on its own line in
-    # the skill and (b) sit under a procedure-style header within a short window.
+    return bool(_procedural_step_header(skill, span));
+}
+
+def _procedural_step_header(skill: str, span: str) -> str {
+    # The procedure header that CLAIMS this span, or "" when none does. The span
+    # must be (a) a list item ("2. …", "- …", "* …") on its own line in the skill
+    # and (b) sit under a procedure-style header within a short window.
+    # Returns the header rather than a bool because infer_modality has to CITE
+    # it: a structural binding is always reported with the span that governed it
+    # (see _settled_lines), never anonymously.
     sp = str(span).strip();
-    if not sp { return False; }
+    if not sp { return ""; }
     # must read as an IMPERATIVE: reject labels/descriptors ("Most reliable evidence",
     # "Four-Column Format", "GDPR applies when:") — a step starts with a bare verb.
     body0 = re.sub(r"^(\d+[.)]|[-*•])\s+", "", sp).strip();
-    if body0.endswith(":") { return False; }
+    if body0.endswith(":") { return ""; }
     w0 = re.split(r"[\s,]+", body0.lower())[0] if body0 else "";
-    if (not w0) or (w0 in _NON_IMPERATIVE_STARTS) or w0.endswith("est") or w0.endswith("ly") { return False; }
+    if (not w0) or (w0 in _NON_IMPERATIVE_STARTS) or w0.endswith("est") or w0.endswith("ly") { return ""; }
     lines = skill.split("\n");
     for i in range(len(lines)) {
         ln = lines[i].strip();
@@ -273,13 +291,13 @@ def _is_procedural_step_line(skill: str, span: str) -> bool {
             # a bold label that introduces a list ("**Activities**:", "**Three Evidence
             # Collection Techniques**:") opens a procedure block too
             if re.match(r"^\*\*[^*]+\*\*\s*:\s*$", raw) { is_proc = True; }
-            if is_proc { return True; }
+            if is_proc { return raw; }
             # only a markdown heading closes the section
-            if re.match(r"^#{1,6}\s+", raw) { return False; }
+            if re.match(r"^#{1,6}\s+", raw) { return ""; }
             j = j - 1;
         }
     }
-    return False;
+    return "";
 }
 
 def promote_procedural_aliases(skill: str, rs: RuleSet) -> list[str] {
@@ -685,13 +703,34 @@ def infer_modality(skill: str, rs: RuleSet) -> dict {
         if r.condition.strip() { continue; }     # a 'When' already carries its gate
         if _force_of(r.quote) { continue; }      # the span states its own force
         at = _locate(lines, r.quote);
-        if at < 0 { continue; }
-        for g in _governing_lines(lines, at) {
-            f = _force_of(g[1]);
-            if (not f) and (g[0] == "heading") and _illustrative_heading(g[1]) { f = "maybe"; }
-            if not f { continue; }
-            out[r.id] = [f, str(g[1])];
-            break;                               # nearest governing scope wins
+        if at >= 0 {
+            for g in _governing_lines(lines, at) {
+                f = _force_of(g[1]);
+                if (not f) and (g[0] == "heading") and _illustrative_heading(g[1]) { f = "maybe"; }
+                if not f { continue; }
+                out[r.id] = [f, str(g[1])];
+                break;                           # nearest governing scope wins
+            }
+        }
+        # STEP GRANULARITY — the last structural read, and the weakest signal, so
+        # it fires only when no governing line stated a force at all: the span is
+        # a list item under a procedure header, and the list IS the procedure, so
+        # the author means it as a Do. An explicit force still wins outright —
+        # a list under '## Examples' is demoted by the loop above and never
+        # reaches here.
+        #
+        # This is the TIER the reading has to live at. #176 put the same detector
+        # at the bottom (resolve_ambiguous_default), which only sees obligations
+        # the adjudicator declined to answer — so a model answering 'maybe' on a
+        # procedural step demoted it anyway, and two identical steps in one list
+        # could end up MANDATORY and DISCRETIONARY depending on which the model
+        # happened to answer. Settling here closes that: a settled rule is never
+        # flagged, so the adjudicator is never asked and cannot answer it away.
+        # _locate is deliberately not required — _procedural_step_header does its
+        # own line scan, so a quote _locate cannot place is still protected.
+        if (r.id not in out) and (r.kind == RuleKind.STEP) {
+            ph = _procedural_step_header(skill, str(r.quote));
+            if ph { out[r.id] = ["do", ph]; }
         }
     }
     return out;
@@ -809,13 +848,18 @@ def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[s
     demote: list = [c for c in clarify if not str(c.reason).startswith("kind/modality conflict")];
     keep: list = [c for c in clarify if str(c.reason).startswith("kind/modality conflict")];
     ids: list[str] = [c.rule_id for c in demote];
-    # STEP-GRANULARITY (bench finding, data-privacy-expert): a numbered/bulleted
-    # imperative under a procedure header ("Process: 2. Search all systems…",
-    # "**Step 1: Assess Breach** - Contain the breach") carries no must/always
-    # wording, so the modality detector flags it `?` and — with no adjudicator —
-    # it was ASSUMED MAYBE and dropped from the graph (no node → the agent
-    # deterministically skipped it; AMC 50 vs hand-OSP 80). The list IS the
-    # procedure: such a step is MANDATORY by structure. Keep it a DO.
+    # STEP-GRANULARITY BACKSTOP (bench finding, data-privacy-expert): a
+    # numbered/bulleted imperative under a procedure header ("Process: 2. Search
+    # all systems…", "**Step 1: Assess Breach** - Contain the breach") carries no
+    # must/always wording, so it was ASSUMED MAYBE and dropped from the graph (no
+    # node → the agent deterministically skipped it; AMC 50 vs hand-OSP 80). The
+    # list IS the procedure: such a step is MANDATORY by structure. Keep it a DO.
+    #
+    # infer_modality now settles these one tier up, so in the ordinary case they
+    # never reach here at all. This remains for what still can: a quote the last
+    # extraction round rephrased past the detector at settle time, or a step
+    # flagged for some other reason. Reaching this line is the exception, not the
+    # mechanism — the mechanism is that structure decided before anyone asked.
     protected: list[str] = [];
     for r in rs.rules {
         if (r.id in ids) and (r.kind == RuleKind.STEP) and _is_procedural_step_line(_SKILL_FOR_RESOLVE, str(r.quote)) {
