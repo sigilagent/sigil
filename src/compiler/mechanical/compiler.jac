@@ -1220,6 +1220,25 @@ def _guard_literals(ir: any, carries: any) -> dict {
     return out;
 }
 
+# Is this node the one whose output IS the user-facing deliverable? (its written
+# carry is read by an ACT/file-writing node, or by the terminal report). Those
+# slots legitimately own the task's output checklist; procedural steps do not.
+def _is_deliverable_node(ir: any, n: any) -> bool {
+    writes = _list(n.get("writes"));
+    if not writes { return False; }
+    w0 = str(writes[0]);
+    for m in _list(ir.get("nodes")) {
+        if not isinstance(m, dict) { continue; }
+        if w0 in _list(m.get("reads")) and str(m.get("type","")) in ["ACT", "TERMINAL"] { return True; }
+    }
+    # a slot that nothing downstream consumes except the final report is a deliverable too
+    consumed = False;
+    for m in _list(ir.get("nodes")) {
+        if isinstance(m, dict) and m.get("id") != n.get("id") and w0 in _list(m.get("reads")) { consumed = True; }
+    }
+    return not consumed;
+}
+
 def _emit_slots(ir: any) -> str {
     out: list = [];
     types = ir.get("types");
@@ -1303,6 +1322,18 @@ def _emit_slots(ir: any) -> str {
         seed = _slot_seed(ir, n["id"]);
         doc = str(n.get("doc") or "");
         semtext = doc + seed;
+        # TASK-SCOPE (bench finding, data-privacy-expert t2): a procedural slot
+        # that reads the raw `task` also sees the task's OUTPUT-FORMAT checklist
+        # ("Required content: these literal strings MUST appear in your output…").
+        # That stronger-worded directive hijacked `contain_breach` /
+        # `preserve_evidence` into emitting the notification deliverable instead of
+        # their own step (judge: MISSED). A step slot is told, explicitly, that the
+        # task is context for THIS step only and the deliverable checklist is not
+        # its job. Terminal/deliverable-producing slots (the ones whose write IS
+        # the artifact) are left alone — for them the checklist is the point.
+        if ("task" in creads) and (nt in GEN_TYPES) and (not _is_deliverable_node(ir, n)) {
+            semtext = semtext + " SCOPE: `task` is background context for THIS step only. Do exactly this step and return only its result. Any output-format or 'required content / literal strings' checklist inside the task applies to the FINAL deliverable, not to this step — do not produce the deliverable here.";
+        }
         # discriminator slot: its written carry feeds ==-literal route guards.
         # Constrain the answer to the guard set, or the route can dead-end.
         if (ret == "str") and n.get("writes") {
