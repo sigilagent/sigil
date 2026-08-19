@@ -328,30 +328,59 @@ def models_info() -> dict {
     };
 }
 
+def _seed_soul() -> Soul {
+    # The cold-graph seed. Called through graph_write (below), so it runs with
+    # the store lock held and its read is taken INSIDE the critical section, as
+    # every mutation here must be — it adopts whatever Soul it finds rather than
+    # adding a second one.
+    found = [root -->[?:Soul]];
+    if found { return found[0]; }
+    soul = Soul(
+        name="sigil",
+        persona="A pragmatic operator that compiles tasks into reliable, minimal procedures and runs them cheaply.",
+        ethos=[
+            "Prefer mechanized structure over prose.",
+            "Never leave a step unembodied.",
+            "Ground verification in the real artifact, not a proxy.",
+            "Reuse a compiled procedure before authoring a new one."
+        ],
+        frontier_model=os.getenv("SIGIL_FRONTIER", "gpt-5"),
+        small_model=os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"),
+        router_model=os.getenv("SIGIL_ROUTER", ""),
+        channels=["cli"]
+    );
+    root +>:Embodies:+> soul;
+    reg = Registry();
+    root +>:Anchored:+> reg;
+    soul +>:Owns:+> reg;
+    soul +>:Knows:+> Spec(kind="agir-contract", body=default_contract());
+    return soul;
+}
+
 def awaken() -> Soul {
     found = [root -->[?:Soul]];
     if found {
         soul = found[0];
     } else {
-        soul = Soul(
-            name="sigil",
-            persona="A pragmatic operator that compiles tasks into reliable, minimal procedures and runs them cheaply.",
-            ethos=[
-                "Prefer mechanized structure over prose.",
-                "Never leave a step unembodied.",
-                "Ground verification in the real artifact, not a proxy.",
-                "Reuse a compiled procedure before authoring a new one."
-            ],
-            frontier_model=os.getenv("SIGIL_FRONTIER", "gpt-5"),
-            small_model=os.getenv("SIGIL_SMALL", "ollama_chat/qwen3:32b"),
-            router_model=os.getenv("SIGIL_ROUTER", ""),
-            channels=["cli"]
-        );
-        root +>:Embodies:+> soul;
-        reg = Registry();
-        root +>:Anchored:+> reg;
-        soul +>:Owns:+> reg;
-        soul +>:Knows:+> Spec(kind="agir-contract", body=default_contract());
+        # Seeded inline, this write stayed DIRTY for the life of the process:
+        # a jac process commits on exit, so `sigil chat` held its brand-new root
+        # anchor for as long as the REPL was open (measured: the store file does
+        # not exist until it quits) and a supervisor holds it for days. On a
+        # store with real row locks that is not a private inconvenience — every
+        # sibling process blocks on the anchor until the store gives up. Which
+        # is exactly how the auto-started scheduler broke the first `sigil chat`
+        # on a fresh checkout: "canceling statement due to lock timeout ... while
+        # inserting index tuple (0,1) in relation anchors", 60s in (postgres, jac
+        # 0.36.1).
+        #
+        # So the seed is a mutation like any other: serialized across processes
+        # and committed on the spot. The lock is held for one insert, and the row
+        # is out of everyone else's way the moment it is released.
+        graph_write(_seed_soul, "awaken");
+        found = [root -->[?:Soul]];
+        # No lock available (no fcntl) or the commit lost a race — seed in place
+        # rather than refuse to wake, exactly as this behaved before.
+        soul = found[0] if found else _seed_soul();
     }
     # rebind cognition from the graph
     frontier = _bind_tier(soul, "frontier", soul.frontier_model);

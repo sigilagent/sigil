@@ -10,6 +10,14 @@
 # ~25s web-client build.
 
 test "a deliberate serve stop sticks, and an explicit start lifts it" {
+    # Own run dir, for the same reason as the scheduler's twin in
+    # sigil_daemon.test.jac: the pidfile check runs first, so against the real
+    # $SIGIL_HOME this reads "already running" on any machine whose Observatory
+    # is up — which, since autostart, is any machine sigil has been used on.
+    import os;
+    import tempfile;
+    prev = os.environ.get("SIGIL_HOME") or "";
+    os.environ["SIGIL_HOME"] = tempfile.mkdtemp(prefix="sigil-serve-test-");
     clear_serve_stopped();
     assert serve_optout() == False;
     mark_serve_stopped();
@@ -19,6 +27,7 @@ test "a deliberate serve stop sticks, and an explicit start lifts it" {
     assert r["reason"] == "stopped deliberately";
     clear_serve_stopped();
     assert serve_optout() == False;
+    if prev { os.environ["SIGIL_HOME"] = prev; } else { del os.environ["SIGIL_HOME"]; }
 }
 
 test "SIGIL_NO_SERVE and api children decline before anything is spawned" {
