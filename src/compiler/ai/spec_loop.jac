@@ -204,6 +204,109 @@ def _in_skill(skill_norm: str, span: any) -> bool {
     return bool(sp) and (sp in skill_norm);
 }
 
+# STEP GRANULARITY — a numbered/bulleted imperative under a procedure header is
+# a MANDATORY STEP of its own, decided mechanically (never by the model).
+#
+# Bench finding (GRC skills: data-privacy-expert, iso27001-internal-auditor,
+# soc2-system-description). These skills write their procedure as bare imperative
+# lists — "**Process:** 2. Search all systems for personal data", "### Step 1:
+# Assess Breach - Contain the breach", "**Activities**: - Review Information
+# Security Policy" — with no must/always wording. Two things then lose them:
+#   (1) the modality detector flags them `?`, and with no adjudicator
+#       resolve_ambiguous_default ASSUMES MAYBE (optional); a DISCRETIONARY rule
+#       gets no mandatory node, G5 never enforces it, and the compiled agent
+#       deterministically skips the step. iso27001 lost 99 rules this way — its
+#       whole audit procedure — and compiled to a 13-node graph.
+#   (2) occasionally the extractor folds such steps into the deliverable rule as
+#       `aliases` ("a recap of 'Provide data copy'"), a procedure mistaken for a
+#       restatement of its outcome.
+# Measured: dpe AMC 50% (vs hand-authored OSP 80%) -> 100% once every procedural
+# step had its own node; iso27001 40 -> 80; soc2 70 -> 100.
+# _is_procedural_step_line is the shared detector; promote_procedural_aliases
+# fixes (2); the guard in resolve_ambiguous_default fixes (1).
+glob _SKILL_FOR_RESOLVE: str = "";
+# a step line that starts with one of these is a label/descriptor, not an imperative
+glob _NON_IMPERATIVE_STARTS: list = ["most", "least", "the", "a", "an", "this", "that", "these", "those", "four-column", "four", "three", "two", "one", "gdpr", "ccpa", "iso", "soc", "all", "any", "some", "no", "non", "key", "main", "common", "typical", "example", "examples", "note", "notes", "tip", "tips", "optional", "optionally", "consider", "maybe", "if", "when", "unless", "for", "in", "on", "at", "with", "without", "e.g.", "i.e.", "see", "also"];
+glob _PROC_HEADERS: list = ["process:", "steps:", "procedure:", "workflow:", "checklist:", "how to:", "actions:", "tasks:"];
+# bold stage headers like "**Step 1: Assess Breach (Immediately)**" / "Phase 2: ..." also open a procedure
+glob _PROC_HEADER_RX: list = [
+    r"^#{0,6}\s*\*{0,2}\s*(step|phase|stage)\s*\d+\s*[:.\-]",        # "### Step 1: Document Review" / "**Step 1: Assess**"
+    r"^#{1,6}\s+.*\b(workflow|procedure|process|checklist|handling)\b",  # "## Workflow for AI Agents" / "### Handling Access Requests"
+    r"^\*\*[a-z ]*(activities|actions|tasks|steps|process|procedure|checklist|in [a-z]+)\*\*\s*:",  # "**Activities**:" / "**In Vanta**:"
+];
+
+def set_skill_for_resolve(skill: str) -> None { _SKILL_FOR_RESOLVE = skill; }
+
+def _is_procedural_step_line(skill: str, span: str) -> bool {
+    # The span must be (a) a list item ("2. …", "- …", "* …") on its own line in
+    # the skill and (b) sit under a procedure-style header within a short window.
+    sp = str(span).strip();
+    if not sp { return False; }
+    # must read as an IMPERATIVE: reject labels/descriptors ("Most reliable evidence",
+    # "Four-Column Format", "GDPR applies when:") — a step starts with a bare verb.
+    body0 = re.sub(r"^(\d+[.)]|[-*•])\s+", "", sp).strip();
+    if body0.endswith(":") { return False; }
+    w0 = re.split(r"[\s,]+", body0.lower())[0] if body0 else "";
+    if (not w0) or (w0 in _NON_IMPERATIVE_STARTS) or w0.endswith("est") or w0.endswith("ly") { return False; }
+    lines = skill.split("\n");
+    for i in range(len(lines)) {
+        ln = lines[i].strip();
+        if not re.match(r"^(\d+[.)]|[-*•])\s+", ln) { continue; }
+        body = re.sub(r"^(\d+[.)]|[-*•])\s+", "", ln).strip();
+        if _norm(body) != _norm(sp) and _norm(ln) != _norm(sp) { continue; }
+        # walk UP to the nearest header (<=25 lines). A procedure header claims
+        # the line; any OTHER markdown heading or bold label closes the section
+        # first — so a "## Quick Decision Tree" bullet is never claimed by a
+        # "### Step 1:" block sitting above it.
+        lo = i - 25 if i - 25 > 0 else 0;
+        j = i - 1;
+        while j >= lo {
+            raw = lines[j].strip();
+            hl = raw.lower().replace("**", "");
+            is_proc = False;
+            for h in _PROC_HEADERS {
+                if hl.endswith(h) or hl == h.rstrip(":") { is_proc = True; }
+            }
+            for rx in _PROC_HEADER_RX {
+                if re.search(rx, raw.lower()) { is_proc = True; }
+            }
+            # a bold label that introduces a list ("**Activities**:", "**Three Evidence
+            # Collection Techniques**:") opens a procedure block too
+            if re.match(r"^\*\*[^*]+\*\*\s*:\s*$", raw) { is_proc = True; }
+            if is_proc { return True; }
+            # only a markdown heading closes the section
+            if re.match(r"^#{1,6}\s+", raw) { return False; }
+            j = j - 1;
+        }
+    }
+    return False;
+}
+
+def promote_procedural_aliases(skill: str, rs: RuleSet) -> list[str] {
+    # Any alias that is a procedural step line becomes its own MANDATORY STEP
+    # rule (inheriting the host rule's binds); returns the new rule ids.
+    promoted: list[str] = [];
+    new_rules: list[Rule] = [];
+    base_n: int = 0;
+    for _r0 in rs.rules { base_n = base_n + 1; }
+    for r in rs.rules {
+        if not r.aliases { continue; }
+        keep: list[str] = [];
+        for a in r.aliases {
+            if _is_procedural_step_line(skill, a) {
+                nid = "r" + str(base_n + len(new_rules) + 1);
+                nr = Rule(id=nid, quote=str(a), kind=RuleKind.STEP, modality=Modality.MANDATORY,
+                          binds=r.binds, statement=re.sub(r"^(\d+[.)]|[-*•])\s+", "", str(a)).strip());
+                new_rules.append(nr);
+                promoted.append(nid + " <- alias of " + r.id + ": " + str(a)[:60]);
+            } else { keep.append(a); }
+        }
+        r.aliases = keep;
+    }
+    for nr in new_rules { rs.rules.append(nr); }
+    return promoted;
+}
+
 def ground_rules(skill: str, rs: RuleSet) -> list[str] {
     # Soundness: ids of rules whose quote does NOT appear in the skill.
     # This is the mechanical anti-hallucination backbone — never model-judged.
@@ -215,6 +318,8 @@ def ground_rules(skill: str, rs: RuleSet) -> list[str] {
         if not _in_skill(sn, r.quote) { bad.append(r.id); continue; }
         if r.aliases { r.aliases = [a for a in r.aliases if _in_skill(sn, a)]; }
     }
+    # step granularity: a procedural step hiding as an alias is promoted to a rule
+    promote_procedural_aliases(skill, rs);
     return bad;
 }
 
@@ -704,6 +809,22 @@ def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[s
     demote: list = [c for c in clarify if not str(c.reason).startswith("kind/modality conflict")];
     keep: list = [c for c in clarify if str(c.reason).startswith("kind/modality conflict")];
     ids: list[str] = [c.rule_id for c in demote];
+    # STEP-GRANULARITY (bench finding, data-privacy-expert): a numbered/bulleted
+    # imperative under a procedure header ("Process: 2. Search all systems…",
+    # "**Step 1: Assess Breach** - Contain the breach") carries no must/always
+    # wording, so the modality detector flags it `?` and — with no adjudicator —
+    # it was ASSUMED MAYBE and dropped from the graph (no node → the agent
+    # deterministically skipped it; AMC 50 vs hand-OSP 80). The list IS the
+    # procedure: such a step is MANDATORY by structure. Keep it a DO.
+    protected: list[str] = [];
+    for r in rs.rules {
+        if (r.id in ids) and (r.kind == RuleKind.STEP) and _is_procedural_step_line(_SKILL_FOR_RESOLVE, str(r.quote)) {
+            protected.append(r.id);
+            r.modality = Modality.MANDATORY;
+        }
+    }
+    ids = [x for x in ids if x not in protected];
+    demote = [c for c in demote if c.rule_id not in protected];
     for r in rs.rules {
         if (r.id in ids) and (r.modality != Modality.DISCRETIONARY) {
             r.modality = Modality.DISCRETIONARY;
@@ -1041,6 +1162,7 @@ def _gaps_digest(v: ExtractVerdict) -> str {
 # ---------------------------------------------------------------------------
 
 def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
+    _SKILL_FOR_RESOLVE = skill;   # the resolver's demotion guard needs the source text
     # Returns the frozen spec plus its honest verdict. Callers gate on
     # verdict.sound/complete rather than trusting the set blindly.
     sn = _norm(skill);

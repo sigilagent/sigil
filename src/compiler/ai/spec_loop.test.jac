@@ -577,3 +577,83 @@ test "an explicitly optional preamble is left alone" {
 
 # NOTE: the MockLLM convergence run lives in scenarios/spec_loop.jac (run via
 # `jac run` in CI) — same runtime bug as above.
+
+# ---------------------------------------------------------------------------
+# Step granularity: a numbered/bulleted imperative under a procedure header is
+# MANDATORY by structure. Born from the GRC bench (data-privacy-expert 50 vs
+# hand-OSP 80; iso27001 lost 99 rules): such steps carry no must/always wording,
+# so the modality detector flagged them `?` and, with no adjudicator,
+# resolve_ambiguous_default assumed MAYBE and the graph dropped them.
+# ---------------------------------------------------------------------------
+
+glob PROC_SKILL: str = """# Access requests
+
+### Handling Access Requests
+
+**Process:**
+1. Verify identity of requester
+2. Search all systems for personal data
+3. Compile data in readable format
+4. Review for third-party rights or confidential information
+
+## Breach Response
+
+### Step 1: Assess Breach (Immediately)
+- Contain the breach
+- Document facts: what happened, when, how many affected
+
+**Three Evidence Collection Techniques**:
+- Most reliable evidence
+- Use open-ended questions
+
+## Quick Decision Tree
+- Access request → Provide data copy (30 days GDPR, 45 days CCPA)
+- Consider using a DPIA tool for large assessments
+""";
+
+test "procedural step lines are recognised under Process:/Step N: headers" {
+    assert _is_procedural_step_line(PROC_SKILL, "2. Search all systems for personal data");
+    assert _is_procedural_step_line(PROC_SKILL, "Search all systems for personal data");
+    assert _is_procedural_step_line(PROC_SKILL, "- Contain the breach");
+    assert _is_procedural_step_line(PROC_SKILL, "Contain the breach");
+}
+
+test "labels, tips, decision-tree bullets and hedged lines are NOT procedural steps" {
+    assert not _is_procedural_step_line(PROC_SKILL, "Most reliable evidence");
+    assert not _is_procedural_step_line(PROC_SKILL, "Access request → Provide data copy (30 days GDPR, 45 days CCPA)");
+    assert not _is_procedural_step_line(PROC_SKILL, "Consider using a DPIA tool for large assessments");
+    assert not _is_procedural_step_line(PROC_SKILL, "Three Evidence Collection Techniques:");
+}
+
+test "promote_procedural_aliases lifts a step hiding as an alias into its own MANDATORY STEP rule" {
+    rs = RuleSet(rules=[
+        Rule(id="r1", quote="Access request → Provide data copy (30 days GDPR, 45 days CCPA)",
+             aliases=["2. Search all systems for personal data", "3. Compile data in readable format"])
+    ]);
+    promoted = promote_procedural_aliases(PROC_SKILL, rs);
+    assert len(promoted) == 2;
+    assert len(list(rs.rules)) == 3;
+    assert rs.rules[0].aliases == [];
+    for r in rs.rules[1:] {
+        assert r.kind == RuleKind.STEP;
+        assert r.modality == Modality.MANDATORY;
+    }
+}
+
+test "resolve_ambiguous_default keeps a procedural step MANDATORY but still demotes a hedged line" {
+    set_skill_for_resolve(PROC_SKILL);
+    rs = RuleSet(rules=[
+        Rule(id="r68", quote="Search all systems for personal data", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r90", quote="Contain the breach", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r99", quote="Consider using a DPIA tool for large assessments", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+    ]);
+    clarify = [
+        ClarifyItem(rule_id="r68", quote="Search all systems for personal data", reason="ambiguous modality"),
+        ClarifyItem(rule_id="r90", quote="Contain the breach", reason="ambiguous modality"),
+        ClarifyItem(rule_id="r99", quote="Consider using a DPIA tool for large assessments", reason="ambiguous modality")
+    ];
+    resolve_ambiguous_default(rs, clarify);
+    assert rs.rules[0].modality == Modality.MANDATORY;
+    assert rs.rules[1].modality == Modality.MANDATORY;
+    assert rs.rules[2].modality == Modality.DISCRETIONARY;
+}
