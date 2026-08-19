@@ -74,6 +74,14 @@ test "the service unit runs the launcher, which pins cwd for itself" {
 # reaching this at once produce one daemon rather than eight.
 
 test "a deliberate stop sticks, and an explicit start lifts it" {
+    # Run against a run dir of our own. ensure_daemon answers "already running"
+    # before it ever looks at the marker, and since autostart every machine
+    # anyone has used sigil on HAS a daemon running — read the real $SIGIL_HOME
+    # and this asserts the state of the developer's box, not the decision.
+    import os;
+    import tempfile;
+    prev = os.environ.get("SIGIL_HOME") or "";
+    os.environ["SIGIL_HOME"] = tempfile.mkdtemp(prefix="sigil-daemon-test-");
     clear_stopped();
     assert daemon_optout() == False;
     mark_stopped();
@@ -84,6 +92,7 @@ test "a deliberate stop sticks, and an explicit start lifts it" {
     assert r["reason"] == "stopped deliberately";
     clear_stopped();
     assert daemon_optout() == False;
+    if prev { os.environ["SIGIL_HOME"] = prev; } else { del os.environ["SIGIL_HOME"]; }
 }
 
 test "SIGIL_NO_DAEMON declines before anything is spawned" {

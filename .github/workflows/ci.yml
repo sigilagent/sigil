@@ -70,6 +70,15 @@ jobs:
       # if any of src/sigil_chat.jac's imports are unprovisioned. No API key needed:
       # /exit returns before a model is ever called.
       - name: Smoke-test the chat REPL
+        # SIGIL_NO_DAEMON / SIGIL_NO_SERVE: an ordinary CLI command auto-starts the
+        # scheduler and the Observatory, and neither belongs in this step. What is
+        # being checked is that the REPL's imports are provisioned — not service
+        # lifecycle, which src/sigil_{daemon,serve}.test.jac own. Left on, the step
+        # spawns a supervisor and a ~25s web-client build that outlive it and keep
+        # writing to the same graph while the test suite runs.
+        env:
+          SIGIL_NO_DAEMON: "1"
+          SIGIL_NO_SERVE: "1"
         run: printf '/exit\n' | jac run src/main.jac -s "$RUNNER_TEMP/ci.session" -- chat
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
