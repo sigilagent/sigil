@@ -520,3 +520,83 @@ edges:
         os.environ["SIGIL_INFL_CAP"] = "12";
     }
 }
+
+
+# ===========================================================================
+# role:input is a promise only `task` can keep. Every other carry marked that
+# way is unproduced AND unsupplied — it lowers as <Unknown>, which is silent
+# until a typed consumer trips over it:
+#   error[E1053]: Cannot assign <Unknown> to parameter 'human_approval' of type bool
+# The reproduction is verbatim from a real compile (systematic-debugging).
+# ===========================================================================
+
+glob ORPHAN_INPUT_IR: str = """---
+name: debugger
+description: debug a failure
+---
+agir_version: 0.1
+walker:
+  name: debugger_agent
+  carries:
+    task: {type: str, role: input, doc: user task}
+    three_plus_failures: {type: bool, produced_by: compute_three_plus}
+    human_approval: {type: bool, role: input, doc: did a human approve}
+nodes:
+  - id: compute_three_plus
+    type: CODE
+    owner: code
+    doc: Count consecutive failures.
+    writes: [three_plus_failures]
+    traces_to: [r1]
+  - id: require_human_discussion
+    type: ROUTE
+    owner: code
+    doc: Stop and question the architecture after three failures.
+    reads: [three_plus_failures, human_approval]
+    traces_to: [r2]
+  - id: done
+    type: TERMINAL
+    owner: code
+    doc: Report.
+    traces_to: []
+edges:
+  - {from: compute_three_plus, to: require_human_discussion}
+  - {from: require_human_discussion, to: done}
+""";
+
+
+test "G9 flags a role:input carry whose type a task-string seed cannot satisfy" {
+    issues = gate_type_unification(ORPHAN_INPUT_IR);
+    hits = [i for i in issues if "human_approval" in i and "role: input" in i];
+    assert len(hits) == 1, "expected exactly one orphan-input finding, got: " + str(issues);
+    assert "cannot satisfy" in hits[0], hits[0];
+    assert hits[0].startswith("G9: "), hits[0];
+}
+
+
+test "a role:input STRING lane stays a legitimate boundary" {
+    # the seed IS a string, so this shape is survivable and must stay clean
+    ir = ORPHAN_INPUT_IR.replace("human_approval: {type: bool, role: input",
+                                 "human_approval: {type: str, role: input");
+    assert not [i for i in gate_type_unification(ir) if "human_approval" in i], str(gate_type_unification(ir));
+}
+
+
+test "G9 does not flag task itself" {
+    issues = gate_type_unification(ORPHAN_INPUT_IR);
+    assert not [i for i in issues if "carry 'task'" in i], str(issues);
+}
+
+
+test "a role:input carry that DOES have a producer is left alone" {
+    ir = ORPHAN_INPUT_IR.replace(
+        "human_approval: {type: bool, role: input, doc: did a human approve}",
+        "human_approval: {type: bool, role: input, produced_by: ask_human, doc: approved}"
+    ).replace(
+        "  - id: done",
+        "  - id: ask_human\n    type: SENSE\n    owner: code\n    doc: Ask the human.\n"
+        "    writes: [human_approval]\n    traces_to: [r3]\n  - id: done"
+    );
+    issues = gate_type_unification(ir);
+    assert not [i for i in issues if "human_approval" in i and "nothing supplies" in i], str(issues);
+}
