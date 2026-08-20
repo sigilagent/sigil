@@ -592,6 +592,33 @@ def gate_type_unification(ir_text: str) -> list[str] {
             }
         }
     }
+
+    # -- a role:input carry cannot be seeded into a non-string type --
+    # An unproduced carry is seeded with the task string (see the IO-provenance
+    # note above: "the carry held its task-string seed"). That is survivable for
+    # a str lane and impossible for a typed one: nothing supplies the carry, the
+    # seed does not fit, and it lowers as <Unknown>. The failure then surfaces
+    # far from its cause, at the first typed consumer:
+    #
+    #   error[E1053]: Cannot assign <Unknown> to parameter 'human_approval' of type bool
+    #
+    # role: input stays a legitimate boundary for string lanes — this only
+    # rejects the shapes a seed can never satisfy. Measured across three
+    # compiler arms: 21 of 51 authored IRs declare a non-task input carry.
+    for cname2 in carries {
+        if str(cname2) == "task" { continue; }
+        c2 = carries[cname2];
+        if not isinstance(c2, dict) { continue; }
+        if str(c2.get("role", "")) != "input" { continue; }
+        if list(producers.get(str(cname2), [])) { continue; }     # produced anyway — fine
+        t2 = str(c2.get("type") or "str").strip().lower();
+        if t2 in ["str", "string", "text", "any", "path", ""] { continue; }
+        issues.append("G9: carry '" + str(cname2) + "' is declared role: input with type '" + t2
+            + "', but a walker receives only `task` — an unproduced carry is seeded with the task"
+            + " string, which cannot satisfy '" + t2 + "', so it lowers as <Unknown> and the first"
+            + " typed consumer fails jac check. Give it a producer (an owner=code node that senses"
+            + " or defaults it), or type the lane str");
+    }
     return issues;
 }
 
