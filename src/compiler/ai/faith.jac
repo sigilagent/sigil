@@ -352,10 +352,18 @@ def _tool_for(pir: ParsedIR, n: PNode) -> list[PTool] {
 # A deliverable is REACHED only if something actually writes it. These are the
 # ways an inline body can produce a file; a body that merely computes and
 # returns text is a report, not a deliverable.
+# NB: `[^\n]*?` rather than `[^)]*` for the open() forms — a mode string sitting
+# after a NESTED call (`open(os.path.join(d, "x.json"), "w")`, the commonest
+# shape there is) is unreachable if the scan stops at the first ")".
 glob _WRITE_OPS: str =
-    r"(\bopen\s*\([^)]*[\"'](?:w|a|wb|ab|w\+|x)[\"']|\.write\s*\(|\.writelines\s*\("
-    + r"|\bjson\.dump\s*\(|\.to_csv\s*\(|\.to_excel\s*\(|\.to_json\s*\("
-    + r"|\.savefig\s*\(|\.save\s*\(|\bshutil\.(copy|move)|\bPath\([^)]*\)\.write_)";
+    r"(\bopen\s*\([^\n]*?,\s*[\"'](?:w|a|x)[bt+]*[\"']"
+    + r"|\bopen\s*\([^\n]*?[\"'](?:w|a|x)[bt+]*[\"']\s*\)"
+    + r"|\.write\s*\(|\.writelines\s*\(|\.writestr\s*\(|\.write_(?:text|bytes)\s*\("
+    + r"|\b(?:json|yaml|pickle|toml|msgpack)\.dump\s*\("
+    + r"|\.to_(?:csv|excel|json|parquet|feather|hdf|pickle|markdown|html|latex|stata|xml)\s*\("
+    + r"|\.savefig\s*\(|\.save\s*\(|\bnp\.save(?:txt|z|z_compressed)?\s*\("
+    + r"|\bcv2?\.imwrite\s*\(|\bplt\.imsave\s*\("
+    + r"|\bshutil\.(?:copy|copy2|copyfile|copytree|move)|\bos\.(?:rename|replace)\s*\()";
 
 def _body_writes(text: str) -> bool {
     t = str(text or "");

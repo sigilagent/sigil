@@ -700,3 +700,40 @@ test "an external command stays acceptable — it is opaque, not provably inert"
     ]);
     assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
 }
+
+
+# The gate turns "does not write" into a REFUSED compile, so a write idiom it
+# fails to recognise costs a working skill its artifact. These are the shapes a
+# first pass missed — a Path held in a variable, the serialisers that are not
+# json, the pandas writers past csv/excel/json, and a mode string sitting behind
+# a nested call. Each must READ AS A WRITE; the report-only shapes below must
+# still not.
+test "the write gate recognises the idioms a skill actually writes with" {
+    writes = [
+        "with open(os.path.join(d, \"x.json\"), \"w\") as f:\n    json.dump(r, f)",
+        "out = Path(dest) / \"a.md\"\nout.write_text(body)",
+        "p.write_bytes(blob)",
+        "yaml.dump(cfg, fh)",
+        "pickle.dump(model, fh)",
+        "df.to_parquet(out)",
+        "np.savetxt(out, arr)",
+        "np.savez(out, a=arr)",
+        "z.writestr(\"a.txt\", data)",
+        "doc.save(out_path)",
+        "shutil.copy2(src, dst)",
+        "os.replace(tmp, final)",
+        "cv2.imwrite(out, img)"
+    ];
+    for w in writes { assert _body_writes(w), "not recognised as a write: " + w; }
+}
+
+test "the write gate still refuses a body that only computes" {
+    reports = [
+        "d = furthest(a, b)\nreturn \"id=%s\" % d[\"id\"]",
+        "with open(p) as f:\n    return f.read()",
+        "return json.dumps(rows)",
+        "fh = open(p, \"r\")\nreturn fh.read()",
+        "total = sum(x)\nreturn \"total=%d\" % total"
+    ];
+    for r in reports { assert not _body_writes(r), "wrongly counted as a write: " + r; }
+}
