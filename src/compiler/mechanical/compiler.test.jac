@@ -517,13 +517,46 @@ test "a ROUTE guard whose subject is no carry stays permissive" {
     assert "if True {" in src;
 }
 
-test "spawn binding skips produced and non-string carries" {
+# A caller-supplied carry must REACH the walker whatever its type. A non-`str`
+# `role: input` used to be dropped from the spawn entirely, so the walker kept
+# the type default and ran on [] / {} / 0 — and because empty-input checks pass
+# vacuously, the artifact reported every check green having done nothing. It is
+# bound through `_as_param`, which JSON-decodes the string the MCP inputSchema
+# delivers and falls back to the SAME default the `has` declaration uses.
+# Carries the walker produces for itself still stay out of the spawn.
+test "spawn binding carries every caller input, typed, and skips produced ones" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
-    assert "spawn MixedAgent(task=task, src_path=str(params.get('src_path', task)))" in src;
-    assert "retries=task" not in src;     # int input: the task text is not an int
-    assert "retries=str(" not in src;     # nor a caller param bound as str
-    assert "seen=task" not in src;        # produced by peek_it, not by the caller
+    assert ("spawn MixedAgent(task=task, src_path=str(params.get('src_path', task)),"
+            + " retries=_as_param(params.get('retries', ''), 0))") in src;
+    assert "retries=task" not in src;      # int input: the task text is not an int
+    assert "retries=str(" not in src;      # nor a caller param bound as str
+    assert "seen=task" not in src;         # produced by peek_it, not by the caller
     assert "seen=str(" not in src;
+    assert "seen=_as_param" not in src;
+}
+
+
+# `_body_lines` refuses to degrade an unparseable-but-plainly-Python body into a
+# stub that returns its own source. The opener test must not mistake a
+# STYLESHEET for Python: CSS at-rules all begin with "@", and so does a
+# decorated Python function.
+test "a CSS at-rule body is an asset, not unparseable Python" {
+    for css in ["@tailwind base;\n.btn { color: red; }",
+                "@media (min-width: 640px) {\n  .x { display: none }\n}",
+                "@font-face { font-family: X; src: url(x.woff2); }"] {
+        assert not _looks_python(css), css[:40];
+        out = "\n".join(_body_lines(css, []));
+        assert "raise SyntaxError" not in out, out;
+        assert "non-Python tool body" in out, out;   # rides along as a string
+    }
+}
+
+test "a decorated Python body that does not parse still fails loudly" {
+    body = "@dataclass\nclass Row:\n    a: int =\n";
+    assert not _py_ok(body);                          # genuinely unparseable
+    assert _looks_python(body);                       # ...and genuinely Python
+    out = "\n".join(_body_lines(body, []));
+    assert "raise SyntaxError" in out, out;
 }
 
 # A verify-then-repair skill: a model proposes, code checks six ways, a gate folds

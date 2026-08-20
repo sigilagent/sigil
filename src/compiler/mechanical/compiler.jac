@@ -689,13 +689,29 @@ glob _SHELL_CLIS: list = ["pandoc", "soffice", "libreoffice", "qpdf", "pdftoppm"
 def _looks_python(body: str) -> bool {
     # plainly-Python opener: tells "unparseable Python" (a compiler bug) apart
     # from a genuine non-Python asset body (CSS/JSON/template).
-    for ln in body.splitlines() {
+    lines = body.splitlines();
+    first = "";
+    for ln in lines {
         s = ln.strip();
         if (not s) or s.startswith("#") { continue; }
-        for k in ["def ", "import ", "from ", "class ", "@", "return ", "if ", "for ", "with "] {
-            if s.startswith(k) { return True; }
+        first = s;
+        break;
+    }
+    if not first { return False; }
+    for k in ["def ", "import ", "from ", "class ", "return ", "if ", "for ", "with "] {
+        if first.startswith(k) { return True; }
+    }
+    # A DECORATOR opens a Python body too — but so does a CSS at-rule, and
+    # `@media` / `@tailwind` / `@import` / `@font-face` are how real stylesheet
+    # bodies begin. Treating a bare "@" as Python sent every one of them to the
+    # SyntaxError branch below instead of riding along as a string asset, which
+    # is exactly what the CSS/JSON/template branch exists for. A decorator has a
+    # def or a class under it; a stylesheet never does.
+    if first.startswith("@") {
+        for ln in lines {
+            s2 = ln.strip();
+            if s2.startswith("def ") or s2.startswith("class ") { return True; }
         }
-        return False;
     }
     return False;
 }
