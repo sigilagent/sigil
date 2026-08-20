@@ -57,12 +57,35 @@ jobs:
         run: jac --version
 
       # byLLM is bundled in the native binary, but some Python deps are not (PyYAML
-      # for the AG-IR compiler, rich + prompt_toolkit for the chat REPL). Bare
-      # `jac install` provisions exactly what jac.toml declares — do NOT re-list
-      # packages here: an explicit list silently drifts from jac.toml, which is how
-      # `sigil chat` once shipped dead with "No module named 'rich'" (#87).
+      # for the AG-IR compiler, rich + prompt_toolkit for the chat REPL, and since
+      # jac 0.36 litellm itself). Bare `jac install` provisions exactly what jac.toml
+      # resolves to — do NOT re-list packages here: an explicit list silently drifts
+      # from jac.toml, which is how `sigil chat` once shipped dead with
+      # "No module named 'rich'" (#87).
       - name: Provision runtime dependencies (from jac.toml)
         run: jac install
+
+      # Same class of drift, one layer down. jac 0.36 dropped litellm from the runtime
+      # closure, leaving it an OPTIONAL dep of byLLM: without a top-level [byllm] section
+      # in jac.toml, jac resolves no `llm`
+      # capability, `jac install` still exits 0, and byLLM silently swaps in a stub
+      # whose every call fails as "'types.SimpleNamespace' object has no attribute
+      # 'completion'". The test suite runs on MockLLM and would never notice. Assert
+      # the real backend resolved.
+      - name: Assert the LLM backend resolved
+        run: |
+          cat > "$RUNNER_TEMP/llm_probe.jac" <<'PROBE'
+          with entry {
+              import from jaclang.byllm._optdeps.litellm { HAS_LITELLM }
+              print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
+          }
+          PROBE
+          out="$(jac run "$RUNNER_TEMP/llm_probe.jac")"
+          echo "$out"
+          case "$out" in
+            *sigil-llm-ok*) ;;
+            *) echo "::error::byLLM resolved no litellm backend - jac.toml needs its top-level [byllm] section"; exit 1 ;;
+          esac
 
       # Guards the drift above: the test suite never imports the chat REPL, so a
       # missing REPL dependency was invisible until a user ran `sigil chat`. This

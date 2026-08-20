@@ -33,6 +33,21 @@ test "auth, rate-limit, timeout and refused-connection each get their own senten
     assert "couldn't reach" in c and "ollama_chat/qwen3:8b" in c;
 }
 
+test "a stubbed-out byLLM is reported as a missing install, not a bad model" {
+    # What byLLM raises when jac provisioned no `llm` capability: the _optdeps
+    # stub has no `completion`, and the AttributeError says nothing about models.
+    msg = friendly_llm_error(
+        "AttributeError: 'types.SimpleNamespace' object has no attribute 'completion'",
+        "gpt-5", "frontier"
+    );
+    assert "LLM backend isn't installed" in msg;
+    assert "jac install" in msg;
+    assert "[byllm]" in msg;
+    assert "sigil configure" not in msg;          # not a config problem
+    m2 = friendly_llm_error("ModuleNotFoundError: No module named 'litellm'");
+    assert "LLM backend isn't installed" in m2;
+}
+
 test "an unrecognized failure falls back to its first line, truncated" {
     msg = friendly_llm_error("SomethingOdd: weird\nsecond line never shows");
     assert "the model call failed: SomethingOdd: weird" in msg;
