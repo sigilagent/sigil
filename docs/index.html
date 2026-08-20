@@ -899,7 +899,7 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
     <div class="what-grid">
       <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs one small self-contained program; no Python, no dependencies to manage.</p></div>
       <div class="what"><div class="k">02</div><h4>Fetches Sigil</h4><p>Clones the source into <code>~/.sigil/app</code> (or a tarball if you have no git).</p></div>
-      <div class="what"><div class="k">03</div><h4>Provisions PyYAML</h4><p>The one dependency the compiler needs and the binary doesn't bundle.</p></div>
+      <div class="what"><div class="k">03</div><h4>Provisions dependencies</h4><p>One <code>jac install</code>: the model backend (litellm), the compiler's PyYAML, and the chat REPL.</p></div>
       <div class="what"><div class="k">04</div><h4>Puts <code>sigil</code> on PATH</h4><p>A launcher so <code>sigil serve</code> / <code>sigil solve</code> work from anywhere.</p></div>
     </div>
 
@@ -912,9 +912,9 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
 curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
 <span class="k">export</span> <span class="v">PATH</span>=<span class="s">"$HOME/.local/bin:$PATH"</span>
 
-<span class="c"># 2 · clone Sigil &amp; provision the compiler dependency</span>
+<span class="c"># 2 · clone Sigil &amp; provision its dependencies (reads jac.toml — don't name packages)</span>
 git clone https://github.com/sigilagent/sigil.git &amp;&amp; <span class="k">cd</span> sigil
-jac install pyyaml
+jac install
 
 <span class="c"># 3 · configure cognition (frontier needs a provider key)</span>
 <span class="k">export</span> <span class="v">OPENAI_API_KEY</span>=sk-...

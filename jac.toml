@@ -7,11 +7,11 @@ entry-point = "observatory.jac"
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
 # plugin, so there is NO `pip install byllm`. Import it as
 # `import from jaclang.byllm.lib { Model }`, and the ambient `by llm()` uses the
-# default model configured in [plugins.byllm.model] below.
+# default model configured in [byllm.model] below.
 
-# The AG-IR compiler parses the crystallizer's YAML output via PyYAML — the one
-# Python dependency the native binary does NOT bundle. `jac install` provisions it
-# into the project venv.
+# The AG-IR compiler parses the crystallizer's YAML output via PyYAML. `jac install`
+# provisions everything below; the LLM backend itself is NOT here — it rides the
+# `llm` capability the [byllm] section switches on. See the note there.
 [dependencies]
 pyyaml = "latest"
 # The interactive `chat` REPL (src/sigil_chat.jac) renders with rich; its line editor
@@ -20,19 +20,37 @@ pyyaml = "latest"
 rich = "~=15.0"
 prompt_toolkit = "~=3.0"
 # byLLM's streaming path (chat mode streams the reply token-by-token) imports httpx.
-# The native runtime does bundle it; kept here so a non-bundled runtime still works.
+# The `llm` capability below pulls it too; kept declared here so it survives even if
+# byLLM's capability ever stops listing it.
 httpx = "latest"
-# NOTE: do not add litellm/loguru/pillow here. The native jac runtime ships them in
-# its own closure, and litellm has no wheel for that bundled Python — declaring it
-# makes `jac install` (and therefore install.sh) fail outright.
+# NOTE: do NOT hand-list litellm/loguru/pillow here. They are OPTIONAL deps of byllm
+# (jaclang/byllm/_optdeps/*.jac imports each under try/except) and are provisioned by
+# the `llm` CAPABILITY instead — see the [byllm] opt-in below. Pinning them here would
+# fork from the range jac's capability registry resolves.
 
-# Default builtin `llm` model (any by-llm() call that doesn't override). Sigil
-# keeps its live model tiers on the graph (Soul), so this is only a seed default.
-# Builtin `llm` default. Sigil keeps its live tiers on the graph (Soul:
-# frontier=gpt-5, small=gpt-4o-mini), so this only seeds any bare `by llm()`.
+# THE LLM OPT-IN — this section is load-bearing, and NOT just for the model name.
+# jac 0.36 stopped shipping litellm in the runtime closure (verified by diffing the
+# extracted closures: 0.34.5 carries litellm/loguru/PIL/yaml/httpx, 0.36.1 carries none
+# of them). Without it byLLM falls back to its `_optdeps` stub, `HAS_LITELLM` is False,
+# and every model call dies as `'types.SimpleNamespace' object has no attribute
+# 'completion'`. jac provisions the real backend from its `llm` capability — litellm +
+# pillow + httpx + loguru — and the capability resolver switches that on by seeing a
+# TOP-LEVEL [byllm] table (jaclang/project/capabilities.jac, `byllm_intent_capabilities`).
+# No [byllm] section, no LLM.
+#
+# NOTE the section name, the same trap as [scale.*] below: config only reads `byllm`,
+# `scale`, `client`, `mcp` and `desktop` at TOP level. `[plugins.byllm.model]` — where
+# this lived until now — is never read into `config.plugins`, so it silently switched
+# OFF the llm capability AND silently dropped this default model. Verified on both
+# 0.34.5 and 0.36.1: `[byllm.model]` resolves litellm in `jac install --plan` and binds
+# default_model; `[plugins.byllm.model]` resolves neither. The reason this only started
+# breaking installs at 0.36 is that until then the bundled copy masked it.
+#
+# The model name itself is only a seed: Sigil keeps its live tiers on the graph (Soul:
+# frontier=gpt-5, small=gpt-4o-mini), so this binds any bare `by llm()` only.
 # API keys are NOT stored here (jac.toml is git-tracked) — OPENAI_API_KEY /
 # ZAI_API_KEY come from the environment / gitignored `.env`, read by litellm.
-[plugins.byllm.model]
+[byllm.model]
 default_model = "gpt-4o-mini"
 
 # NOTE the section name: jac-scale reads `[scale.*]`, NOT `[plugins.scale.*]`.

@@ -97,17 +97,45 @@ fi
 [ -f "$SIGIL_HOME/src/main.jac" ] || die "Sigil source looks incomplete (no src/main.jac in $SIGIL_HOME)."
 
 # ---- 3. runtime dependencies -------------------------------------------------
-# Bare `jac install` provisions everything in jac.toml's [dependencies] — notably
-# rich + prompt_toolkit, which the `chat` REPL imports. The byLLM 'llm' runtime
-# (litellm/loguru/pillow) and pyyaml/httpx ship inside the native jac runtime
-# closure, so they are NOT listed in jac.toml — litellm in particular has no wheel
-# for the bundled Python and would make this step fail outright.
+# Bare `jac install` provisions two things at once: jac.toml's [dependencies] (pyyaml
+# for the AG-IR compiler, rich + prompt_toolkit for the `chat` REPL) AND the capability
+# closures jac derives from the config — among them `llm`, which is what puts the
+# litellm/pillow/loguru model backend on disk.
+#
+# That second half is why jac.toml carries a top-level [byllm] section. Through jac 0.34
+# the runtime closure shipped litellm itself and the section did nothing; 0.36 dropped it
+# from the closure, leaving it an optional dep of byLLM that jac resolves only for a
+# project whose config asks for the `llm` capability. Miss the opt-in and the install
+# still reports success — byLLM just falls back to its stub and every model call dies
+# later with an unreadable AttributeError.
 # Do NOT re-list packages here: an explicit list silently drifts from jac.toml, and
 # a dependency added there but missed here breaks that feature on a fresh install
 # (this is exactly how `sigil chat` shipped broken with "No module named 'rich'").
-info "Provisioning dependencies (the chat REPL + anything else jac.toml declares)…"
+info "Provisioning dependencies (LLM runtime, chat REPL, everything jac.toml declares)…"
 ( cd "$SIGIL_HOME" && jac install >/dev/null 2>&1 ) \
   || warn "dependency install failed — run \`jac install\` in $SIGIL_HOME before your first solve."
+
+# An install that "succeeds" with no model backend is the one failure worth catching
+# here, because nothing else notices until the user's first solve. Ask byLLM directly
+# whether its litellm backend resolved rather than trusting the exit code above.
+probe_dir="$(mktemp -d)"
+cat > "$probe_dir/probe.jac" <<'PROBE'
+with entry {
+    import from jaclang.byllm._optdeps.litellm { HAS_LITELLM }
+    print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
+}
+PROBE
+probe_out="$( cd "$SIGIL_HOME" && jac run "$probe_dir/probe.jac" 2>/dev/null || true )"
+case "$probe_out" in
+  *sigil-llm-ok*)
+    info "LLM runtime ready (byLLM + litellm)."
+    ;;
+  *)
+    warn "byLLM resolved no litellm backend — model calls will fail on the first solve."
+    warn "  fix: cd $SIGIL_HOME && jac install   (jac.toml must keep its top-level [byllm] section)"
+    ;;
+esac
+rm -rf "$probe_dir"
 
 # ---- 4. launcher on PATH -----------------------------------------------------
 mkdir -p "$BIN_DIR"

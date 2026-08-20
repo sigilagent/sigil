@@ -35,6 +35,12 @@ The frontier tier needs its provider key; the small/chat tiers can be fully loca
 A weaker chat model tends to over-reach for tools — if chat behaves oddly, try a
 stronger `chat_model`.
 
+litellm itself is provisioned by `jac install`, from the `llm` capability that jac's
+config resolver switches on when it sees the top-level `[byllm]` table in `jac.toml`
+(it stopped being bundled in the runtime closure in jac 0.36). If every model call
+fails identically — regardless of tier, provider or key — that section is what to
+check; `install.sh` verifies it, and `jac install --plan` should list `litellm`.
+
 ## No key at all: your Claude Code CLI
 
 `--claude` puts every tier on the Claude Code CLI you already have installed, using

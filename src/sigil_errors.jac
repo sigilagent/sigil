@@ -99,6 +99,19 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
     fix = (("`sigil configure " + tier + "_model <name>`") if tier
            else "`sigil models set <tier> <name>` (see `sigil models list`)");
     hint = "  — full detail: " + error_log_path();
+    # Not a model failure at all: jac 0.36 dropped litellm from the runtime closure,
+    # so a runtime provisioned without the `llm` capability swaps in byLLM's `_optdeps`
+    # stub and every call dies as an AttributeError on a SimpleNamespace.
+    # Say what it actually is — an install, not a config. `sigil models set` cannot
+    # fix it, and left unmapped this falls through to the generic branch and reads
+    # like the model is at fault.
+    if ("simplenamespace" in low)
+            or (("no module named" in low) and ("litellm" in low)) {
+        return ("the LLM backend isn't installed — byLLM has no litellm to call. Run "
+                + "`jac install` in the Sigil directory (its jac.toml needs the "
+                + "top-level [byllm] section that turns jac's `llm` capability on)."
+                + hint);
+    }
     if (("404" in low) or ("not_found" in low) or ("notfounderror" in low)
             or ("does not exist" in low) or ("may not exist" in low)) {
         return ("model '" + name + "' isn't available on this provider — it may be "
