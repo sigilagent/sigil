@@ -29,7 +29,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_fron
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
-import from .autofix { canonicalize_ir }
+import from .autofix { canonicalize_ir, autofix_ir }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
@@ -121,7 +121,7 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
             warnings = resolve_ambiguous_default(sr.spec, sr.clarify);
         }
     }
-    rr = raise_from_spec(skill, name, sr.spec, max_repair);
+    rr = raise_from_spec(skill, name, sr.spec, max_repair, skill_dir=skill_dir);
     rr.warnings = warnings;
     rr.clarify = sr.clarify;
     return rr;
@@ -135,7 +135,20 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
     return out;
 }
 
-def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
+def embody_siblings(ir_text: str, skill_dir: str) -> dict {
+    # Pull the content of any sibling the IR only POINTS at into the IR itself.
+    # Split out of raise_from_spec so the wiring is unit-testable without a
+    # model: the bug this fixes was not a broken autofix (autofix.test.jac
+    # covers it) but an autofix the default front end never called — raise2
+    # accepted skill_dir and used it nowhere, so every default compile shipped
+    # "see FORMS.md" instead of what FORMS.md says.
+    if not skill_dir { return {"ir_text": ir_text, "fixes": []}; }
+    af = autofix_ir(ir_text, skill_dir);
+    return {"ir_text": str(af["ir_text"]), "fixes": list(af["fixes"])};
+}
+
+def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
+                    skill_dir: str = "") -> RaiseResult {
     _t = time.time();
     _emit({"stage": "author", "state": "start"});
     au = author_direct(skill, spec, name);
@@ -147,6 +160,18 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         repairs.append("author produced no IR");
         return RaiseResult(status="failed", repairs=repairs);
     }
+
+    # Sibling embodiment, BEFORE the first faithfulness report so the gate
+    # judges the IR that actually ships. A skill that delegates to a sibling
+    # ("see FORMS.md") must carry that content: the harness deploys the compiled
+    # artifact alone, so a node that opens the file at run time finds nothing.
+    # autofix_ir already resolves refs under skill_dir (refusing absolute paths
+    # and escapes) — it was simply never reachable from this front end, only
+    # from the legacy lift(), so every default compile silently shipped the
+    # pointer instead of the content.
+    emb = embody_siblings(ir, skill_dir);
+    ir = str(emb["ir_text"]);
+    for f in list(emb["fixes"]) { repairs.append("autofix: " + str(f)); }
 
     _t = time.time();
     _emit({"stage": "faith", "state": "start"});
