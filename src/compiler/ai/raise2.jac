@@ -240,8 +240,12 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
         msgs: list[str] = [str(g.message) for g in fr.dropped];
         if msgs {
             _t = time.time();
+            # captured BEFORE the round: `fr` is rebound on adoption below, so
+            # reading it afterwards for both ends reports before == after and the
+            # event says nothing about whether the round helped.
+            _before_loc: int = gap_score(fr);
             _emit({"stage": "repair", "state": "start", "round": 0,
-                   "issues": gap_score(fr), "target": "faithfulness-localized"});
+                   "issues": _before_loc, "target": "faithfulness-localized"});
             rl = repair_localized(skill, spec, ir, msgs);
             ir3: str = str(rl["ir_text"]).strip();
             repairs += [str(x) for x in list(rl["notes"])];
@@ -258,8 +262,8 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
                 }
             }
             _emit({"stage": "repair", "state": "done", "secs": time.time() - _t,
-                   "round": 0, "before": gap_score(fr), "after": gap_score(fr),
-                   "adopted": fr.ok});
+                   "round": 0, "before": _before_loc, "after": gap_score(fr),
+                   "adopted": gap_score(fr) < _before_loc});
         }
     }
 
