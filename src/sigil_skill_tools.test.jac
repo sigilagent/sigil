@@ -5,7 +5,7 @@
 # so nothing is ever actually executed.
 
 import from .sigil_core { awaken, Registry, TaskGraph, configure, Anchored, Crystallized }
-import from .approvals { approvals_set, approvals_get, allowlist_add, approvals_clear, _policy }
+import from .approvals { approvals_set, approvals_get, allowlist_add, approvals_clear, _policy, Approval }
 import from .sigil_workspace { set_approver, drain_trace }
 
 def _seed(sig: str, intent: str = "", module: str = "", runs: int = 0, ok: int = 0) -> TaskGraph {
