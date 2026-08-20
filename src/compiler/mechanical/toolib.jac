@@ -154,12 +154,17 @@ return p
         "doc": "Run a shell command and return exit code + combined output.",
         "body": """
 import subprocess as _sp
+import shutil as _shutil
 _cmd = str(command or "").strip()
 if not _cmd:
     return "[run_command: no command given]"
 try:
-    # /bin/sh is dash on Debian; a bash-drafted command dies at the first "("
-    _sh = _shutil.which("bash") or "/bin/sh";
+    # /bin/sh is dash on Debian; a bash-drafted command dies at the first "(".
+    # `import shutil` above is load-bearing: a tool body is emitted as a
+    # self-contained function body, so a name it does not import is a NameError
+    # the surrounding `try` swallows into "[run_command failed: ...]" -- every
+    # call, silently, with nothing run.
+    _sh = _shutil.which("bash") or "/bin/sh"
     _p = _sp.run(_cmd, shell=True, capture_output=True, text=True, executable=_sh)
 except Exception as _e:
     return "[run_command failed: %s]" % str(_e)[:200]
