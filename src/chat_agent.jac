@@ -23,7 +23,7 @@ import tempfile;
 import threading;
 import from jaclang.byllm.lib { Model }
 import from .sigil_core {
-    bind_chat_model, describe_soul, teach, recollect, library,
+    bind_chat_model, describe_soul, teach, recollect,
     cfg_set_model, cfg_set_persona, cfg_set_prompt_mode
 }
 import from .agent { run_task }
@@ -39,6 +39,7 @@ import from .sigil_workspace {
     sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
+import from .sigil_skill_tools { run_skill, skill_tools, skill_tool_index, _tail_progress }
 import from .sigil_errors { friendly_llm_error, log_error }
 
 glob chat_llm: any = Model(model_name="gpt-4o-mini");
@@ -172,13 +173,15 @@ def learn_skill(task: str = "") -> str {
     return (out + "\nWARNING: " + warn) if warn else out;
 }
 
-sem list_skills = "List the compiled (learned) skills — signature, run stats, and what each one is for.";
+sem list_skills = "List the compiled skills you can call — the tool name for each, its run stats, and what it is for.";
 def list_skills() -> str {
-    lib = library();
-    if not lib { return "(no compiled skills yet)"; }
+    # The GATED list, matching the tools actually on the belt. Listing a skill the
+    # policy denies would only teach the model to reach for a door that is locked.
+    rows = skill_tool_index();
+    if not rows { return "(no compiled skills yet)"; }
     out: list = [];
-    for e in lib {
-        line = str(e["signature"]) + " v" + str(e["version"]) + " [" + str(e["origin"]) + "] runs=" + str(e["runs"]) + " ok=" + str(e["successes"]);
+    for e in rows {
+        line = str(e["tool"]) + "  runs=" + str(e["runs"]) + " ok=" + str(e["successes"]);
         it = str(e.get("intent") or "").strip().replace(chr(10), " ")[:140];
         # the intent is the WHEN-and-WHAT of the skill — without it the model had
         # to read compiled source (or shell out) to learn what it already owned.
@@ -189,80 +192,28 @@ def list_skills() -> str {
 }
 
 # ---------------------------------------------------------------------------
-# use_skill — the internal runner for ALREADY-COMPILED skills, with the run
-# made VISIBLE. The compiled module appends one JSON line per node entry to
-# $AGIR_PROGRESS; a tail thread turns those into live `skill ▸ <node>` trace
-# lines while the run is still going, and the solve trace (route/HIT/eval)
-# lands on the trace after. Without this tool the model's only path to a
-# compiled skill was ws_exec("sigil solve …") — a SECOND sigil process against
-# the same database, approval-gated, and invisible until it exited.
+# use_skill — the NAMED door to an already-compiled skill. Every compiled skill
+# is also its own tool now (`skill_<signature>`, minted by sigil_skill_tools and
+# appended to the belt below), which is how the model reaches one WITHOUT being
+# told to; this tool stays for the case where a signature is already in hand —
+# the user named it, or list_skills just printed it.
+#
+# Both doors run through `run_skill`: same policy filter, same approval gate,
+# same live node trace, same in-process graph. Neither is ws_exec("sigil solve …"),
+# which would boot a SECOND sigil process against the same database.
 # ---------------------------------------------------------------------------
-def _tail_progress(path: str, flag: dict) -> None {
-    seen = 0;
-    while True {
-        try {
-            with open(path, "r") as f { lines = f.read().splitlines(); }
-            for ln in lines[seen:] {
-                try { _trace("skill", chr(0x25B8) + " " + str(json.loads(ln).get("node", ""))); }
-                except Exception as e2 {}
-            }
-            seen = len(lines);
-        } except Exception as e {}
-        if flag.get("done") { break; }   # after a final drain above
-        time.sleep(0.4);
-    }
-}
-
-sem use_skill = """Run an ALREADY-COMPILED skill from this agent's library on a task — the
-internal skill runner. Use this whenever the user wants a compiled skill executed (your
-standing context's `compiled_skills` shelf and list_skills show what exists and what each
-is for). It runs in this process on this graph, routes straight to the named procedure,
-streams each step live as it executes, and returns the skill's report. NEVER run
-`sigil solve` through ws_exec — that boots a second copy of this agent against the same
-database. A run may take minutes (it fetches, generates, verifies); that is normal — wait
-for it.""";
+sem use_skill = """Run an ALREADY-COMPILED skill from this agent's library on a task, BY
+NAME. Every compiled skill also appears in your tool list as its own `skill_…` tool with
+a description of what it is for — reach for THAT when you are picking a skill for a task.
+Use this one when you already have the exact signature in hand (the user named it, or
+list_skills printed it). It runs in this process on this graph, streams each step live,
+and returns the skill's report. NEVER run `sigil solve` through ws_exec — that boots a
+second copy of this agent against the same database. A run may take minutes (it fetches,
+generates, verifies); that is normal — wait for it.""";
 sem use_skill.signature = "The compiled skill's signature exactly as listed (e.g. 'hackernews_relevant_posts').";
 sem use_skill.task = "The task to run it on. Empty = run the skill on its own intent.";
 def use_skill(signature: str, task: str = "") -> str {
-    sig = str(signature).strip();
-    lib = library();
-    known = [str(e["signature"]) for e in lib];
-    if sig not in known {
-        _trace("skill", sig + " (not compiled)", False);
-        if not known { return "no compiled skills yet — sigil_compile a SKILL.md, or learn_skill for new work. Nothing was run."; }
-        return "no compiled skill '" + sig + "'. Compiled: " + ", ".join(known) + ". Nothing was run.";
-    }
-    t: str = str(task).strip();
-    if not t {
-        for e in lib { if str(e["signature"]) == sig { t = str(e.get("intent") or sig); } }
-    }
-    _trace("skill", sig + "  <-  " + t[:120]);
-    # live node trace: point the run's AGIR_PROGRESS at a scratch file and tail it
-    ppath = os.path.join(tempfile.mkdtemp(prefix="sigil_skill_"), "agir.progress");
-    prev = os.environ.get("AGIR_PROGRESS");
-    os.environ["AGIR_PROGRESS"] = ppath;
-    flag: dict = {"done": False};
-    th = threading.Thread(target=_tail_progress, args=(ppath, flag), daemon=True);
-    th.start();
-    r: dict = {};
-    try {
-        r = run_task(t, sig);
-    } finally {
-        flag["done"] = True;
-        try { th.join(2.0); } except Exception as e {}
-        if prev is None { os.environ.pop("AGIR_PROGRESS", None); }
-        else { os.environ["AGIR_PROGRESS"] = prev; }
-    }
-    # A run mutates the graph in-process (run counts, Attempts, eval verdicts on
-    # the Registry hub) — commit before those writes can age into a lost race.
-    warn = commit_now("use_skill:" + sig);
-    # the honest route story — route/HIT/eval/relearn — onto the trace, warts and all
-    for ln in str(r.get("trace") or "").splitlines() {
-        cl = str(ln).strip();
-        if cl and (not cl.startswith("prompt-mode")) { _trace("skill", cl); }
-    }
-    out = "skill '" + str(r.get("signature") or sig) + "' finished.\n" + str(r.get("result") or "")[:6000];
-    return (out + "\nWARNING: " + warn) if warn else out;
+    return run_skill(signature, task);
 }
 
 sem mcp_call = """Invoke a tool exposed by a registered MCP server (external tools the
@@ -355,20 +306,23 @@ Guidance:
   with something else and check back, or ws_kill("<job>") if it's clearly stuck or wrong.
   ws_jobs() lists what's still running. Never claim a long command failed just because it
   hasn't finished.
-- Skills — three different tools, don't confuse them. (1) To RUN a skill that is ALREADY
-  COMPILED, call use_skill(signature, task): your standing context's `compiled_skills`
-  shelf names each one with what it is for, so you never need to go hunting for whether a
-  skill exists. It runs in this process on this graph, streams each step of the procedure
-  live, and returns the report. NEVER run `sigil solve` (or any `sigil …`) through
-  ws_exec — that boots a SECOND copy of this agent against the same database. (2) If the
-  skill is WRITTEN DOWN but not compiled (a SKILL.md), compile that document with
-  sigil_compile: never `sigil compile` through ws_exec, and never learn_skill. When it
-  lives in a repo, fetch it first — for GitHub use the raw URL, e.g.
+- Skills. Every COMPILED skill is one of your own tools, named `skill_<signature>`, with
+  a description saying what it is for. Treat them like any other tool: when a request
+  matches one, CALL IT — don't re-do the work by hand with files and shell, and don't ask
+  whether a skill exists. A compiled skill executes its steps in a harness, so it is more
+  reliable at its own job than you are improvising the same procedure. If a skill tool
+  returns BLOCKED or DENIED, the operator has gated it — say so plainly and stop, don't
+  reimplement it to get around the gate. use_skill(signature, task) is the same runner
+  by name, for when you already have the signature. NEVER run `sigil solve` (or any
+  `sigil …`) through ws_exec — that boots a SECOND copy of this agent against the same
+  database. If the skill is WRITTEN DOWN but not compiled (a SKILL.md), compile that
+  document with sigil_compile: never `sigil compile` through ws_exec, and never
+  learn_skill. When it lives in a repo, fetch it first — for GitHub use the raw URL, e.g.
   web_fetch("https://raw.githubusercontent.com/<org>/<repo>/main/<path>/SKILL.md") —
   ws_write it into the workspace, then sigil_compile that path. It runs in this process
-  on this graph, takes several minutes with no time limit, and streams each stage.
-  (3) Only when NOTHING is written down do you use learn_skill, which authors a fresh
-  procedure from a description.
+  on this graph, takes several minutes with no time limit, and streams each stage. It
+  becomes a tool of yours the moment it compiles. Only when NOTHING is written down do
+  you use learn_skill, which authors a fresh procedure from a description.
 - Analyzing a codebase/repo: SURVEY FIRST with ws_tree, LOCATE with ws_grep, then READ
   SEVERAL representative files (page large ones — a partial read shows "lines X-Y of N",
   so keep reading rather than concluding from the first page). Never judge a codebase from
@@ -401,6 +355,10 @@ Reply in concise GitHub-flavored markdown. Report what you actually did, includi
 paths and command results. If a tool fails, say what failed and what you'll try next.""";
 sem chat_agent.message = "The user's latest message.";
 def chat_agent(message: str) -> str by chat_llm(
+    # + skill_tools(): ONE TOOL PER COMPILED SKILL, rebuilt on every turn (byLLM
+    # re-evaluates call params per invocation). A skill compiled two messages ago
+    # is callable now, described by its own intent, and the operator's tool policy
+    # decided whether it is in this list at all.
     tools=[
         ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
         ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search,
@@ -409,7 +367,7 @@ def chat_agent(message: str) -> str by chat_llm(
         mcp_call, send_message, connect_channel, setup_channel,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
         doc_index, read_docs, spawn_subagent, spawn_parallel
-    ],
+    ] + skill_tools(),
     conversation=CHAT_HISTORY,
     incl_info=CHAT_INFO,
     max_react_iterations=14,
@@ -427,13 +385,15 @@ def _refresh_info(message: str) -> None {
     # The skill SHELF, not a count. `compiled_skills: 4` told the model something
     # existed and nothing about what — so it went reading compiled source and
     # shelling out `sigil solve` to discover what it already owned. Each entry
-    # carries the signature use_skill takes and the intent that says when to
-    # reach for it.
+    # now leads with the TOOL NAME it answers to, so the shelf and the tool list
+    # are visibly the same shelf: the model sees `skill_clean_csv` here and finds
+    # `skill_clean_csv` among its tools. Policy-denied skills are absent from
+    # both — what it cannot call, it is not told about.
     shelf: list = [];
-    for e in library()[:12] {
+    for e in skill_tool_index()[:12] {
         it = str(e.get("intent") or "").strip().replace(chr(10), " ")[:140];
-        shelf.append(str(e["signature"]) + " v" + str(e["version"])
-                     + ((" — " + it) if it else "") + "  (runs=" + str(e["runs"]) + ")");
+        shelf.append(str(e["tool"]) + ((" — " + it) if it else "")
+                     + "  (runs=" + str(e["runs"]) + ")");
     }
     info: dict = {
         "agent_name": str(s["name"]),

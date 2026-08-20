@@ -156,6 +156,14 @@ jq '.customApiKeyResponses, .oauthAccount.emailAddress' ~/.claude.json
 `sigil mcp-serve` speaks MCP over stdio and publishes one tool per compiled
 skill, so Claude Code can call your compiled harnesses directly.
 
+Sigil's own agents see the same shelf the same way — each compiled skill is a
+tool on the chat agent's belt, under the same names
+([chat-and-tools](chat-and-tools.md#compiled-skills--one-tool-each)). What is
+served here is filtered by the same tool policy: a skill you
+`configure tool_deny skill_<sig>` is not listed to Claude Code and cannot be
+called by name. The approval gate is deliberately *not* applied over the wire —
+there is no operator at the far end of a stdio pipe to answer it.
+
 ### 1. Compile at least one skill, with a `description:`
 
 The frontmatter description becomes the MCP tool description, which is the only

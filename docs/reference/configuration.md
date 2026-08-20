@@ -30,6 +30,11 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 | `tool_deny` | csv | Denied tools (deny wins over allow); `*` denies all. |
 | `tool_profile` | group name | Active profile — a tool group whose tools join the allow-list. |
 
+Compiled skills are tools too, named `skill_<signature>` — so `tool_deny
+skill_clean_csv` takes that skill off the agent's belt and out of what
+`sigil mcp-serve` publishes. `sigil tools skills` shows the current list and the
+gate in front of each; see [chat-and-tools](chat-and-tools.md#the-skill-gate).
+
 ## Examples
 
 ```bash

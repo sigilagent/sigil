@@ -467,10 +467,11 @@ def graph_write(mutate: any, context: str = "") -> dict {
 # ``{ok, report, error}``. Never raises — a crash/timeout is a typed failure the
 # walker escalates (mutate + retry), never a walker abort. ``mcp_json`` is the
 # user's registered MCP servers (JSON), exposed to the run's ``_live_tool`` via
-# ``SIGIL_MCP``.
+# ``SIGIL_MCP``, and the sibling-skill shelf via ``SIGIL_SKILL_TOOLS``.
 def execute_module(module_path: str, task: str, model_name: str,
                    skill: str = "", workdir: str = ".", timeout: int = 1800,
-                   mcp_json: str = "", signature: str = "") -> dict {
+                   mcp_json: str = "", signature: str = "",
+                   skill_tools: str = "") -> dict {
     mod = Path(module_path).stem;
     driver = Path(workdir) / f"_driver_{mod}.jac";
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER));
@@ -480,6 +481,13 @@ def execute_module(module_path: str, task: str, model_name: str,
     env["SIGIL_SIG"] = signature;
     if mcp_json {
         env["SIGIL_MCP"] = mcp_json;
+    }
+    if skill_tools {
+        # The OTHER compiled skills this run may call, as tools on its autonomy
+        # slots (built by `_skill_tools()` in the emitted prelude). Absent, a
+        # compiled module is exactly as standalone as it has always been — which
+        # is what an ejected artifact, or anyone else's harness, gets.
+        env["SIGIL_SKILL_TOOLS"] = skill_tools;
     }
     jacbin = _jac_bin();
     try {

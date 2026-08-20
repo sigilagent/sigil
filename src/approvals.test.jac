@@ -47,3 +47,19 @@ test "an allowlisted command passes the gate" {
     allowlist_remove("_t_allowed_bin");
     approvals_set(str(before["security"]), str(before["ask"]));
 }
+
+test "peek_exec answers without queueing a question nobody asked" {
+    # A read-only view (`/skills`, `sigil tools`) asks what the gate WOULD say.
+    # Routing that through check_exec filled the operator's pending queue every
+    # time a table was rendered.
+    approvals_clear();
+    approvals_set("allowlist", "on-miss");
+    assert peek_exec("skill:never_allowlisted") == "ask";
+    assert len(approvals_pending()) == 0, str(approvals_pending());
+    allowlist_add("skill:blessed");
+    assert peek_exec("skill:blessed") == "allow";
+    approvals_set("deny", "off");
+    assert peek_exec("skill:blessed") == "deny";
+    approvals_set("allowlist", "on-miss");
+    approvals_clear();
+}

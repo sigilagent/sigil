@@ -54,6 +54,17 @@ def set_trace_sink(fn: any) -> None { _SINK = fn; }
 def set_approver(fn: any) -> None { _APPROVER = fn; }
 def drain_trace() -> list { out = list(TRACE); TRACE = []; return out; }
 
+def ask_approval(subject: str) -> bool {
+    # The one door to whoever is at the prompt. Headless (daemon, channel, a
+    # scripted run) there is nobody to ask, and a missing approver is a NO —
+    # the pending approval `check_exec` already queued is the operator's copy.
+    # Shared with the skill gate (src/sigil_skill_tools.jac) so an approval means
+    # the same thing whether the model reached for a shell command or a skill.
+    if _APPROVER is None { return False; }
+    try { return bool(_APPROVER(subject)); }
+    except Exception as e { return False; }
+}
+
 def _trace(tool: str, detail: str, ok: bool = True) -> None {
     rec = {"tool": tool, "detail": detail[:200], "ok": ok};
     TRACE.append(rec);
@@ -481,10 +492,7 @@ def ws_exec(command: str, wait_seconds: int = 30) -> str {
     gate = check_exec(command);
     dec = str(gate["decision"]);
     if dec == "approval-pending" {
-        approved = False;
-        if _APPROVER is not None {
-            try { approved = bool(_APPROVER(command)); } except Exception as e { approved = False; }
-        }
+        approved = ask_approval(command);
         if approved { allowlist_add(command.strip().split(" ")[0]); }
         else { _trace("exec", command + " (needs approval)", False); return "BLOCKED: '" + command + "' needs operator approval (exec policy). Ask the operator to approve, or run it manually."; }
     } elif dec == "deny" {

@@ -151,6 +151,22 @@ def approvals_clear() -> str {
     return "cleared " + str(n) + " pending approval(s)";
 }
 
+def peek_exec(cmd: str) -> str {
+    # What the gate WOULD say — "allow" | "deny" | "ask" — without saying it.
+    # `check_exec` is not a predicate: a miss queues an Approval and an elevated
+    # allow writes an audit record, so asking it just to render a table would fill
+    # the operator's pending queue with questions nobody asked. Read-only views
+    # (`/skills`, `sigil tools`) ask here instead.
+    p = _policy();
+    if p.elevated_until_ms > now_ms() { return "allow"; }
+    if p.security == "deny" { return "deny"; }
+    rules = [r.pattern for r in [p -->[?:AllowRule]]];
+    if p.security == "full" { return "ask" if p.ask == "always" else "allow"; }
+    if _matches(cmd, rules) { return "ask" if p.ask == "always" else "allow"; }
+    if (p.ask == "on-miss") or (p.ask == "always") { return "ask"; }
+    return "deny";
+}
+
 def check_exec(cmd: str) -> dict {
     # The gate an exec tool consults. Returns decision: allow | deny | approval-pending.
     p = _policy();

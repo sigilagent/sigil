@@ -30,10 +30,28 @@ kind is a **MISS**, compiled fresh.
 In chat, `learn_skill(task)` compiles a reusable skill on demand; use it only when you
 want a durable, repeatable procedure rather than a one-off action.
 
+### A compiled skill is a tool
+
+The moment a skill compiles it joins the agent's own tool-belt as
+`skill_<signature>`, described by its `intent`. The chat agent and its sub-agents
+call it the way they call any other tool — the description is the trigger, so
+nobody has to say "use the csv-clean skill" — under the tool policy and the skill
+gate ([chat-and-tools](chat-and-tools.md#the-skill-gate)). `use_skill(signature,
+task)` remains the by-name door.
+
+A compiled skill can also call *another* compiled skill. A run is handed the rest
+of the library (this skill excluded, policy already applied) through
+`SIGIL_SKILL_TOOLS`, and the emitted prelude turns it into tools on the slots
+that already carry an autonomy tool-belt. Each sibling runs in its own
+subprocess, and the shelf is not passed down again, so composition is one level
+deep by construction. An ejected artifact gets no such environment and stays
+exactly as standalone as it was ([ejecting-agents](ejecting-agents.md)).
+
 ## Managing the library
 
 ```bash
 sigil library                 # compiled skills with run stats
+sigil tools skills            # …as tools: the name each answers to, and its gate
 sigil eval <sig> [probe]      # grounded-eval a skill (run + judge the artifact)
 sigil relearn <sig> [hint]    # recompile a skill fresh with the frontier
 sigil forget <sig>            # remove a skill entirely (all versions + files)

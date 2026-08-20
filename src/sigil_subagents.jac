@@ -8,12 +8,22 @@ calls are I/O-bound, N sub-agents finish in ~1× wall-clock, not N×.
 A sub-agent is itself a small ReAct loop over the workspace tools
 (read/write/edit/list/exec/web) — but deliberately WITHOUT the spawn or cron
 tools, so sub-agents cannot recurse or schedule. They do real work (files, shell,
-web) and return a short text result the parent synthesizes. They never mutate the
-persistent agent graph, so running many at once is safe.
+web) and return a short text result the parent synthesizes. Their own tools never
+mutate the persistent agent graph, so running many at once is safe — the one
+exception is a compiled-skill tool, whose run records itself on the graph and is
+therefore serialized process-wide (see `sigil_skill_tools.run_skill`).
 
 They get ws_watch/ws_kill alongside ws_exec for the same reason the parent does:
 a sub-agent that shells out to something slow has to be able to keep watching it
 rather than report a failure that never happened.
+
+They also get the compiled skills as tools (`skill_<signature>`, from
+sigil_skill_tools), under the same policy filter and approval gate the parent
+works under. A delegated chunk of work is exactly where a compiled procedure
+earns its keep — and without them a sub-agent would hand-roll a job the library
+already does properly, which is the failure mode the whole library exists to
+prevent. Running one is a graph read plus a subprocess, not a graph write, so it
+stays safe to fan out.
 """
 
 import from jaclang.byllm.lib { Model }
@@ -22,6 +32,7 @@ import from .sigil_workspace {
     ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
     ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search, _trace
 }
+import from .sigil_skill_tools { skill_tools }
 
 glob sub_llm: any = Model(model_name="gpt-4o-mini");
 glob _SUB_PINNED: bool = False;   # when set, don't rebind from the graph (tests / embedders pin a model)
@@ -37,14 +48,16 @@ def _ensure_sub_llm() -> None {
 
 sem subagent_run = """You are a focused sub-agent. Complete the single TASK using
 the workspace tools, then return a SHORT (1-3 sentence) result stating exactly what
-you did and where any output landed. Ground claims in what you actually read (ws_tree
-to survey, ws_grep to locate, ws_read to read); do the work — don't ask questions.
+you did and where any output landed. If one of your `skill_…` tools already does the job
+— each says what it is for — call it instead of building the same thing by hand.
+Ground claims in what you actually read (ws_tree to survey, ws_grep to locate, ws_read
+to read); do the work — don't ask questions.
 A shell command is never killed on a timer: if ws_exec reports STILL RUNNING, keep
 watching with ws_watch(job) until it finishes rather than calling it a failure.""";
 sem subagent_run.task = "The one self-contained sub-task to complete.";
 def subagent_run(task: str) -> str by sub_llm(
     tools=[ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep,
-           ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search],
+           ws_exec, ws_watch, ws_kill, ws_jobs, web_fetch, web_search] + skill_tools(),
     max_react_iterations=8
 );
 

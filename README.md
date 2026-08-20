@@ -167,6 +167,13 @@ procedural (the compiled skills), episodic (`Attempt` nodes — every run and it
 outcome), and semantic (`Memory` nodes — durable facts, injected at execution
 time so the compiled procedure stays class-general).
 
+Every compiled skill is also a **tool** on that agent — `skill_<signature>`,
+triggered by the skill's own description, on the chat agent, its sub-agents, and
+inside other compiled skills. Nobody has to say "use the csv-clean skill"; the
+tool list says it exists and what it is for. Both gates stay the operator's: the
+tool policy decides whether a skill is offered at all, and the exec-approval gate
+asks before the agent starts one on its own.
+
 Around that: chat (a tool-using ReAct agent with file, shell and web tools behind
 an exec-approval gate), MCP tool servers, Discord / Telegram / WhatsApp / Slack
 channels, cron jobs as real graph nodes, and the Observatory — `sigil serve`, a
@@ -185,6 +192,7 @@ src/
   contracts/             the AG-IR standard (primitives · authoring contract)
   sigil.jac              graph model + routing + the compile/execute cognition
   chat_agent.jac         the conversational ReAct agent
+  sigil_skill_tools.jac  every compiled skill as a gated tool on that agent
   sigil_workspace.jac    tool-belt: file tools, gated exec, SSRF-guarded web
 web/                     the Observatory browser client
 tools/sandbox/           containerized harness for running compiled agents

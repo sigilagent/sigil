@@ -24,6 +24,8 @@ import re;
 import time;
 import from .sigil_logo { BANNER_LOGO }
 import from .sigil_core { describe_soul, configure, library, recollect, teach }
+import from .sigil_skill_tools { skill_tool_index, tool_name }
+import from .approvals { peek_exec }
 import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
@@ -213,11 +215,25 @@ def _show_soul(console: any) {
 def _show_library(console: any) {
     lib = library();
     if not lib { console.print("[dim]  (no compiled skills yet)[/dim]"); return; }
+    # `tool` and `gate` are the two questions an operator actually has about a
+    # compiled skill now that the agent can reach for one on its own: what name
+    # does it answer to, and what stands between the model and running it.
+    offered = {str(r["signature"]) for r in skill_tool_index()};
     t = Table(show_header=True, header_style="dim", box=None, pad_edge=False);
     t.add_column("skill"); t.add_column("v"); t.add_column("origin");
     t.add_column("runs", justify="right"); t.add_column("ok", justify="right");
+    t.add_column("tool"); t.add_column("gate");
     for e in lib {
-        t.add_row(str(e["signature"]), "v" + str(e["version"]), str(e["origin"]), str(e["runs"]), str(e["successes"]));
+        sig = str(e["signature"]);
+        on = sig in offered;
+        gate_txt = "[dim]denied[/dim]";
+        if on {
+            dec = peek_exec("skill:" + sig);
+            gate_txt = "[green]allowed[/green]" if dec == "allow" else (
+                       "[red]denied[/red]" if dec == "deny" else "[yellow]asks first[/yellow]");
+        }
+        t.add_row(sig, "v" + str(e["version"]), str(e["origin"]), str(e["runs"]),
+                  str(e["successes"]), (tool_name(sig) if on else "[dim]—[/dim]"), gate_txt);
     }
     console.print(t);
 }
@@ -366,11 +382,24 @@ def _install_hooks(console: any, session: any) {
         }
     }
     def approver(command: str) -> bool {
+        # One prompt for two gates. A shell command arrives as itself; a compiled
+        # skill the agent reached for on its own arrives as `skill:<signature>
+        # <task>` (src/sigil_skill_tools.gate), and saying yes allows that SKILL
+        # from here on — not that one run — which is why the label has to say
+        # which of the two is being asked about.
         paused = False;
         if _STATUS is not None { try { _STATUS.stop(); paused = True; } except Exception as e {} }
-        console.print("  [yellow]⚠ approve shell[/yellow] [dim]" + command + "[/dim]");
+        is_skill = str(command).startswith("skill:");
+        if is_skill {
+            console.print("  [yellow]⚠ approve skill[/yellow] [dim]" + str(command)[6:] + "[/dim]");
+        } else {
+            console.print("  [yellow]⚠ approve shell[/yellow] [dim]" + command + "[/dim]");
+        }
         decided = False;
-        try { ans = str(prompt_text(session, "    run this? [y/N] ")).strip().lower(); decided = ans in ["y", "yes"]; }
+        try {
+            ans = str(prompt_text(session, "    run this skill? [y/N] " if is_skill else "    run this? [y/N] ")).strip().lower();
+            decided = ans in ["y", "yes"];
+        }
         except Exception as e { decided = False; }
         if paused { try { _STATUS.start(); } except Exception as e {} }
         return decided;

@@ -57,6 +57,23 @@ When analyzing a codebase the agent surveys with `ws_tree`, locates with
 `sigil compile`, see [workspace-and-tools](workspace-and-tools.md). More in
 [memory-and-skills](memory-and-skills.md).
 
+### Compiled skills — one tool each
+
+Every compiled skill is also a tool of the agent's own, named `skill_<signature>`
+and described by the skill's `intent`. The agent reaches for one the way it
+reaches for `ws_read`: because the tool list says it exists and what it is for —
+no "run the csv-clean skill" required. This is the same surface `sigil mcp-serve`
+publishes to Claude Code ([claude-code](claude-code.md)), pointed inward.
+
+The list is rebuilt every turn, so a skill compiled two messages ago is callable
+on the next one, with no restart. Sub-agents get the same tools.
+
+`use_skill(signature, task)` still runs one by name, for when the signature is
+already in hand. Both doors go through the same gates below.
+
+`sigil tools skills` lists what is on the belt and the gate in front of each;
+`/skills` in the REPL shows the same as a `tool` and `gate` column.
+
 ### Sub-agents
 
 `spawn_parallel(tasks)` runs independent sub-tasks concurrently, via Jac
@@ -87,3 +104,35 @@ itself.
 Which tools are permitted is governed by `tool_allow` / `tool_deny` /
 `tool_profile` on the soul (see [configuration](configuration.md)). Deny wins
 over allow.
+
+Compiled skills answer to the policy under their tool name, so
+`configure tool_deny skill_clean_csv` takes that skill off the belt — in chat, in
+sub-agents, and over `sigil mcp-serve`. A denied skill is not filtered at call
+time; it is never listed, so the model is never shown a door it cannot open.
+
+## The skill gate
+
+A compiled skill writes files and shells out, so the agent starting one on its
+own goes through the exec-approval gate — the same one in front of `ws_exec`,
+keyed `skill:<signature>`:
+
+```
+⚠ approve skill  clean_csv  turn messy.csv into a tidy one
+    run this skill? [y/N]
+```
+
+Answering yes allowlists that skill, so you are asked once, not once per run.
+Headless (a daemon tick, a channel message) there is nobody to ask: the run is
+refused and the question lands in `sigil approvals pending`, where
+
+```bash
+sigil approvals approve "skill:clean_csv" allow-always
+sigil approvals allow "skill:*"           # or: let the agent run any of them
+```
+
+settles it. The gate stands at the tool boundary, not in the runner — `sigil
+solve` and `sigil run` are you asking directly, and are not re-asked.
+
+Over `sigil mcp-serve` the policy filter applies but the approval prompt does
+not: there is no operator at the far end of a stdio pipe to answer it, so an
+approval there would be a hang rather than a question.

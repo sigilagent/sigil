@@ -568,7 +568,16 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
     # time, as a context preamble on the task — never baked into the procedure.
     # The user's registered MCP servers are exposed to the run's live tools.
     run_input = (context + "\nTask: " + task) if context else task;
-    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature);
+    # The rest of the library rides along as tools (this skill excluded — a
+    # procedure that can call itself is a loop waiting to happen). Imported
+    # lazily: sigil_skill_tools imports the run path, and at module scope that
+    # would close the circle.
+    shelf = "";
+    try {
+        import from .sigil_skill_tools { skill_manifest }
+        shelf = skill_manifest(tg.signature);
+    } except Exception as e { shelf = ""; }
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
