@@ -27,6 +27,7 @@ closure — a node that traces to nothing is an unverifiable (added) behavior, n
 a free pass.
 """
 
+import re;
 import yaml;
 import from src.compiler.mechanical.compiler { _load_ir }
 import from src.sigil_agir_yaml { dump_agir }
@@ -384,12 +385,36 @@ def _realizes_gate(pir: ParsedIR, rid: str) -> bool {
     return False;
 }
 
+# A pointer body READS something and NAMES a sibling document. Both halves are
+# required: the filename can sit in a candidate list rather than inside the
+# open() call ("for candidate in ('forms.md', './forms.md'): ... open(candidate)"),
+# so matching only `open("x.md")` misses the shape that actually ships.
+glob _POINTER_READ: str = r"\b(open|read_text|read_bytes|loadtxt|Path)\s*\(";
+glob _POINTER_DOC: str  = r"[\"'][^\"']*\.([mM][dD]|[tT][xX][tT]|[rR][sS][tT]|[aA][dD][oO][cC])[\"']";
+
+def _is_pointer_body(text: str) -> bool {
+    # A body that merely OPENS a sibling document is a pointer, not embodiment.
+    # The harness deploys the compiled artifact alone, so such a read finds
+    # nothing at run time — this is the "instruction to consult a file the
+    # harness does not carry" that admission is supposed to reject. Observed
+    # live: the SkillsBench pdf skill compiled `faithful` with a tool whose whole
+    # body was a search for forms.md, and shipped without the file.
+    t = str(text or "");
+    if not t.strip() { return False; }
+    return bool(re.search(_POINTER_READ, t)) and bool(re.search(_POINTER_DOC, t));
+}
+
 def _realizes_knowledge(pir: ParsedIR, rid: str) -> bool {
     for k in pir.knowledge {
         if (rid in k.traces_to) and k.content.strip() { return True; }
     }
     for t in pir.tools {
-        if (rid in t.traces_to) and (t.body.strip() or t.command.strip()) { return True; }
+        if rid not in t.traces_to { continue; }
+        body = str(t.body or ""); cmd = str(t.command or "");
+        if not (body.strip() or cmd.strip()) { continue; }
+        # carrying the content counts; pointing at where the content lives does not
+        if _is_pointer_body(body) and (not cmd.strip()) { continue; }
+        return True;
     }
     return False;
 }

@@ -26,12 +26,12 @@ Two things that differ from `lift()`:
 
 import os;
 import time;
-import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
+import from .spec_loop { extract_spec, bundle_skill, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
 import from .author_direct { author_direct, pin_direct_llm }
 import from .author_buildout { author_buildout, pin_buildout_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
-import from .autofix { canonicalize_ir }
+import from .autofix { canonicalize_ir, autofix_ir }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
@@ -111,6 +111,17 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     # Every tier WARNS about what it decided, so --strict fails on an
     # underspecified skill no matter which one ran.
     skill = strip_frontmatter(skill);
+    # A skill is a DIRECTORY. Extraction must see every sibling doc it delegates
+    # to, or obligations stated only there never become rules — and a rule that
+    # was never extracted cannot be realized, demanded, or reported missing.
+    bundle = bundle_skill(skill, skill_dir);
+    bundled: list = list(bundle["files"]);
+    if bundled {
+        skill = str(bundle["text"]);
+        # `pre` was extracted from SKILL.md alone; it no longer describes this
+        # source, so re-extract rather than spec the smaller document.
+        pre = None;
+    }
     # `pre`: a SpecResult the lint pre-pass already extracted from this same
     # (stripped) text — reuse it instead of paying for the spec loop twice.
     # Only valid when the source was NOT amended after extraction.
@@ -122,6 +133,14 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
            "sound": sr.verdict.sound, "complete": sr.verdict.complete,
            "drift": sr.verdict.drift});
     warnings: list[str] = [];
+    if bundled {
+        sr.spec.sub_resources = bundled;
+        warnings.append("bundled " + str(len(bundled)) + " sibling resource(s) into the spec: "
+                        + ", ".join(bundled));
+    }
+    for sk in list(bundle["skipped"]) {
+        warnings.append("sibling '" + str(sk) + "' did not fit the bundle budget and was NOT read");
+    }
     if sr.clarify {
         if ask {
             answers: dict[str, str] = {};
@@ -137,7 +156,7 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
             warnings = resolve_ambiguous_default(sr.spec, sr.clarify);
         }
     }
-    rr = raise_from_spec(skill, name, sr.spec, max_repair);
+    rr = raise_from_spec(skill, name, sr.spec, max_repair, skill_dir=skill_dir);
     rr.warnings = warnings;
     rr.clarify = sr.clarify;
     return rr;
@@ -151,7 +170,20 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
     return out;
 }
 
-def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
+def embody_siblings(ir_text: str, skill_dir: str) -> dict {
+    # Pull the content of any sibling the IR only POINTS at into the IR itself.
+    # Split out of raise_from_spec so the wiring is unit-testable without a
+    # model: the bug this fixes was not a broken autofix (autofix.test.jac
+    # covers it) but an autofix the default front end never called — raise2
+    # accepted skill_dir and used it nowhere, so every default compile shipped
+    # "see FORMS.md" instead of what FORMS.md says.
+    if not skill_dir { return {"ir_text": ir_text, "fixes": []}; }
+    af = autofix_ir(ir_text, skill_dir);
+    return {"ir_text": str(af["ir_text"]), "fixes": list(af["fixes"])};
+}
+
+def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
+                    skill_dir: str = "") -> RaiseResult {
     _t = time.time();
     _emit({"stage": "author", "state": "start"});
     au = _author(skill, spec, name);
@@ -163,6 +195,18 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         repairs.append("author produced no IR");
         return RaiseResult(status="failed", repairs=repairs);
     }
+
+    # Sibling embodiment, BEFORE the first faithfulness report so the gate
+    # judges the IR that actually ships. A skill that delegates to a sibling
+    # ("see FORMS.md") must carry that content: the harness deploys the compiled
+    # artifact alone, so a node that opens the file at run time finds nothing.
+    # autofix_ir already resolves refs under skill_dir (refusing absolute paths
+    # and escapes) — it was simply never reachable from this front end, only
+    # from the legacy lift(), so every default compile silently shipped the
+    # pointer instead of the content.
+    emb = embody_siblings(ir, skill_dir);
+    ir = str(emb["ir_text"]);
+    for f in list(emb["fixes"]) { repairs.append("autofix: " + str(f)); }
 
     _t = time.time();
     _emit({"stage": "faith", "state": "start"});

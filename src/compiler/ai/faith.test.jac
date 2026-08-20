@@ -11,6 +11,7 @@ lock in the two properties the rearchitecture turns on:
      ships green today.
 """
 
+import re;
 import from .spec_loop { flag_ambiguous, resolve_ambiguous_default }
 
 # --- Layer 0: the required-realization table ------------------------------
@@ -551,4 +552,75 @@ test "a spec that still requires something is NOT vacuous" {
 test "an empty spec is not vacuous — there was nothing to lose" {
     fr = faithfulness_report(RuleSet(skill_name="none", rules=[]), _IR_NO_LOADING);
     assert not fr.vacuous;
+}
+
+glob POINTER_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: fill
+    type: GEN-RAW
+    doc: Fill the form.
+    traces_to: [r_guide]
+  - id: done
+    type: TERMINAL
+tools:
+  read_forms_guide:
+    surface: SENSE
+    traces_to: [r_guide]
+    body: |
+      for candidate in ("forms.md", "./forms.md"):
+          if os.path.exists(candidate):
+              return open(candidate).read()
+      return "forms.md was not found"
+""";
+
+glob EMBODIED_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: fill
+    type: GEN-RAW
+    doc: Fill the form.
+    traces_to: [r_guide]
+  - id: done
+    type: TERMINAL
+knowledge:
+  forms_guide:
+    traces_to: [r_guide]
+    content: |
+      If the PDF has fillable form fields, set each field by field_id and mark
+      checkboxes with their checked_value.
+""";
+
+test "a tool that only OPENS a sibling doc does not embody it" {
+    # the live SkillsBench pdf case: compiled `faithful` with a tool whose body
+    # was a search for forms.md, then shipped without the file and produced a
+    # blank PDF. Pointing at content is not carrying it.
+    spec = RuleSet(rules=[
+        Rule(id="r_guide", quote="Read forms.md completely before filling the form.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.MANDATORY)
+    ]);
+    d = check_completeness(spec, parse_ir(POINTER_IR));
+    assert [f.rule for f in d] == ["r_guide"];
+    assert d[0].shape == "EMBODIED_KNOWLEDGE";
+}
+
+test "the same rule passes once the content is actually carried" {
+    spec = RuleSet(rules=[
+        Rule(id="r_guide", quote="Read forms.md completely before filling the form.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(EMBODIED_IR))] == [];
+}
+
+test "a tool that computes still counts as embodiment" {
+    # the guard is narrow: only a body whose work IS opening a document is a
+    # pointer. A real tool body must keep satisfying the shape.
+    ir = re.sub(r"body: \|\n(      .*\n)+",
+                "body: |\n      return {\"field_id\": fid, \"checked_value\": \"On\"}\n",
+                POINTER_IR);
+    spec = RuleSet(rules=[
+        Rule(id="r_guide", quote="Read forms.md completely before filling the form.",
+             kind=RuleKind.KNOWLEDGE, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
 }

@@ -6,6 +6,8 @@ surface the uncovered spans, round two converges. Asserts the hallucination was
 mechanically dropped and the verdict is honest.
 """
 
+import os;
+import tempfile;
 import from jaclang.byllm.lib { MockLLM }
 
 glob SKILL: str = """# CSV Extractor
@@ -709,4 +711,108 @@ test "an explicit governing force still outranks the procedural read" {
     settled = apply_structural_modality(PROC_UNDER_EXAMPLES, rs);
     assert "Examples" in str(settled["r1"]);
     assert rs.rules[0].modality == Modality.DISCRETIONARY;
+}
+
+test "the bundle carries every sibling doc, with provenance" {
+    # A skill is a directory: obligations stated only in a sibling must reach
+    # extraction, or they never become rules at all.
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "SKILL.md"), "w") as f {
+        f.write("# PDF\nRead forms.md completely before filling the form.\n");
+    }
+    with open(os.path.join(d, "forms.md"), "w") as f {
+        f.write("Set each field by field_id and mark checkboxes with checked_value.\n");
+    }
+    with open(os.path.join(d, "reference.md"), "w") as f {
+        f.write("Always set NeedAppearances so the values render.\n");
+    }
+    b = bundle_skill("# PDF\nRead forms.md completely before filling the form.\n", d);
+    assert sorted(list(b["files"])) == ["forms.md", "reference.md"];
+    # every sibling span is now groundable against the bundle text
+    assert "mark checkboxes with checked_value" in str(b["text"]);
+    assert "Always set NeedAppearances" in str(b["text"]);
+    # ...and each one says where it came from
+    assert "--- bundled from forms.md ---" in str(b["text"]);
+    assert list(b["skipped"]) == [];
+}
+
+test "grounding still works against bundled sibling text" {
+    # the property the concatenation exists to preserve: a quote lifted from a
+    # sibling must ground, exactly as one from SKILL.md does
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "forms.md"), "w") as f {
+        f.write("Mark checkboxes with their checked_value.\n");
+    }
+    b = bundle_skill("# PDF\nFill the form.\n", d);
+    rs = RuleSet(rules=[
+        Rule(id="r_main", quote="Fill the form."),
+        Rule(id="r_sib", quote="Mark checkboxes with their checked_value."),
+        Rule(id="r_ghost", quote="Rotate the pages ninety degrees.")
+    ]);
+    assert ground_rules(str(b["text"]), rs) == ["r_ghost"];
+}
+
+test "no skill_dir leaves the text exactly as given" {
+    b = bundle_skill("# PDF\nFill the form.\n", "");
+    assert str(b["text"]) == "# PDF\nFill the form.\n";
+    assert list(b["files"]) == [];
+}
+
+test "SKILL.md is never bundled into itself" {
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "SKILL.md"), "w") as f { f.write("# PDF\nFill the form.\n"); }
+    b = bundle_skill("# PDF\nFill the form.\n", d);
+    assert list(b["files"]) == [];
+    assert str(b["text"]).count("Fill the form.") == 1;
+}
+
+test "scripts the skill ships are bundled, fenced, from scripts/ too" {
+    # "use scripts/rearrange.py" is only executable knowledge if the compiler
+    # has read rearrange.py.
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    os.makedirs(os.path.join(d, "scripts"));
+    with open(os.path.join(d, "scripts", "rearrange.py"), "w") as f {
+        f.write("def rearrange(order):\n    return sorted(order)\n");
+    }
+    with open(os.path.join(d, "helper.sh"), "w") as f { f.write("echo packing\n"); }
+    b = bundle_skill("# PPTX\nUse scripts/rearrange.py to reorder slides.\n", d);
+    files = list(b["files"]);
+    assert os.path.join("scripts", "rearrange.py") in files;
+    assert "helper.sh" in files;
+    txt = str(b["text"]);
+    assert "def rearrange(order):" in txt;          # the body is carried
+    assert "```python" in txt and "```bash" in txt;  # fenced by language
+}
+
+test "test files are not part of the skill" {
+    # a test asserts ABOUT the skill; it is not the skill, and bundling it
+    # would spend budget teaching the extractor the assertions
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "check_bounding_boxes_test.py"), "w") as f { f.write("def test_x(): pass\n"); }
+    with open(os.path.join(d, "test_helper.py"), "w") as f { f.write("def test_y(): pass\n"); }
+    with open(os.path.join(d, "fill.py"), "w") as f { f.write("def fill(): pass\n"); }
+    b = bundle_skill("# PDF\nFill the form.\n", d);
+    assert list(b["files"]) == ["fill.py"];
+}
+
+test "an oversized file is reported, never silently dropped" {
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "huge.py"), "w") as f { f.write("# pad\n" * 20000); }
+    with open(os.path.join(d, "small.py"), "w") as f { f.write("def ok(): pass\n"); }
+    b = bundle_skill("# S\nrun it.\n", d);
+    assert "huge.py" in list(b["skipped"]);
+    assert "small.py" in list(b["files"]);
+}
+
+test "the bundle is byte-identical across runs on the same tree" {
+    # extraction is expensive; an unstable bundle would reshuffle the spec and
+    # invalidate caching for no reason
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "b.md"), "w") as f { f.write("bee\n"); }
+    with open(os.path.join(d, "a.md"), "w") as f { f.write("ay\n"); }
+    with open(os.path.join(d, "z.py"), "w") as f { f.write("def z(): pass\n"); }
+    first = bundle_skill("# S\n", d);
+    second = bundle_skill("# S\n", d);
+    assert str(first["text"]) == str(second["text"]);
+    assert list(first["files"]) == ["a.md", "b.md", "z.py"];   # prose first, then code
 }
