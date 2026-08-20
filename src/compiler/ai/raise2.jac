@@ -24,9 +24,11 @@ Two things that differ from `lift()`:
    gap is closed — the property `lift()` could not get from one front-end.
 """
 
+import os;
 import time;
 import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
 import from .author_direct { author_direct, pin_direct_llm }
+import from .author_buildout { author_buildout, pin_buildout_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
 import from .autofix { canonicalize_ir }
@@ -52,7 +54,21 @@ obj RaiseResult {
 def pin_raise2_llms(m: any) -> None {
     pin_lift_llm(m);
     pin_direct_llm(m);
+    pin_buildout_llm(m);
     pin_adjudge_llm(m);
+}
+
+
+# AUTHORING STRATEGY. Both front-ends satisfy the same
+# (skill, spec, name, gaps) -> {"ir_text","notes"} contract, so everything below
+# — faithfulness closure, mechanical rungs, repair ladder, G4 — is unchanged.
+#   SIGIL_AUTHOR=buildout   skeleton-first, region-scoped build-out
+#   (default)               single-pass direct author
+def _author(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict {
+    if os.environ.get("SIGIL_AUTHOR", "").strip().lower() == "buildout" {
+        return author_buildout(skill, spec, name, gaps);
+    }
+    return author_direct(skill, spec, name, gaps);
 }
 
 glob _DIRECTIVE_CAP: int = 20;
@@ -138,7 +154,7 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
 def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -> RaiseResult {
     _t = time.time();
     _emit({"stage": "author", "state": "start"});
-    au = author_direct(skill, spec, name);
+    au = _author(skill, spec, name);
     ir: str = str(au["ir_text"]).strip();
     _emit({"stage": "author", "state": "done", "secs": time.time() - _t,
            "lines": len(ir.splitlines()) if ir else 0});
@@ -177,7 +193,7 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2) -
         _t = time.time();
         _emit({"stage": "repair", "state": "start", "round": rounds,
                "issues": before, "target": "faithfulness"});
-        au2 = author_direct(skill, spec, name, _directives(fr));
+        au2 = _author(skill, spec, name, _directives(fr));
         ir2: str = str(au2["ir_text"]).strip();
         if not ir2 {
             repairs.append("repair round " + str(rounds) + ": author returned empty — keeping prior");

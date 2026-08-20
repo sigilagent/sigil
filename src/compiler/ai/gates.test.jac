@@ -5,6 +5,9 @@ failure paths must return routed verdicts, never raise."""
 import from .spec_loop { Rule }
 import from .workflow { AgirNode }
 import from .flows { ToolDef, KnowledgeItem, KnowledgeView, HILView, HILPoint }
+import from .spec_loop { RuleSet }
+import from .lift_types { Modality, RuleKind }
+import from .skeleton { skeleton_ir }
 
 glob GOOD_IR: str = """---
 name: note-writer
@@ -392,4 +395,128 @@ test "G9 + autofix never raise on garbage input" {
     assert gate_type_unification("::: not yaml {{{") == [];
     fx = autofix_carry_types("::: not yaml {{{");
     assert fx["fixes"] == [];
+}
+
+
+# ===========================================================================
+# G10 (trace fan-out) + G11 (artifact embodiment) — the two holes that let a
+# hollow agent certify as faithful. Both fixtures are shrunk-down reproductions
+# of real v0.5.1 output: soc2's `append_file` claiming dozens of procedural
+# mandates, and a graph that never touches the scripts its own rules name.
+# ===========================================================================
+glob SPEC_SCRIPTS: RuleSet = RuleSet(skill_name="grc", rules=[
+    Rule(id="r1", quote="Run `scripts/completeness_checker.py` to ensure all sections are present.",
+         statement="run the completeness checker", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+    Rule(id="r2", quote="Run `scripts/control_coverage_validator.py` to validate TSC coverage.",
+         statement="run the coverage validator", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+    Rule(id="r3", quote="Draft each required section of the description.",
+         statement="draft the sections", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+]);
+
+# The observed pathology: generate prose, append it, claim everything.
+glob HOLLOW_IR: str = """---
+name: grc
+description: draft a description
+---
+agir_version: 0.1
+nodes:
+  - id: draft_all
+    type: GEN-RAW
+    owner: model
+    doc: Draft every section of the description.
+    writes: [body]
+    traces_to: [r1, r2, r3]
+  - id: done
+    type: TERMINAL
+    owner: code
+    doc: Report.
+    traces_to: []
+tools:
+  append_file:
+    surface: ACT·artifact
+    sig: "(content, path) -> str"
+    body: |
+      with open(path, 'a') as f:
+          f.write(content)
+      return path
+    traces_to: [r1, r2, r3]
+edges:
+  - {from: draft_all, to: done}
+""";
+
+
+test "G11 catches a graph that never touches the scripts its rules name" {
+    issues = gate_artifact_embodiment(SPEC_SCRIPTS, HOLLOW_IR);
+    assert len(issues) >= 2, "G11 missed the unbound scripts: " + str(issues);
+    joined = " ".join(issues);
+    assert "completeness_checker.py" in joined, joined;
+    assert "control_coverage_validator.py" in joined, joined;
+    for m in issues { assert m.startswith("G11: "), m; }
+}
+
+
+test "G11 passes a skeleton — it binds every artifact its rules name" {
+    ir = skeleton_ir(SPEC_SCRIPTS, "grc");
+    issues = gate_artifact_embodiment(SPEC_SCRIPTS, ir);
+    assert len(issues) == 0, "skeleton failed artifact embodiment: " + str(issues);
+}
+
+
+test "G10 catches one element standing in for many procedures" {
+    os.environ["SIGIL_INFL_CAP"] = "2";
+    try {
+        issues = gate_trace_inflation(SPEC_SCRIPTS, HOLLOW_IR);
+        assert len(issues) >= 1, "G10 missed the fan-out: " + str(issues);
+        for m in issues { assert m.startswith("G10: "), m; }
+    } finally {
+        os.environ["SIGIL_INFL_CAP"] = "12";
+    }
+}
+
+
+test "G10 passes a skeleton — one stub per procedure, no fan-out" {
+    os.environ["SIGIL_INFL_CAP"] = "2";
+    try {
+        ir = skeleton_ir(SPEC_SCRIPTS, "grc");
+        issues = gate_trace_inflation(SPEC_SCRIPTS, ir);
+        assert len(issues) == 0, "skeleton tripped the fan-out gate: " + str(issues);
+    } finally {
+        os.environ["SIGIL_INFL_CAP"] = "12";
+    }
+}
+
+
+test "G10 does not punish folded prohibitions" {
+    spec = RuleSet(skill_name="p", rules=[
+        Rule(id="r1", quote="Draft the summary.", kind=RuleKind.STEP, modality=Modality.MANDATORY),
+        Rule(id="r2", quote="Never invent numbers.", kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN),
+        Rule(id="r3", quote="Never speculate.", kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN),
+        Rule(id="r4", quote="Never omit caveats.", kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN)
+    ]);
+    ir = """---
+name: p
+description: d
+---
+agir_version: 0.1
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    doc: Draft the summary. Never invent numbers. Never speculate. Never omit caveats.
+    traces_to: [r1, r2, r3, r4]
+  - id: done
+    type: TERMINAL
+    owner: code
+    doc: Report.
+    traces_to: []
+edges:
+  - {from: draft, to: done}
+""";
+    os.environ["SIGIL_INFL_CAP"] = "1";
+    try {
+        issues = gate_trace_inflation(spec, ir);
+        assert len(issues) == 0, "G10 counted prohibitions as procedures: " + str(issues);
+    } finally {
+        os.environ["SIGIL_INFL_CAP"] = "12";
+    }
 }

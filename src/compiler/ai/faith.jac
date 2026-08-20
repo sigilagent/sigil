@@ -60,22 +60,30 @@ def required_shape(kind: RuleKind, modality: Modality, binds: str = "agent") -> 
     # FORBIDDEN does NOT override KNOWLEDGE — a descriptive 'never' ("the harness
     # never guesses") is a fact to embody, not a constraint to trace; modal force
     # never outranks what the rule IS.
-    if modality == Modality.DISCRETIONARY { return RealShape.OPTIONAL; }
+    # Dispatch on enum NAMES, not enum identity. Under multi-file `jac test` a
+    # module can be imported more than once, and `Modality.FORBIDDEN` from one
+    # load is not the same object as `Modality.FORBIDDEN` from another: every
+    # identity test then misses and a FORBIDDEN CONSTRAINT silently falls
+    # through to the NODE default — i.e. a prohibition is demanded as a
+    # procedure. Names are stable across loads.
+    k = str(getattr(kind, "name", kind));
+    m = str(getattr(modality, "name", modality));
+    if m == "DISCRETIONARY" { return RealShape.OPTIONAL; }
     b = str(binds or "agent");
     if b not in ["agent", ""] {
-        if kind == RuleKind.KNOWLEDGE { return RealShape.EMBODIED_KNOWLEDGE; }
+        if k == "KNOWLEDGE" { return RealShape.EMBODIED_KNOWLEDGE; }
         return RealShape.OPTIONAL;
     }
-    if modality == Modality.FORBIDDEN {
-        if kind == RuleKind.KNOWLEDGE { return RealShape.EMBODIED_KNOWLEDGE; }
+    if m == "FORBIDDEN" {
+        if k == "KNOWLEDGE" { return RealShape.EMBODIED_KNOWLEDGE; }
         return RealShape.CONSTRAINT;
     }
-    if kind == RuleKind.STEP { return RealShape.NODE; }
-    if kind == RuleKind.IO { return RealShape.EMBODIED_WRITE; }
-    if kind == RuleKind.CONSTRAINT { return RealShape.CONSTRAINT; }
-    if kind == RuleKind.HIL { return RealShape.CODE_GATE; }
-    if kind == RuleKind.KNOWLEDGE { return RealShape.EMBODIED_KNOWLEDGE; }
-    if kind == RuleKind.GROUNDING { return RealShape.LIVE_TOOL; }
+    if k == "STEP" { return RealShape.NODE; }
+    if k == "IO" { return RealShape.EMBODIED_WRITE; }
+    if k == "CONSTRAINT" { return RealShape.CONSTRAINT; }
+    if k == "HIL" { return RealShape.CODE_GATE; }
+    if k == "KNOWLEDGE" { return RealShape.EMBODIED_KNOWLEDGE; }
+    if k == "GROUNDING" { return RealShape.LIVE_TOOL; }
     return RealShape.NODE;
 }
 

@@ -695,3 +695,116 @@ def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict 
         try { shutil.rmtree(tmp); } except Exception {  }
     }
 }
+
+
+# ---------------------------------------------------------------------------
+# G10 — TRACE FAN-OUT.  A completeness check asks "does every rule have a
+# realization?", which one generic element can satisfy for dozens of unrelated
+# mandates at once: soc2's `append_file` tool alone claimed 37, and docx
+# collapsed from 98 nodes (max claim 2) to 14 (max claim 50) while its runtime
+# compliance fell to 2/15. Coverage was reported; nothing was performed.
+#
+# Only ACTION shapes are counted. Prohibitions legitimately fold into the slot
+# they govern, so CONSTRAINT/KNOWLEDGE claims are exempt — the pathology is one
+# element standing in for many distinct PROCEDURES.
+# ---------------------------------------------------------------------------
+glob _ACTION_SHAPES: list[str] = ["NODE", "EMBODIED_WRITE", "CODE_GATE", "LIVE_TOOL"];
+
+def _action_rule_ids(spec: RuleSet) -> list[str] {
+    # Shape membership by NAME — enum identity is not stable across the repeated
+    # module loads multi-file `jac test` performs, and an identity miss here
+    # silently reclassifies prohibitions as procedures.
+    import from .faith { required_shape }
+    out: list[str] = [];
+    for r in spec.rules {
+        if str(required_shape(r.kind, r.modality, r.binds).name) in _ACTION_SHAPES {
+            out.append(r.id);
+        }
+    }
+    return out;
+}
+
+
+def gate_trace_inflation(spec: RuleSet, ir_text: str) -> list[str] {
+    cap = int(os.environ.get("SIGIL_INFL_CAP", "12"));
+    try { ir = _load_ir(ir_text); } except Exception { return []; }
+    if not isinstance(ir, dict) { return []; }
+    action = set(_action_rule_ids(spec));
+    if not action { return []; }
+    issues: list[str] = [];
+
+    def _claims(tr: any) -> list[str] {
+        if isinstance(tr, list) { return [str(x) for x in tr]; }
+        return [str(tr)] if tr else [];
+    }
+
+    for n in (ir.get("nodes") or []) {
+        if not isinstance(n, dict) { continue; }
+        got = [t for t in _claims(n.get("traces_to")) if t in action];
+        if len(got) > cap {
+            issues.append("G10: node '" + str(n.get("id", "?")) + "' claims " + str(len(got))
+                + " distinct procedural rules (" + ", ".join(got[:4]) + ", ...) — one element cannot"
+                + " perform them all; decompose it so each procedure has its own realization");
+        }
+    }
+    tools = ir.get("tools") or {};
+    if isinstance(tools, dict) {
+        for (tname, td) in tools.items() {
+            if not isinstance(td, dict) { continue; }
+            got = [t for t in _claims(td.get("traces_to")) if t in action];
+            if len(got) > cap {
+                issues.append("G10: tool '" + str(tname) + "' claims " + str(len(got))
+                    + " distinct procedural rules (" + ", ".join(got[:4]) + ", ...) — a generic tool"
+                    + " standing in for many procedures is coverage without performance");
+            }
+        }
+    }
+    return issues;
+}
+
+
+# ---------------------------------------------------------------------------
+# G11 — ARTIFACT EMBODIMENT.  When a rule's verbatim quote names a bundle file
+# ("Run `scripts/completeness_checker.py`", "Use `references/common_saas_controls.md`"),
+# the realization must actually touch THAT file. Nothing in the faithfulness
+# closure relates rule text to the element claiming it, so soc2 compiled to a
+# graph that mentions neither script anywhere and still reported faithful.
+#
+# Satisfied by any of: a tool body/command naming the artifact, a node doc
+# naming it, or a knowledge item traced to the rule carrying real content
+# (embodying the reference verbatim is a legitimate alternative to reading it).
+# ---------------------------------------------------------------------------
+def gate_artifact_embodiment(spec: RuleSet, ir_text: str) -> list[str] {
+    import from .skeleton { artifacts_in }
+    import from .faith { parse_ir, required_shape }
+    try { pir = parse_ir(ir_text); } except Exception { return []; }
+    issues: list[str] = [];
+    for r in spec.rules {
+        if str(required_shape(r.kind, r.modality, r.binds).name) == "OPTIONAL" { continue; }
+        arts = artifacts_in(r.quote);
+        named: list[str] = list(arts[0]) + list(arts[1]);
+        if not named { continue; }
+        for art in named {
+            base = os.path.basename(str(art));
+            seen: bool = False;
+            # Any embodied tool naming the artifact counts — the binding is what
+            # matters, not which rule id that tool happens to carry.
+            for t in pir.tools {
+                if (base in t.body) or (base in t.command) { seen = True; }
+            }
+            for n in pir.nodes {
+                if (r.id in n.traces_to) and (base in n.doc) { seen = True; }
+            }
+            for k in pir.knowledge {
+                if (r.id in k.traces_to) and (len(k.content.strip()) > 40) { seen = True; }
+            }
+            if not seen {
+                issues.append("G11: rule '" + r.id + "' names the bundle artifact '" + str(art)
+                    + "' but no realization touches it — bind a tool that runs/reads that exact"
+                    + " file (or embody its content verbatim in a knowledge item traced to '"
+                    + r.id + "'): " + str(r.quote)[:90]);
+            }
+        }
+    }
+    return issues;
+}

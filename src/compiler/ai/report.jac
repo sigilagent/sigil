@@ -28,13 +28,17 @@ import from .ir_views { LiftResult }
 glob _SEVERITY: dict = {
     "compile": "fatal",
     "G3": "error", "G6": "error", "G8": "error", "G9": "error",
-    "G1": "warn", "G5": "warn", "G7": "warn",
+    "G1": "warn", "G5": "warn", "G7": "warn", "G10": "warn", "G11": "warn",
     "spec": "warn", "spine": "warn", "assemble": "warn",
 };
 
 def classify(gate: str, message: str = "") -> str {
     g = str(gate);
     if (g == "G7") and (os.environ.get("SIGIL_G7_HARD", "") not in ["", "0", "false"]) {
+        return "error";
+    }
+    # G11 (artifact embodiment) is precise enough to block once a corpus is clean.
+    if (g == "G11") and (os.environ.get("SIGIL_G11_HARD", "") not in ["", "0", "false"]) {
         return "error";
     }
     return str(_SEVERITY.get(g, "warn"));
