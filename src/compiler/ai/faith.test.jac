@@ -624,3 +624,79 @@ test "a tool that computes still counts as embodiment" {
     ]);
     assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
 }
+
+glob REPORT_ONLY_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: compute
+    type: ACT
+    doc: Find the farthest point and report it.
+    traces_to: [r_deliver]
+    serves: [distance_report]
+  - id: done
+    type: TERMINAL
+tools:
+  distance_report:
+    surface: ACT
+    serves: [compute]
+    traces_to: [r_deliver]
+    body: |
+      d = furthest(points, boundaries)
+      return "report_text=furthest_point_id=%s" % d["id"]
+""";
+
+glob REAL_WRITE_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: emit
+    type: ACT
+    doc: Write the answer file.
+    traces_to: [r_deliver]
+    serves: [write_answer]
+  - id: done
+    type: TERMINAL
+tools:
+  write_answer:
+    surface: ACT
+    serves: [emit]
+    traces_to: [r_deliver]
+    body: |
+      with open(out_path, "w") as f:
+          json.dump({"id": d["id"]}, f)
+      return out_path
+""";
+
+test "an ACT that only REPORTS does not realize a deliverable" {
+    # the live SkillsBench geospatial case: the tool computed the right answer
+    # (furthest_point_id=hv74103036), returned it as report_text, wrote no file,
+    # and the cell scored 0/8 — yet the skill compiled `faithful`.
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    d = check_completeness(spec, parse_ir(REPORT_ONLY_IR));
+    assert [f.rule for f in d] == ["r_deliver"];
+    assert d[0].shape == "EMBODIED_WRITE";
+}
+
+test "an ACT whose body actually writes does realize it" {
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(REAL_WRITE_IR))] == [];
+}
+
+test "an external command stays acceptable — it is opaque, not provably inert" {
+    # `python scripts/pack.py in out` writes, but nothing in the string says so.
+    # Rejecting commands would fail every script-delegating skill.
+    ir = REPORT_ONLY_IR.replace(
+        "    body: |\n      d = furthest(points, boundaries)\n"
+        + "      return \"report_text=furthest_point_id=%s\" % d[\"id\"]\n",
+        "    command: python scripts/emit_answer.py {points} {out}\n");
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
+}

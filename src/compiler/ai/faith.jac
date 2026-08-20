@@ -349,10 +349,28 @@ def _tool_for(pir: ParsedIR, n: PNode) -> list[PTool] {
     return out;
 }
 
+# A deliverable is REACHED only if something actually writes it. These are the
+# ways an inline body can produce a file; a body that merely computes and
+# returns text is a report, not a deliverable.
+glob _WRITE_OPS: str =
+    r"(\bopen\s*\([^)]*[\"'](?:w|a|wb|ab|w\+|x)[\"']|\.write\s*\(|\.writelines\s*\("
+    + r"|\bjson\.dump\s*\(|\.to_csv\s*\(|\.to_excel\s*\(|\.to_json\s*\("
+    + r"|\.savefig\s*\(|\.save\s*\(|\bshutil\.(copy|move)|\bPath\([^)]*\)\.write_)";
+
+def _body_writes(text: str) -> bool {
+    t = str(text or "");
+    if not t.strip() { return False; }
+    return bool(re.search(_WRITE_OPS, t));
+}
+
 def _is_embodied_act(pir: ParsedIR, n: PNode) -> bool {
     if n.ntype != "ACT" { return False; }
     for t in _tool_for(pir, n) {
-        if t.body.strip() or t.command.strip() { return True; }
+        # An external command is opaque — it may well write, and refusing it
+        # would reject every `python scripts/pack.py in out`. An INLINE body is
+        # readable, so hold it to the standard: it must actually write.
+        if t.command.strip() { return True; }
+        if _body_writes(t.body) { return True; }
     }
     return bool(n.reads);   # ACT with a content read lowers to the _write_artifact fallback
 }
