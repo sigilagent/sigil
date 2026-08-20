@@ -686,6 +686,20 @@ glob _SHELL_CLIS: list = ["pandoc", "soffice", "libreoffice", "qpdf", "pdftoppm"
     "pdftotext", "tesseract", "pnpm", "npm ", "npx", "create-vite", "bash ", "sh ", "cp ",
     "mv ", "tar ", "mkdir ", "rm ", "convert ", "gs ", "./"];
 
+def _looks_python(body: str) -> bool {
+    # plainly-Python opener: tells "unparseable Python" (a compiler bug) apart
+    # from a genuine non-Python asset body (CSS/JSON/template).
+    for ln in body.splitlines() {
+        s = ln.strip();
+        if (not s) or s.startswith("#") { continue; }
+        for k in ["def ", "import ", "from ", "class ", "@", "return ", "if ", "for ", "with "] {
+            if s.startswith(k) { return True; }
+        }
+        return False;
+    }
+    return False;
+}
+
 def _looks_shell(body: str) -> bool {
     for ln in body.splitlines() {
         s = ln.strip();
@@ -790,6 +804,14 @@ def _body_lines(body: str, params: list) -> list {
         out.append("    import subprocess as _sp");
         out.append("    _r = _sp.run(" + repr(script) + ", shell=True, capture_output=True, text=True)");
         out.append("    return _r.stdout if _r.returncode == 0 else _r.stderr");
+    } elif _looks_python(body) {
+        # A body that is plainly Python but does not parse must NOT be degraded
+        # into a stub that returns its own source: the caller then uses that
+        # source text as a value (observed live -- 172 chars of source passed to
+        # open(), ENAMETOOLONG), and `jac check` passes because the stub is
+        # itself valid Python. Fail loudly so the repair loop can see it.
+        out.append("    # unparseable Python tool body -> refuse to ship a stub");
+        out.append("    raise SyntaxError(" + repr("sigil: tool body failed to parse as Python; the compiler refused to emit a string stub for it") + ")");
     } else {
         out.append("    # non-Python tool body (CSS/JSON/template) -> returned string");
         out.append("    return " + repr(body));
@@ -2109,7 +2131,14 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             if (k == "task") or (not isinstance(meta, dict)) { continue; }
             if str(meta.get("role")) != "input" { continue; }
             if meta.get("produced_by") { continue; }
-            if str(_jac_type(meta.get("type"), types)[0]) != "str" { continue; }
+            # A non-`str` role:input used to be dropped here entirely -- it never
+            # reached _EJ_PARAM_KEYS nor the spawn kwargs, so it kept its type
+            # default and the walker ran on [] / {} / 0. Empty-input checks then
+            # pass vacuously, so the artifact reports success having done nothing.
+            # The MCP inputSchema types every key as a string, so bind by decoding.
+            _jt = str(_jac_type(meta.get("type"), types)[0]);
+            _jd = str(_jac_type(meta.get("type"), types)[1]);
+            if (_jt == "any") or (_jt not in ["str", "int", "float", "bool", "dict", "list"] and not _jt.startswith("list[")) { continue; }
             # _safe the carry name: an autofix-minted lane can be path-shaped
             # (e.g. './canvas-fonts'), and the `has` decl is already _safe'd — the
             # spawn kwarg MUST match it or the module is a syntax error (caught
@@ -2125,8 +2154,12 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             # observed live, migrate_residue), and a non-entry input is not either.
             if (str(meta.get("type") or "").strip() == "str") and (k in _entry_reads) {
                 extra_in.append(f"{sk}=str(params.get('{sk}', task))");
-            } else {
+            } elif _jt == "str" {
                 extra_in.append(f"{sk}=str(params.get('{sk}', ''))");
+            } else {
+                # typed carry: decode the string param, falling back to the same
+                # default the `has` declaration uses
+                extra_in.append(f"{sk}=_as_param(params.get('{sk}', ''), {_jd})");
             }
         }
         sargs = _j(", ", ["task=task"] + extra_in);
