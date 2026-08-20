@@ -290,7 +290,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     # With eject, the module is ALSO written out as one runnable .jac program.
     # LAZY imports — see the register_skill note on the jac-test topology bug.
     import from .compiler.ai.lift { lift, pin_all_lift_llms, set_lift_progress }
-    import from .compiler.ai.eject { eject_program, write_program }
+    import from .compiler.ai.eject { eject_program, write_program, copy_skill_sidecars }
     import from .compiler.ai.report { explain, strict_mode }
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
@@ -335,6 +335,10 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
         ejected = write_program(eject_program(lr.module_src, sig), ep);
+        # escape hatch: whatever bundling could not embody still ships
+        # beside the artifact, so a run-time lookup finds the real file
+        # rather than falling back to a guess.
+        copy_skill_sidecars(skill_dir, ep);
     }
     return {"ok": True, "status": lr.status, "signature": tg.signature, "module": tg.module,
             "issues": issues, "findings": lr.findings, "fixes": lr.fixes,
@@ -382,7 +386,7 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     # assumed-Maybe warning fatal (CI: force the author to make the skill specific).
     import from .compiler.ai.raise2 { raise2, explain2, pin_raise2_llms }
     import from .compiler.ai.faith { vacuity_finding }
-    import from .compiler.ai.eject { eject_program, write_program }
+    import from .compiler.ai.eject { eject_program, write_program, copy_skill_sidecars }
     import from .compiler.ai.report { strict_mode }
     pin_raise2_llms(cur_frontier());
     rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec, adjudicate=adjudicate);
@@ -425,6 +429,10 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     if eject {
         ep = eject_path if eject_path else (sig.replace("-", "_") + ".jac");
         ejected = write_program(eject_program(rr.module_src, sig), ep);
+        # escape hatch: whatever bundling could not embody still ships
+        # beside the artifact, so a run-time lookup finds the real file
+        # rather than falling back to a guess.
+        copy_skill_sidecars(skill_dir, ep);
     }
     return {"ok": True, "status": rr.status, "signature": tg.signature, "module": tg.module,
             "version": tg.version, "origin": tg.origin,

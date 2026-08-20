@@ -13,6 +13,7 @@ rides the runnable (and never enters a prompt).
 """
 
 import os;
+import shutil;
 
 glob _MCP_SERVE_SRC: str = 'def _mcp_description(name):\n    # serve the SKILL.md imperative description (the trigger surface that\n    # drives selection) instead of a bland generic line\n    import os, re\n    desc = ""\n    try:\n        sk = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKILL.md")\n        fm = open(sk, encoding="utf-8", errors="replace").read().split("---")\n        if len(fm) > 2:\n            m = re.search(r"description:\\s*\\"?(.*?)\\"?\\s*$", fm[1], re.M | re.S)\n            if m:\n                desc = " ".join(m.group(1).split())[:800]\n    except Exception:\n        pass\n    return ((desc + " ") if desc else "") + ("This tool EXECUTES the whole procedure itself (compiled program, built-in checks) — "\n        "ALWAYS call it instead of writing the logic manually; hand-rolled versions fail verification. "\n        "After it returns, VERIFY the produced files against the task requirements before finishing.")\n\ndef _mcp_serve(run_fn, model_cls, keys, name, model_name):\n    # HANDTUNE mcp-1: the artifact hosts itself as an MCP stdio server.\n    # `tools/call` invokes run() IN-PROCESS (jac runtime + model warm across\n    # calls); the artifact\'s own prints are rerouted to stderr so stdout\n    # stays a clean JSON-RPC channel.\n    import sys, json as _j, os as _os\n    real_out = sys.stdout\n    tool = {\n        "name": name,\n        "description": _mcp_description(name),\n        "inputSchema": {\n            "type": "object",\n            "properties": dict(\n                [("task", {"type": "string", "description": "One sentence: the concrete goal."})] +\n                [(k, {"type": "string", "description": "Exact value for input \'" + k + "\'."}) for k in keys]\n            ),\n            "required": ["task"],\n            "additionalProperties": False,\n        },\n    }\n    for line in sys.stdin:\n        line = line.strip()\n        if not line:\n            continue\n        try:\n            req = _j.loads(line)\n        except Exception:\n            continue\n        rid = req.get("id")\n        m = req.get("method", "")\n        if m == "initialize":\n            res = {"protocolVersion": req.get("params", {}).get("protocolVersion", "2024-11-05"),\n                   "capabilities": {"tools": {}},\n                   "serverInfo": {"name": "sigil-" + name, "version": "1.0"}}\n        elif m == "tools/list":\n            res = {"tools": [tool]}\n        elif m == "tools/call":\n            args = (req.get("params", {}) or {}).get("arguments", {}) or {}\n            task = str(args.get("task", "")) or ("apply the " + name + " skill")\n            params = {k: str(v) for k, v in args.items() if k != "task" and str(v).strip()}\n            before = set(_os.listdir("."))\n            sys.stdout = sys.stderr\n            try:\n                rep = str(run_fn(task, model_cls(model_name=model_name), "", params))\n                err = False\n            except Exception as e:\n                rep = f"{type(e).__name__}: {e}"\n                err = True\n            finally:\n                sys.stdout = real_out\n            new = sorted(set(_os.listdir(".")) - before)\n            txt = rep + (("\\nnew files: " + ", ".join(new)) if new else "")\n            res = {"content": [{"type": "text", "text": txt[:8000]}], "isError": err}\n        elif rid is None:\n            continue\n        else:\n            res = {}\n        if rid is not None:\n            real_out.write(_j.dumps({"jsonrpc": "2.0", "id": rid, "result": res}) + "\\n")\n            real_out.flush()';
 
@@ -79,6 +80,45 @@ def eject_program(module_src: str, name: str) -> str {
     );
     serve = "\n\n::py::\n" + _MCP_SERVE_SRC + "\n::py::\n";
     return header + module_src.rstrip() + serve + shim;
+}
+
+glob _SIDECAR_SKIP: list[str] = ["SKILL.md", "LICENSE", "LICENSE.txt", "LICENSE.md"];
+
+def copy_skill_sidecars(skill_dir: str, out_path: str) -> list[str] {
+    # Copy the skill's remaining files next to the ejected artifact.
+    #
+    # Bundling embodies what it can, but embodiment is best-effort: a file can
+    # exceed the budget, an author can carry only part of a reference, and some
+    # payloads (templates, fixtures, data) are not text to embody at all.
+    # Shipping the rest beside the artifact is the ESCAPE HATCH — if the
+    # compiled program still reaches for `forms.md` or `scripts/rearrange.py` at
+    # run time, it finds it instead of falling back to a guess.
+    #
+    # Best-effort by design: failing to copy an extra must never fail a compile
+    # that already produced a runnable artifact.
+    copied: list[str] = [];
+    if (not skill_dir) or (not os.path.isdir(skill_dir)) { return copied; }
+    dest = os.path.dirname(os.path.abspath(out_path));
+    if not dest { return copied; }
+    try { os.makedirs(dest, exist_ok=True); } except Exception { return copied; }
+    for (dpath, dirs, fnames) in os.walk(skill_dir) {
+        dirs[:] = [d for d in dirs if not str(d).startswith(".")];
+        rd = os.path.relpath(dpath, skill_dir);
+        for f in sorted(fnames) {
+            if str(f).startswith(".") { continue; }
+            rel = str(f) if rd == "." else os.path.join(rd, str(f));
+            if (rd == ".") and (str(f) in _SIDECAR_SKIP) { continue; }
+            src = os.path.join(dpath, str(f));
+            dst = os.path.join(dest, rel);
+            if os.path.abspath(src) == os.path.abspath(out_path) { continue; }
+            try {
+                os.makedirs(os.path.dirname(dst), exist_ok=True);
+                shutil.copy2(src, dst);
+                copied.append(rel);
+            } except Exception { continue; }
+        }
+    }
+    return copied;
 }
 
 def write_program(text: str, path: str) -> str {

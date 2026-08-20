@@ -74,3 +74,39 @@ test "the ejected program itself passes jac check, and lands executable" {
         shutil.rmtree(d, ignore_errors=True);
     }
 }
+
+test "the ejected artifact ships the skill's other files as an escape hatch" {
+    # Bundling embodies what it can; the rest must still be reachable at run
+    # time, or an artifact that looks up forms.md finds nothing and guesses.
+    sk = tempfile.mkdtemp(prefix="sigil_sc_skill_");
+    out = tempfile.mkdtemp(prefix="sigil_sc_out_");
+    os.makedirs(os.path.join(sk, "scripts"));
+    with open(os.path.join(sk, "SKILL.md"), "w") as f { f.write("# PDF\nfill it\n"); }
+    with open(os.path.join(sk, "forms.md"), "w") as f { f.write("field_id rules\n"); }
+    with open(os.path.join(sk, "scripts", "fill.py"), "w") as f { f.write("def fill(): pass\n"); }
+    with open(os.path.join(sk, "blank.pdf"), "w") as f { f.write("%PDF-1.4\n"); }
+
+    ep = os.path.join(out, "pdf.jac");
+    with open(ep, "w") as f { f.write("# artifact\n"); }
+    copied = copy_skill_sidecars(sk, ep);
+
+    # the reference doc, the script, and the binary payload all travel
+    assert "forms.md" in copied;
+    assert os.path.join("scripts", "fill.py") in copied;
+    assert "blank.pdf" in copied;
+    assert os.path.isfile(os.path.join(out, "forms.md"));
+    assert os.path.isfile(os.path.join(out, "scripts", "fill.py"));
+    # SKILL.md is the compiled source, not a run-time input
+    assert "SKILL.md" not in copied;
+    # the artifact itself is never overwritten by the copy
+    assert open(ep).read() == "# artifact\n";
+}
+
+test "sidecar copying never fails a compile" {
+    # best-effort by contract: a missing or unreadable skill dir must not raise
+    out = tempfile.mkdtemp(prefix="sigil_sc_out_");
+    ep = os.path.join(out, "x.jac");
+    with open(ep, "w") as f { f.write("# artifact\n"); }
+    assert copy_skill_sidecars("", ep) == [];
+    assert copy_skill_sidecars(os.path.join(out, "does-not-exist"), ep) == [];
+}
