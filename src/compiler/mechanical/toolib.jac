@@ -158,7 +158,9 @@ _cmd = str(command or "").strip()
 if not _cmd:
     return "[run_command: no command given]"
 try:
-    _p = _sp.run(_cmd, shell=True, capture_output=True, text=True)
+    # /bin/sh is dash on Debian; a bash-drafted command dies at the first "("
+    _sh = _shutil.which("bash") or "/bin/sh";
+    _p = _sp.run(_cmd, shell=True, capture_output=True, text=True, executable=_sh)
 except Exception as _e:
     return "[run_command failed: %s]" % str(_e)[:200]
 _out = (_p.stdout or "") + (("\\n[stderr] " + _p.stderr) if _p.stderr else "")
