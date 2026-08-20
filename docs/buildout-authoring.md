@@ -117,3 +117,65 @@ percentage, then AMC1-strict + AMC2 on the bench.
 Cost expectation: more calls, each much smaller; repair rounds stop re-emitting
 200-rule IRs. The skeleton-first mcp-builder experiment was 1.38× *cheaper* at
 parity, so this is not assumed to be a cost regression — it is measured.
+
+## Measured so far
+
+### Unit level
+
+`jac test src/compiler/ai/` — **1880 passed**, 18 of them new. The load-bearing
+ones assert the claim rather than the code:
+
+* a skeleton built from a rule set covering every `RuleKind` reports **zero
+  DROPPED and zero ADDED** through the real faithfulness closure — completeness
+  without a model call;
+* a round that quietly deletes the deliverable is **rejected**, and the prior
+  document survives with coverage intact;
+* G11 flags a graph that never touches the scripts its rules name, and passes a
+  skeleton; G10 flags one element claiming many procedures, and does not punish
+  folded prohibitions.
+
+### First live compile — `hipaa-compliance`
+
+```
+buildout hipaa-compliance rc=0 secs=1053 [status: faithful]
+  skeleton: 30 required rules stubbed of 48 extracted, 30 realized at phase 0
+  region 1/3: filled 12 rule(s), 30 realized
+  region 2: REJECTED — dropped 1 realization(s) (r31)
+  region 3/3: filled 6 rule(s), 30 realized
+  buildout: 1 stub(s) still unfilled
+```
+
+Completeness held from phase 0, before any model call. The monotonicity guard
+fired on the first live compile, unprompted: a region round tried to remove a
+realization and was discarded. The cost of that rejection is visible and honest
+— one stub stayed unfilled and the notes say so, instead of shipping a graph
+that claims coverage it does not have.
+
+Structure follows the design: 14 nodes / 8 SENSE (reading the reference files
+the rules name) against the single-pass author's 8 nodes / 4 CODE, with stubs
+named after the rule they realize (`r16_load_references_security_rule`).
+
+### Compliance — AMC2, 9 cells per arm
+
+AMC2 is the branch-aware metric: N/A survives only for a verifiably untaken
+branch, and absence of evidence is MISSED. (`hipaa`'s reference encodes no
+conditional edges, so every N/A is correctly coerced.)
+
+| arm | AMC2 |
+|---|---|
+| single-pass (v0.5.1) | 60 |
+| **build-out** | **80** |
+
+The judge also had far less to guess about: 6 N/A stamps across the build-out
+cells against 16 for the single-pass agent, which is what embodiment buys — when
+the agent actually performs the procedure, the trace shows it.
+
+### Not yet measured
+
+`soc2-system-description` and `docx` — the two skills where the single-pass
+author went hollow (soc2 bundle-artifact embodiment 64% -> 0%, docx 2/15
+mandates followed in every rep) — are compiling under `--buildout` now. They are
+the cases this design exists for, and the numbers above should not be read as
+the result until those land. Likewise the refusal class (`gh-issues`,
+`claude-api`), where the prediction is that completeness-by-construction removes
+the refusal entirely.
