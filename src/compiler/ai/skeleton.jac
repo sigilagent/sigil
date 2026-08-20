@@ -23,8 +23,8 @@ import os;
 import yaml;
 
 import from .spec_loop { Rule, RuleSet }
-import from .lift_types { RuleKind, Modality, Cohesion }
-import from .faith { RealShape, required_shape }
+import from .lift_types { RuleKind, Modality }
+import from .faith { required_shape }
 
 ::py::
 import re as _re
@@ -275,15 +275,12 @@ def artifacts_in(quote: str) -> any {
 
 def shape_name(r: Rule) -> str {
     # The realization shape this rule REQUIRES, as a plain string.
-    sh = required_shape(r.kind, r.modality, r.binds);
-    if sh == RealShape.OPTIONAL { return "OPTIONAL"; }
-    if sh == RealShape.NODE { return "NODE"; }
-    if sh == RealShape.EMBODIED_WRITE { return "EMBODIED_WRITE"; }
-    if sh == RealShape.CONSTRAINT { return "CONSTRAINT"; }
-    if sh == RealShape.CODE_GATE { return "CODE_GATE"; }
-    if sh == RealShape.EMBODIED_KNOWLEDGE { return "EMBODIED_KNOWLEDGE"; }
-    if sh == RealShape.LIVE_TOOL { return "LIVE_TOOL"; }
-    return "NODE";
+    #
+    # Compared by NAME, never by enum identity: under multi-file `jac test` a
+    # module can be loaded more than once, and two loads of the same enum are
+    # not identical objects. Identity comparison then silently falls through to
+    # a default — which is how a prohibition ends up classed as a procedure.
+    return str(required_shape(r.kind, r.modality, r.binds).name);
 }
 
 
@@ -294,7 +291,7 @@ def stub_specs(spec: RuleSet) -> list {
     for r in spec.rules {
         sh = shape_name(r);
         if sh == "OPTIONAL" { continue; }
-        coh = "INVOKE_UNIT" if r.cohesion == Cohesion.INVOKE_UNIT else "ATOMIC";
+        coh = str(r.cohesion.name);
         out.append(_mk_stub(r.id, sh, r.statement, r.quote, r.condition, coh));
     }
     return out;
