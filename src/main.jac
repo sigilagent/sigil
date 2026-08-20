@@ -1297,6 +1297,13 @@ with entry:__main__ {
                 # tried, and the next concrete step — never a bare issue dump.
                 print("compile FAILED for '" + str(r["signature"]) + "'  [status: " + str(r.get("status", "failed")) + "]");
                 print(str(r.get("explain") or ""));
+                # A refused compile must EXIT non-zero. The faithfulness gate declining
+                # to eject is the gate working as designed, but reporting that as success
+                # makes every wrapper read "no artifact" as "done": a batch driver logged
+                # rc=0 for four skills the gate had rejected and moved on, and the empty
+                # output directory went unnoticed for hours. Every other failure path in
+                # this command already exits 1.
+                sys.exit(1);
             } else {
                 print("compiled skill: " + str(r["signature"]) + "  [status: " + str(r.get("status", "")) + "]  -> " + str(r["module"]));
                 for fx in list(r.get("fixes") or []) { print("  (fix) " + str(fx)); }
