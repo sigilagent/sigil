@@ -2187,7 +2187,14 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             } else {
                 # typed carry: decode the string param, falling back to the same
                 # default the `has` declaration uses
-                extra_in.append(f"{sk}=_as_param(params.get('{sk}', ''), {_jd})");
+                # _as_param is untyped python; cast to the DECLARED jac type or the
+                # assignment to the walker carry is <Unknown> -> error[E1053]
+                _cast = "bool";
+                if _jt == "int" { _cast = "int"; }
+                elif _jt == "float" { _cast = "float"; }
+                elif _jt == "dict" { _cast = "dict"; }
+                elif _jt == "list" or _jt.startswith("list[") { _cast = "list"; }
+                extra_in.append(f"{sk}={_cast}(_as_param(params.get('{sk}', ''), {_jd}))");
             }
         }
         sargs = _j(", ", ["task=task"] + extra_in);
