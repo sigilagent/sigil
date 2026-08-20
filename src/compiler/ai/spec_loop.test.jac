@@ -6,6 +6,8 @@ surface the uncovered spans, round two converges. Asserts the hallucination was
 mechanically dropped and the verdict is honest.
 """
 
+import os;
+import tempfile;
 import from jaclang.byllm.lib { MockLLM }
 
 glob SKILL: str = """# CSV Extractor
@@ -709,4 +711,57 @@ test "an explicit governing force still outranks the procedural read" {
     settled = apply_structural_modality(PROC_UNDER_EXAMPLES, rs);
     assert "Examples" in str(settled["r1"]);
     assert rs.rules[0].modality == Modality.DISCRETIONARY;
+}
+
+test "the bundle carries every sibling doc, with provenance" {
+    # A skill is a directory: obligations stated only in a sibling must reach
+    # extraction, or they never become rules at all.
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "SKILL.md"), "w") as f {
+        f.write("# PDF\nRead forms.md completely before filling the form.\n");
+    }
+    with open(os.path.join(d, "forms.md"), "w") as f {
+        f.write("Set each field by field_id and mark checkboxes with checked_value.\n");
+    }
+    with open(os.path.join(d, "reference.md"), "w") as f {
+        f.write("Always set NeedAppearances so the values render.\n");
+    }
+    b = bundle_skill("# PDF\nRead forms.md completely before filling the form.\n", d);
+    assert sorted(list(b["files"])) == ["forms.md", "reference.md"];
+    # every sibling span is now groundable against the bundle text
+    assert "mark checkboxes with checked_value" in str(b["text"]);
+    assert "Always set NeedAppearances" in str(b["text"]);
+    # ...and each one says where it came from
+    assert "--- bundled from forms.md ---" in str(b["text"]);
+    assert list(b["skipped"]) == [];
+}
+
+test "grounding still works against bundled sibling text" {
+    # the property the concatenation exists to preserve: a quote lifted from a
+    # sibling must ground, exactly as one from SKILL.md does
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "forms.md"), "w") as f {
+        f.write("Mark checkboxes with their checked_value.\n");
+    }
+    b = bundle_skill("# PDF\nFill the form.\n", d);
+    rs = RuleSet(rules=[
+        Rule(id="r_main", quote="Fill the form."),
+        Rule(id="r_sib", quote="Mark checkboxes with their checked_value."),
+        Rule(id="r_ghost", quote="Rotate the pages ninety degrees.")
+    ]);
+    assert ground_rules(str(b["text"]), rs) == ["r_ghost"];
+}
+
+test "no skill_dir leaves the text exactly as given" {
+    b = bundle_skill("# PDF\nFill the form.\n", "");
+    assert str(b["text"]) == "# PDF\nFill the form.\n";
+    assert list(b["files"]) == [];
+}
+
+test "SKILL.md is never bundled into itself" {
+    d = tempfile.mkdtemp(prefix="sigil_bun_");
+    with open(os.path.join(d, "SKILL.md"), "w") as f { f.write("# PDF\nFill the form.\n"); }
+    b = bundle_skill("# PDF\nFill the form.\n", d);
+    assert list(b["files"]) == [];
+    assert str(b["text"]).count("Fill the form.") == 1;
 }

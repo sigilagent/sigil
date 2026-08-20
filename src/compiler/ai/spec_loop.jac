@@ -23,6 +23,7 @@ backstop the loop; on exhaustion the spec is returned WITH its honest verdict
 (never a silent success).
 """
 
+import os;
 import re;
 import from jaclang.byllm.lib { Model }
 import from .lift_types { Modality, RuleKind, Cohesion }
@@ -1238,6 +1239,54 @@ def _gaps_digest(v: ExtractVerdict) -> str {
 # ---------------------------------------------------------------------------
 # the loop
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# The skill BUNDLE — what Specification Extraction is allowed to see.
+#
+# A skill is a directory, not a file. SKILL.md routinely delegates the operative
+# detail to siblings ("read forms.md completely before filling the form"), and
+# extraction used to read SKILL.md alone. Everything stated only in a sibling
+# therefore never became a rule — so lambda had nothing to realize, the gate had
+# nothing to demand, and the compile could report `faithful` while most of the
+# skill had never been read. Measured on the SkillsBench suite: 23% of all skill
+# prose lives outside SKILL.md, and for the pdf skill it is 79% (26 KB of 33 KB).
+#
+# Concatenating is deliberate: grounding tests that a quote appears VERBATIM in
+# the source text, so one string keeps every sibling span groundable with no
+# change to ground_rules. Each file is announced by a marker so provenance
+# survives into the spec and the report.
+# ---------------------------------------------------------------------------
+glob BUNDLE_MARK: str = "\n\n--- bundled from ";
+glob _BUNDLE_MAX: int = 400000;   # a runaway directory must not eat the context
+
+def bundle_skill(skill: str, skill_dir: str) -> dict {
+    if not skill_dir { return {"text": skill, "files": [], "skipped": []}; }
+    names: list = [];
+    try { names = sorted(os.listdir(skill_dir)); } except Exception {
+        return {"text": skill, "files": [], "skipped": []};
+    }
+    parts: list[str] = [skill];
+    files: list[str] = [];
+    skipped: list[str] = [];
+    total = len(skill);
+    for n in names {
+        if not str(n).lower().endswith(".md") { continue; }
+        if str(n).upper() == "SKILL.MD" { continue; }
+        p = os.path.join(skill_dir, str(n));
+        if not os.path.isfile(p) { continue; }
+        body = "";
+        try {
+            with open(p, encoding="utf-8", errors="replace") as fh { body = fh.read(); }
+        } except Exception { continue; }
+        if not body.strip() { continue; }
+        chunk = BUNDLE_MARK + str(n) + " ---\n\n" + body;
+        # A bundle that overflows is reported, never silently truncated: a
+        # dropped sibling is a dropped obligation.
+        if (total + len(chunk)) > _BUNDLE_MAX { skipped.append(str(n)); continue; }
+        parts.append(chunk); files.append(str(n)); total += len(chunk);
+    }
+    return {"text": "".join(parts), "files": files, "skipped": skipped};
+}
 
 def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     _SKILL_FOR_RESOLVE = skill;   # the resolver's demotion guard needs the source text

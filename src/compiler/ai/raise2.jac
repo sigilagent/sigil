@@ -25,7 +25,7 @@ Two things that differ from `lift()`:
 """
 
 import time;
-import from .spec_loop { extract_spec, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
+import from .spec_loop { extract_spec, bundle_skill, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
 import from .author_direct { author_direct, pin_direct_llm }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
@@ -95,6 +95,17 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     # Every tier WARNS about what it decided, so --strict fails on an
     # underspecified skill no matter which one ran.
     skill = strip_frontmatter(skill);
+    # A skill is a DIRECTORY. Extraction must see every sibling doc it delegates
+    # to, or obligations stated only there never become rules — and a rule that
+    # was never extracted cannot be realized, demanded, or reported missing.
+    bundle = bundle_skill(skill, skill_dir);
+    bundled: list = list(bundle["files"]);
+    if bundled {
+        skill = str(bundle["text"]);
+        # `pre` was extracted from SKILL.md alone; it no longer describes this
+        # source, so re-extract rather than spec the smaller document.
+        pre = None;
+    }
     # `pre`: a SpecResult the lint pre-pass already extracted from this same
     # (stripped) text — reuse it instead of paying for the spec loop twice.
     # Only valid when the source was NOT amended after extraction.
@@ -106,6 +117,14 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
            "sound": sr.verdict.sound, "complete": sr.verdict.complete,
            "drift": sr.verdict.drift});
     warnings: list[str] = [];
+    if bundled {
+        sr.spec.sub_resources = bundled;
+        warnings.append("bundled " + str(len(bundled)) + " sibling resource(s) into the spec: "
+                        + ", ".join(bundled));
+    }
+    for sk in list(bundle["skipped"]) {
+        warnings.append("sibling '" + str(sk) + "' did not fit the bundle budget and was NOT read");
+    }
     if sr.clarify {
         if ask {
             answers: dict[str, str] = {};
