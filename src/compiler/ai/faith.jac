@@ -349,10 +349,36 @@ def _tool_for(pir: ParsedIR, n: PNode) -> list[PTool] {
     return out;
 }
 
+# A deliverable is REACHED only if something actually writes it. These are the
+# ways an inline body can produce a file; a body that merely computes and
+# returns text is a report, not a deliverable.
+# NB: `[^\n]*?` rather than `[^)]*` for the open() forms — a mode string sitting
+# after a NESTED call (`open(os.path.join(d, "x.json"), "w")`, the commonest
+# shape there is) is unreachable if the scan stops at the first ")".
+glob _WRITE_OPS: str =
+    r"(\bopen\s*\([^\n]*?,\s*[\"'](?:w|a|x)[bt+]*[\"']"
+    + r"|\bopen\s*\([^\n]*?[\"'](?:w|a|x)[bt+]*[\"']\s*\)"
+    + r"|\.write\s*\(|\.writelines\s*\(|\.writestr\s*\(|\.write_(?:text|bytes)\s*\("
+    + r"|\b(?:json|yaml|pickle|toml|msgpack)\.dump\s*\("
+    + r"|\.to_(?:csv|excel|json|parquet|feather|hdf|pickle|markdown|html|latex|stata|xml)\s*\("
+    + r"|\.savefig\s*\(|\.save\s*\(|\bnp\.save(?:txt|z|z_compressed)?\s*\("
+    + r"|\bcv2?\.imwrite\s*\(|\bplt\.imsave\s*\("
+    + r"|\bshutil\.(?:copy|copy2|copyfile|copytree|move)|\bos\.(?:rename|replace)\s*\()";
+
+def _body_writes(text: str) -> bool {
+    t = str(text or "");
+    if not t.strip() { return False; }
+    return bool(re.search(_WRITE_OPS, t));
+}
+
 def _is_embodied_act(pir: ParsedIR, n: PNode) -> bool {
     if n.ntype != "ACT" { return False; }
     for t in _tool_for(pir, n) {
-        if t.body.strip() or t.command.strip() { return True; }
+        # An external command is opaque — it may well write, and refusing it
+        # would reject every `python scripts/pack.py in out`. An INLINE body is
+        # readable, so hold it to the standard: it must actually write.
+        if t.command.strip() { return True; }
+        if _body_writes(t.body) { return True; }
     }
     return bool(n.reads);   # ACT with a content read lowers to the _write_artifact fallback
 }

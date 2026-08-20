@@ -624,3 +624,116 @@ test "a tool that computes still counts as embodiment" {
     ]);
     assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
 }
+
+glob REPORT_ONLY_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: compute
+    type: ACT
+    doc: Find the farthest point and report it.
+    traces_to: [r_deliver]
+    serves: [distance_report]
+  - id: done
+    type: TERMINAL
+tools:
+  distance_report:
+    surface: ACT
+    serves: [compute]
+    traces_to: [r_deliver]
+    body: |
+      d = furthest(points, boundaries)
+      return "report_text=furthest_point_id=%s" % d["id"]
+""";
+
+glob REAL_WRITE_IR: str = """agir_version: 0.1
+shape: pipeline
+nodes:
+  - id: emit
+    type: ACT
+    doc: Write the answer file.
+    traces_to: [r_deliver]
+    serves: [write_answer]
+  - id: done
+    type: TERMINAL
+tools:
+  write_answer:
+    surface: ACT
+    serves: [emit]
+    traces_to: [r_deliver]
+    body: |
+      with open(out_path, "w") as f:
+          json.dump({"id": d["id"]}, f)
+      return out_path
+""";
+
+test "an ACT that only REPORTS does not realize a deliverable" {
+    # the live SkillsBench geospatial case: the tool computed the right answer
+    # (furthest_point_id=hv74103036), returned it as report_text, wrote no file,
+    # and the cell scored 0/8 — yet the skill compiled `faithful`.
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    d = check_completeness(spec, parse_ir(REPORT_ONLY_IR));
+    assert [f.rule for f in d] == ["r_deliver"];
+    assert d[0].shape == "EMBODIED_WRITE";
+}
+
+test "an ACT whose body actually writes does realize it" {
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(REAL_WRITE_IR))] == [];
+}
+
+test "an external command stays acceptable — it is opaque, not provably inert" {
+    # `python scripts/pack.py in out` writes, but nothing in the string says so.
+    # Rejecting commands would fail every script-delegating skill.
+    ir = REPORT_ONLY_IR.replace(
+        "    body: |\n      d = furthest(points, boundaries)\n"
+        + "      return \"report_text=furthest_point_id=%s\" % d[\"id\"]\n",
+        "    command: python scripts/emit_answer.py {points} {out}\n");
+    spec = RuleSet(rules=[
+        Rule(id="r_deliver", quote="Write the farthest earthquake to answer.json.",
+             kind=RuleKind.IO, modality=Modality.MANDATORY)
+    ]);
+    assert [f.rule for f in check_completeness(spec, parse_ir(ir))] == [];
+}
+
+
+# The gate turns "does not write" into a REFUSED compile, so a write idiom it
+# fails to recognise costs a working skill its artifact. These are the shapes a
+# first pass missed — a Path held in a variable, the serialisers that are not
+# json, the pandas writers past csv/excel/json, and a mode string sitting behind
+# a nested call. Each must READ AS A WRITE; the report-only shapes below must
+# still not.
+test "the write gate recognises the idioms a skill actually writes with" {
+    writes = [
+        "with open(os.path.join(d, \"x.json\"), \"w\") as f:\n    json.dump(r, f)",
+        "out = Path(dest) / \"a.md\"\nout.write_text(body)",
+        "p.write_bytes(blob)",
+        "yaml.dump(cfg, fh)",
+        "pickle.dump(model, fh)",
+        "df.to_parquet(out)",
+        "np.savetxt(out, arr)",
+        "np.savez(out, a=arr)",
+        "z.writestr(\"a.txt\", data)",
+        "doc.save(out_path)",
+        "shutil.copy2(src, dst)",
+        "os.replace(tmp, final)",
+        "cv2.imwrite(out, img)"
+    ];
+    for w in writes { assert _body_writes(w), "not recognised as a write: " + w; }
+}
+
+test "the write gate still refuses a body that only computes" {
+    reports = [
+        "d = furthest(a, b)\nreturn \"id=%s\" % d[\"id\"]",
+        "with open(p) as f:\n    return f.read()",
+        "return json.dumps(rows)",
+        "fh = open(p, \"r\")\nreturn fh.read()",
+        "total = sum(x)\nreturn \"total=%d\" % total"
+    ];
+    for r in reports { assert not _body_writes(r), "wrongly counted as a write: " + r; }
+}
