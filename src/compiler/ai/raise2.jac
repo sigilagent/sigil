@@ -28,7 +28,7 @@ import os;
 import time;
 import from .spec_loop { extract_spec, bundle_skill, pin_lift_llm, pin_adjudge_llm, strip_frontmatter, RuleSet, ClarifyItem, apply_clarifications, resolve_ambiguous_default, adjudicate_spec }
 import from .author_direct { author_direct, pin_direct_llm }
-import from .author_buildout { author_buildout, pin_buildout_llm }
+import from .author_buildout { author_buildout, pin_buildout_llm, repair_localized }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
 import from .autofix { canonicalize_ir, autofix_ir }
@@ -230,7 +230,44 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
             }
         }
     }
-    # rule-scoped repair: the SAME coherent author closes exactly the gaps.
+    # LOCALIZED repair BEFORE the whole-document ladder. Re-authoring an entire
+    # IR to close a handful of gaps regresses: measured over one 33-skill sweep,
+    # 11 of 13 repair rounds made the gap count worse (50 -> 136, 76 -> 130) and
+    # one returned a document that no longer parsed. Editing the IR in place, a
+    # bounded chunk of gaps at a time, cannot un-parse the document and cannot
+    # drop coverage. SIGIL_REPAIR=whole restores the old order.
+    if (not fr.ok) and (os.environ.get("SIGIL_REPAIR", "").strip().lower() != "whole") {
+        msgs: list[str] = [str(g.message) for g in fr.dropped];
+        if msgs {
+            _t = time.time();
+            # captured BEFORE the round: `fr` is rebound on adoption below, so
+            # reading it afterwards for both ends reports before == after and the
+            # event says nothing about whether the round helped.
+            _before_loc: int = gap_score(fr);
+            _emit({"stage": "repair", "state": "start", "round": 0,
+                   "issues": _before_loc, "target": "faithfulness-localized"});
+            rl = repair_localized(skill, spec, ir, msgs);
+            ir3: str = str(rl["ir_text"]).strip();
+            repairs += [str(x) for x in list(rl["notes"])];
+            if ir3 and (ir3 != ir) {
+                fr3 = faithfulness_report(spec, ir3);
+                if gap_score(fr3) < gap_score(fr) {
+                    repairs.append("localized repair: " + str(gap_score(fr)) + " -> "
+                                   + str(gap_score(fr3)) + " faithfulness gap(s)");
+                    ir = ir3; fr = fr3;
+                } else {
+                    repairs.append("localized repair: no improvement ("
+                                   + str(gap_score(fr)) + " -> " + str(gap_score(fr3))
+                                   + ") — keeping prior");
+                }
+            }
+            _emit({"stage": "repair", "state": "done", "secs": time.time() - _t,
+                   "round": 0, "before": _before_loc, "after": gap_score(fr),
+                   "adopted": gap_score(fr) < _before_loc});
+        }
+    }
+
+    # whole-document fallback: the SAME coherent author closes exactly the gaps.
     while (not fr.ok) and (rounds < max_repair) {
         rounds += 1;
         before = gap_score(fr);

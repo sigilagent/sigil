@@ -158,3 +158,87 @@ test "regions chunk the required rules into bounded rounds" {
     for g in regs { flat += g; }
     assert len(flat) == 25, str(len(flat));
 }
+
+
+# ===========================================================================
+# LOCALIZED REPAIR — the failure mode it exists to prevent is a repair round
+# that "fixes" one gap by quietly dropping coverage elsewhere, or that returns
+# a document which no longer parses. Both are what whole-document re-authoring
+# actually did in the field, so both are asserted here.
+# ===========================================================================
+
+# The incumbent: r1 realized, r2 has NO realization (the gap to close).
+glob GAPPY_IR: str = """---
+name: two_step
+description: read a file and write a summary
+---
+agir_version: 0.1
+nodes:
+  - id: read_input
+    type: SENSE
+    owner: code
+    tool: read_file
+    doc: Read the input file the user names.
+    writes: [text]
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+    owner: code
+    doc: Report.
+    traces_to: []
+tools:
+  read_file:
+    surface: SENSE
+    sig: "(path) -> str"
+    body: |
+      with open(path) as f:
+          return f.read()
+    traces_to: [r1]
+edges:
+  - {from: read_input, to: done}
+""";
+
+glob GAP_MSG: list = [
+    "DROPPED IO/MANDATORY rule 'r2' — no EMBODIED_WRITE realization. add an ACT "
+    "(write-tool or content read) traced to 'r2' that writes the deliverable: write the summary"
+];
+
+
+test "localized repair adopts a round that closes the gap without losing coverage" {
+    pin_buildout_llm(MockLLM(model_name="mockllm", config={"outputs": [GOOD_FILL]}));
+    res = repair_localized("# two-step skill", SPEC, GAPPY_IR, GAP_MSG);
+    got = sorted(realized_ids(SPEC, res["ir_text"]));
+    assert got == ["r1", "r2"], "gap not closed: " + str(got) + " " + str(res["notes"]);
+}
+
+
+test "a repair round that drops existing coverage is REJECTED" {
+    # LOSSY_FILL realizes r1 only — it would close nothing and lose nothing here,
+    # so invert: start from a COMPLETE ir and hand back the lossy one.
+    pin_buildout_llm(MockLLM(model_name="mockllm", config={"outputs": [LOSSY_FILL]}));
+    res = repair_localized("# two-step skill", SPEC, GOOD_FILL, GAP_MSG);
+    got = sorted(realized_ids(SPEC, res["ir_text"]));
+    assert got == ["r1", "r2"], "coverage regressed: " + str(got);
+    joined = " ".join(res["notes"]);
+    assert "REJECTED" in joined, joined;
+    assert "r2" in joined, joined;
+}
+
+
+test "an unparseable repair round cannot un-parse the document" {
+    pin_buildout_llm(MockLLM(model_name="mockllm", config={"outputs": ["not: [valid: yaml"]}));
+    res = repair_localized("# two-step skill", SPEC, GOOD_FILL, GAP_MSG);
+    assert sorted(realized_ids(SPEC, res["ir_text"])) == ["r1", "r2"], str(res["notes"]);
+    assert "did not parse" in " ".join(res["notes"]), str(res["notes"]);
+}
+
+
+test "repair chunks the gap list so prompt size does not track skill size" {
+    many: list = [];
+    for i in range(1, 21) { many.append("DROPPED STEP/MANDATORY rule 'r" + str(i) + "' — no NODE realization. add a node: step " + str(i)); }
+    # every chunk answers with the incumbent unchanged -> all kept, none adopted
+    pin_buildout_llm(MockLLM(model_name="mockllm", config={"outputs": [GOOD_FILL] * 10}));
+    res = repair_localized("# skill", SPEC, GOOD_FILL, many, 5);
+    rounds = [n for n in res["notes"] if "repair " in str(n)];
+    assert len(rounds) == 4, "expected 20 gaps / 5 per round = 4 rounds, got " + str(rounds);
+}

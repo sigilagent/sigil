@@ -192,3 +192,94 @@ def author_buildout(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dic
     if left { notes.append("buildout: " + str(left) + " stub(s) still unfilled"); }
     return {"ir_text": ir, "notes": notes};
 }
+
+
+# ---------------------------------------------------------------------------
+# LOCALIZED REPAIR — close the gaps in an IR that already exists.
+#
+# The repair ladder re-authors the WHOLE document with the gap list appended,
+# so a model asked to close 20 gaps in a 300-rule IR closes some and drops
+# others it had already covered. Measured over one 33-skill sweep: 11 of 13
+# repair rounds made the gap count WORSE (50 -> 136, 76 -> 130), and one
+# returned a document that no longer parsed (8 -> 1000122, the unparseable
+# sentinel). The monotone guard keeps the prior IR each time, so repair is safe
+# but inert — it protects the compile without ever fixing it.
+#
+# Here the model EDITS the IR it is given, a bounded set of gaps at a time, and
+# every candidate must (a) parse and (b) keep every realization the incumbent
+# had. A round can therefore add coverage and never remove it, and a rewrite
+# cannot un-parse the whole document.
+# ---------------------------------------------------------------------------
+
+sem close_gaps = """You are repairing an AG-IR that is ALREADY AUTHORED and very
+nearly complete. A few obligations have no realization; each GAP below names the
+rule id and the exact shape its realization must take.
+
+EDIT the document you are given. Do NOT re-derive it:
+ - close every gap listed, in the shape the gap names;
+ - keep every existing node, tool, knowledge item, edge, carry and traces_to
+   entry EXACTLY as-is — a realization that disappears is a regression;
+ - do not widen an existing element's traces_to to absorb a gap; give the
+   obligation its own realization;
+ - when a gap's text names a bundle file (`scripts/x.py`, `references/y.md`),
+   bind the realization to THAT file — run it or read it — never a generic
+   stand-in.
+
+Output ONLY the complete raw AG-IR YAML (starting with the '---' frontmatter) —
+no prose, no markdown fences.""";
+sem close_gaps.guide = "The AG-IR authoring guide — obey it for shape and idiom.";
+sem close_gaps.skill = "The SKILL.md being compiled, for the domain content.";
+sem close_gaps.ir_so_far = "The authored AG-IR to EDIT. Everything in it stays unless a gap says otherwise.";
+sem close_gaps.gaps = "The gaps to close in THIS round, verbatim from the gate.";
+def close_gaps(guide: str, skill: str, ir_so_far: str, gaps: str) -> str by buildout_llm();
+
+
+def repair_localized(skill: str, spec: RuleSet, ir_text: str, msgs: list[str],
+                     size: int = 0) -> dict {
+    # Close `msgs` (the gate's own drop directives) against an existing IR, a
+    # bounded chunk at a time. Adoption is per chunk and monotone: a candidate
+    # that fails to parse or loses any realization is discarded and the prior
+    # document continues to the next chunk.
+    n = size if size > 0 else int(os.environ.get("SIGIL_REPAIR_REGION", "8"));
+    notes: list[str] = [];
+    ir: str = str(ir_text);
+    if not msgs { return {"ir_text": ir, "notes": notes}; }
+    guide = _guide_text();
+    total = (len(msgs) + n - 1) // n;
+    i: int = 0;
+    rnd: int = 0;
+    while i < len(msgs) {
+        chunk = msgs[i:i + n];
+        i += n;
+        rnd += 1;
+        directive = "GAPS TO CLOSE — change nothing else:\n" + "\n".join(["- " + str(m) for m in chunk]);
+        cand: str = "";
+        try {
+            cand = _strip_fence(close_gaps(guide, skill, ir, directive));
+        } except Exception as e {
+            notes.append("repair " + str(rnd) + "/" + str(total) + ": call failed ("
+                         + str(e)[:100] + ") — keeping prior");
+            continue;
+        }
+        if not cand {
+            notes.append("repair " + str(rnd) + "/" + str(total) + ": empty answer — keeping prior");
+            continue;
+        }
+        pir = parse_ir(cand);
+        if not pir.nodes {
+            notes.append("repair " + str(rnd) + "/" + str(total)
+                         + ": candidate did not parse — keeping prior");
+            continue;
+        }
+        lost = monotonic(spec, ir, cand);
+        if lost {
+            notes.append("repair " + str(rnd) + "/" + str(total) + ": REJECTED — dropped "
+                         + str(len(lost)) + " existing realization(s) (" + ", ".join(lost[:4]) + ")");
+            continue;
+        }
+        ir = cand;
+        notes.append("repair " + str(rnd) + "/" + str(total) + ": closed "
+                     + str(len(chunk)) + " gap(s), " + str(len(realized_ids(spec, ir))) + " realized");
+    }
+    return {"ir_text": ir, "notes": notes};
+}
