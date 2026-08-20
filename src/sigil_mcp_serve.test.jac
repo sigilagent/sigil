@@ -129,3 +129,40 @@ test "tools/list is valid JSON — it goes on the wire verbatim" {
     r = _dispatch({"method": "tools/list"}, _skills, _run, _solve);
     assert json.loads(json.dumps(r)) == r;
 }
+
+# --- the operator's tool policy, applied on this side of the wire too ---------
+
+def _only_tldr(name: str) -> bool { return str(name) == "skill_one_line_tldr"; }
+
+test "a denied skill is never listed — the client is not shown a locked door" {
+    r = _dispatch({"method": "tools/list"}, _skills, _run, _solve, _only_tldr);
+    names = [t["name"] for t in r["tools"]];
+    assert "skill_one_line_tldr" in names, str(names);
+    assert "skill_clean-csv" not in names, str(names);
+    # sigil_solve / sigil_library are Sigil's own doors, not compiled skills
+    assert "sigil_solve" in names;
+    assert "sigil_library" in names;
+}
+
+test "a denied skill cannot be called by name either" {
+    r = _dispatch({"method": "tools/call",
+                   "params": {"name": "skill_clean-csv", "arguments": {"task": "clean it"}}},
+                  _skills, _run, _solve, _only_tldr);
+    assert r["isError"];
+    assert "Unknown tool" in str(r["content"][0]["text"]);
+}
+
+test "sigil_library lists what the policy allows, not everything compiled" {
+    r = _dispatch({"method": "tools/call",
+                   "params": {"name": "sigil_library", "arguments": {}}},
+                  _skills, _run, _solve, _only_tldr);
+    body = str(r["content"][0]["text"]);
+    assert "one_line_tldr" in body, body;
+    assert "clean-csv" not in body, body;
+}
+
+test "with no policy passed, everything compiled is served" {
+    r = _dispatch({"method": "tools/list"}, _skills, _run, _solve);
+    names = [t["name"] for t in r["tools"]];
+    assert "skill_clean-csv" in names, str(names);
+}

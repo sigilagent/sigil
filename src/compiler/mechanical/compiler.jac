@@ -1299,7 +1299,7 @@ def _emit_slots(ir: any) -> str {
             wau = _dict(n.get("autonomy"));
             if isinstance(wau, dict) and wau.get("tools") {
                 wreal = [tt for tt in _list(wau.get("tools")) if tt != "SENSE"];
-                if wreal { wtools = f"(tools=[{_j(', ', [_safe(tt) for tt in wreal])}])"; }
+                if wreal { wtools = f"(tools=[{_j(', ', [_safe(tt) for tt in wreal])}, *_skill_tools()])"; }
             }
             out.append(f"def {wname}(task: str) -> str by llm{wtools};");
             wdoc = str(n.get("doc") or "").strip();
@@ -1355,7 +1355,16 @@ def _emit_slots(ir: any) -> str {
             real = [tt for tt in _list(au.get("tools")) if tt != "SENSE"];
             if real {
                 names = _j(", ", [_safe(tt) for tt in real]);
-                tools = f"(tools=[{names}])";
+                # `*_skill_tools()`: the OTHER compiled skills Sigil says this run
+                # may use (prelude helper; empty for an ejected artifact or any
+                # harness that isn't Sigil). Appended ONLY to a slot that already
+                # has tools — handing tools to a slot that had none would turn a
+                # single typed generation into a ReAct loop with a finish_tool,
+                # which is a different program than the IR asked for.
+                # SPLAT, not `+`: the helper lives in the module's ::py:: prelude,
+                # so its return type is Unknown to the checker and `list + Unknown`
+                # is a type error — which G4, the compile oracle, would fail on.
+                tools = f"(tools=[{names}, *_skill_tools()])";
             }
         }
         psig = _j(", ", params);

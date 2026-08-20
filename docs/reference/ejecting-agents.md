@@ -45,6 +45,11 @@ prints go to stderr to keep the protocol channel clean.
 This is the same idea as `sigil mcp-serve` ([claude-code](claude-code.md)), minus
 Sigil: one file, one tool, no graph behind it.
 
+The reverse holds too. Inside Sigil, a running skill is handed the rest of the
+library as tools (`SIGIL_SKILL_TOOLS`); an ejected artifact is handed nothing, so
+its autonomy slots carry exactly the tools it was compiled with. An eject depends
+on no library it left behind.
+
 ## A whole agent
 
 ```bash

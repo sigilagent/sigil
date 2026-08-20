@@ -60,6 +60,27 @@ def _describe(skill: dict) -> str:
     return head + stats
 
 
+def _permit_all(name: str) -> bool:
+    return True
+
+
+def _gated(skills: list, permitted) -> list:
+    """The skills this client may see, operator policy applied.
+
+    The same `tool_allowed` gate the inward tools use (src/sigil_skill_tools.jac),
+    keyed on the same `skill_<signature>` name — so `configure tool_deny
+    skill_clean_csv` means one thing whether the caller is Sigil's own chat agent
+    or Claude Code across this pipe. Filtered from the LISTING, not just the call:
+    a client cannot ask for what it was never shown.
+
+    The approval gate deliberately does NOT extend here. There is no operator at
+    the far end of a stdio pipe to answer it, so an approval prompt would turn
+    every skill call into a hang; the policy filter is the whole gate on this
+    side, and `sigil approvals` remains the operator's own instrument.
+    """
+    return [s for s in skills if permitted(_tool_name(s.get("signature")))]
+
+
 def _tools(skills: list) -> list:
     task_schema = {
         "type": "object",
@@ -100,9 +121,10 @@ def _text_result(text: str, is_error: bool = False) -> dict:
     return {"content": [{"type": "text", "text": str(text)}], "isError": bool(is_error)}
 
 
-def _call(name: str, args: dict, list_skills, run_skill, solve) -> dict:
+def _call(name: str, args: dict, list_skills, run_skill, solve, permitted=None) -> dict:
+    permitted = permitted or _permit_all
     if name == "sigil_library":
-        skills = list_skills()
+        skills = _gated(list_skills(), permitted)
         if not skills:
             return _text_result("No compiled skills yet.")
         lines = [
@@ -120,9 +142,12 @@ def _call(name: str, args: dict, list_skills, run_skill, solve) -> dict:
     if name == "sigil_solve":
         r = solve(task, "")
     else:
-        by_tool = {_tool_name(s.get("signature")): str(s.get("signature")) for s in list_skills()}
+        by_tool = {_tool_name(s.get("signature")): str(s.get("signature"))
+                   for s in _gated(list_skills(), permitted)}
         sig = by_tool.get(name)
         if sig is None:
+            # Denied and never-compiled look the same from out here on purpose:
+            # the tool list is the contract, and this is what falling off it says.
             return _text_result("Unknown tool: %s" % name, is_error=True)
         # Pin the skill: the caller picked this tool, so honour it rather than
         # letting the router second-guess them.
@@ -136,7 +161,10 @@ def _call(name: str, args: dict, list_skills, run_skill, solve) -> dict:
     return _text_result(body, is_error=failed)
 
 
-def _dispatch(msg: dict, list_skills, run_skill, solve) -> dict:
+def _dispatch(msg: dict, list_skills, run_skill, solve, permitted=None) -> dict:
+    # `permitted` defaults open so a caller with no policy (a test, an embedder)
+    # gets the plain server; `serve_stdio` always passes the operator's.
+    permitted = permitted or _permit_all
     method = str(msg.get("method", ""))
     if method == "initialize":
         want = str((msg.get("params") or {}).get("protocolVersion") or "")
@@ -148,11 +176,11 @@ def _dispatch(msg: dict, list_skills, run_skill, solve) -> dict:
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": _tools(list_skills())}
+        return {"tools": _tools(_gated(list_skills(), permitted))}
     if method == "tools/call":
         params = msg.get("params") or {}
         return _call(str(params.get("name", "")), params.get("arguments") or {},
-                     list_skills, run_skill, solve)
+                     list_skills, run_skill, solve, permitted)
     raise LookupError("unknown method: %s" % method)
 
 
@@ -166,13 +194,17 @@ def _version() -> str:
         return "0"
 
 
-def serve_stdio(list_skills, run_skill, solve) -> int:
+def serve_stdio(list_skills, run_skill, solve, permitted=None) -> int:
     """Serve MCP over stdio until stdin closes. Returns an exit code.
 
     `list_skills() -> list[dict]`, `run_skill(task, signature) -> dict` and
     `solve(task, skill) -> dict` are Sigil's own functions, passed in from
-    src/main.jac so this module stays free of graph imports.
+    src/main.jac so this module stays free of graph imports. `permitted(tool_name)
+    -> bool` is the operator's tool policy (`sigil_core.tool_allowed`), likewise
+    passed in; omitted, everything compiled is served, which is what a caller with
+    no policy of its own means.
     """
+    permitted = permitted or _permit_all
     # stdout is the wire. Take a private copy of it, then repoint sys.stdout at
     # stderr so that anything Sigil prints while running a skill is diagnostics,
     # not corruption of the protocol stream.
@@ -193,7 +225,7 @@ def serve_stdio(list_skills, run_skill, solve) -> int:
             continue  # not our frame; a malformed line is not fatal
         mid = msg.get("id")
         try:
-            result = _dispatch(msg, list_skills, run_skill, solve)
+            result = _dispatch(msg, list_skills, run_skill, solve, permitted)
         except LookupError as e:
             if mid is not None:
                 send({"jsonrpc": "2.0", "id": mid,

@@ -40,7 +40,8 @@ import from src.sigil_bridge { bridge_run, bridge_running, REPLY_MARKER }
 import from src.sigil_channels_setup { channel_setup_guide, channel_bootstrap, channel_kinds }
 import from src.sigil_docs { list_docs, read_doc }
 import from src.hooks { hook_add, hook_list, hook_enable, hook_remove }
-import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit, approvals_pending, approvals_clear }
+import from src.approvals { approvals_get, approvals_set, allowlist_add, check_exec, peek_exec, approve, approvals_elevate, approvals_deescalate, elevated_audit, approvals_pending, approvals_clear }
+import from src.sigil_skill_tools { skill_tool_index }
 import from src.agent { run_task }
 import from src.sigil_tasks { tasks_list, tasks_show }
 import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
@@ -1378,10 +1379,12 @@ with entry:__main__ {
         # Claude Code session, most usefully) as one tool per skill:
         #   claude mcp add sigil -- sigil mcp-serve
         # Sigil's own functions are passed in so the server module stays free of
-        # graph imports. Nothing may print to stdout past this point — serve_stdio
-        # owns it as the wire.
+        # graph imports — including `tool_allowed`, so the skills served here are
+        # the same set the agent's own tool-belt gets: a skill the operator denied
+        # is not listed and not callable, on either side of the harness.
+        # Nothing may print to stdout past this point — serve_stdio owns it as the wire.
         import from src.sigil_mcp_serve { serve_stdio }
-        sys.exit(serve_stdio(library, run_task, solve_task));
+        sys.exit(serve_stdio(library, run_task, solve_task, tool_allowed));
     } elif cmd == "gate" {
         # gate <file.agir> [name] — run G4 (the compile oracle) + G9-TY (typed-
         # dataflow unification) over one AG-IR and exit nonzero if either fails.
@@ -1580,6 +1583,19 @@ with entry:__main__ {
         sub = _arg(argv, 1);
         if sub == "check" { print(_arg(argv, 2) + ": " + ("allowed" if tool_allowed(_arg(argv, 2)) else "DENIED")); }
         elif sub == "group" { print(tool_group_set(_arg(argv, 2), _arg(argv, 3))); }
+        elif sub == "skills" {
+            # Every compiled skill is a tool the agent can reach for on its own, so
+            # "which skills are on the belt, and what stands in front of each" is a
+            # policy question now — this is where it gets answered.
+            rows = skill_tool_index();
+            if not rows { print("(no compiled skills are offered as tools)"); }
+            for r in rows {
+                dec = peek_exec("skill:" + str(r["signature"]));
+                print("  " + str(r["tool"]).ljust(34) + " " + dec.ljust(6)
+                      + "  " + str(r["intent"]).replace(chr(10), " ")[:80]);
+            }
+            if rows { print("   allowed = runs when the agent calls it · ask = the operator is asked first"); }
+        }
         elif (sub == "policy") or (not sub) {
             p = tools_policy_info();
             print("allow    : " + (", ".join([str(x) for x in list(p["allow"])]) or "(any)"));
@@ -1590,7 +1606,7 @@ with entry:__main__ {
             print("effective allow: " + (", ".join([str(x) for x in list(p["effective_allow"])]) or "(any)"));
             print("effective deny : " + (", ".join([str(x) for x in list(p["effective_deny"])]) or "(none)"));
         }
-        else { print("usage: tools policy|check <name>|group <name> <t1,t2,...>   (set allow/deny via configure tool_allow|tool_deny|tool_profile)"); }
+        else { print("usage: tools policy|skills|check <name>|group <name> <t1,t2,...>   (set allow/deny via configure tool_allow|tool_deny|tool_profile)"); }
     } elif cmd == "session" {
         # session note <ch> <peer> <role> <text> | show <ch> <peer> | reset <ch> <peer> | list
         sub = _arg(argv, 1);
@@ -1674,7 +1690,7 @@ with entry:__main__ {
         print("  add-mcp <name> <transport> <cmd-or-url> [args...]   register a BYO MCP server");
         print("  remove-mcp <name>                   unregister an MCP server");
         print("  mcp                                 list registered MCP servers + their tools");
-        print("  tools policy|check <name>|group ... tool allow/deny/group policy (set via configure tool_allow|tool_deny|tool_profile)");
+        print("  tools policy|skills|check <name>|group ... tool allow/deny/group policy; `skills` lists the compiled skills offered as tools and their gate");
         print("  approvals get|set|allow|check|approve|elevate|deescalate|audit   the shell-exec approval gate");
         print("  secret add <name> <ENV_VAR>|list|rm|test        env-backed secrets (values never printed)");
         print("  hook add|list|enable|disable|rm     lifecycle hooks (before/after solve, message received, …)");

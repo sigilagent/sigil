@@ -304,3 +304,95 @@ test "a py-block marker inside a tool body cannot split the emitted block" {
     assert ":: py ::" in src;                 # the inner marker was defused, not dropped
     assert "inline python" in src;            # …and the body still rode along
 }
+
+
+# ------------------------------------------------- sibling skills as run-time tools
+
+glob SKILL_TOOL_IR: str = """
+name: shelf_agent
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  read_rows:
+    sig: "(path) -> list"
+    surface: SENSE
+    doc: "Read the rows."
+    body: |
+      def read_rows(path):
+          return [1, 2, 3]
+walker:
+  name: ShelfAgent
+  carries:
+    task:  { type: str, role: input }
+    notes: { type: str, produced_by: think }
+    final: { type: str, produced_by: wrap }
+nodes:
+  - id: think
+    type: GEN-RAW
+    owner: model
+    doc: "Work out what the rows say."
+    reads: [task]
+    writes: [notes]
+    autonomy: { tools: [read_rows] }
+  - id: wrap
+    type: GEN-RAW
+    owner: model
+    doc: "Write the summary."
+    reads: [notes]
+    writes: [final]
+  - id: done
+    type: TERMINAL
+    reads: [final]
+edges:
+  - {from: think, to: wrap, modality: mandatory}
+  - {from: wrap, to: done, modality: mandatory}
+""";
+
+test "an autonomy slot can reach the rest of the library; a plain slot is untouched" {
+    # A compiled skill handing a sub-job to another compiled skill: the shelf Sigil
+    # publishes (SIGIL_SKILL_TOOLS) joins the tools the IR already gave the slot.
+    # A slot with NO tools must stay toolless — tools turn a single typed
+    # generation into a ReAct loop with a finish_tool, a different program.
+    src = transpile_ir(SKILL_TOOL_IR, "shelf_agent");
+    assert "def think(task: str) -> str by llm(tools=[read_rows, *_skill_tools()]);" in src, src[-2000:];
+    assert "def wrap(notes: str) -> str by llm;" in src, src[-2000:];
+    # SPLAT, not `+`: the helper is defined in the ::py:: prelude, so `list + Unknown`
+    # would be a type error and G4 (the compile oracle runs jac's checker) would fail.
+    assert "] + _skill_tools()" not in src;
+    assert "def _skill_tools():" in src;      # …and the helper actually ships
+}
+
+test "no shelf in the environment means no extra tools, so an eject stays standalone" {
+    ns = _runtime_ns();
+    ns["os"].environ.pop("SIGIL_SKILL_TOOLS", None);
+    assert ns["_skill_tools"]() == [];
+}
+
+test "each shelf entry becomes one named, described tool" {
+    import json;
+    ns = _runtime_ns();
+    ns["os"].environ["SIGIL_SKILL_TOOLS"] = json.dumps([
+        {"name": "skill_clean_csv", "signature": "clean_csv",
+         "module": "clean_csv_v1", "description": "Clean a messy CSV."}
+    ]);
+    tools = ns["_skill_tools"]();
+    ns["os"].environ.pop("SIGIL_SKILL_TOOLS", None);
+    assert len(tools) == 1, str(tools);
+    assert tools[0].get_name() == "skill_clean_csv";
+    fn = tools[0].get_json_schema()["function"];
+    assert "Clean a messy CSV" in str(fn["description"]);
+    assert "task" in dict(fn["parameters"]["properties"]);
+}
+
+test "a malformed shelf is ignored, never raised" {
+    # The manifest crosses a process boundary as text; a bad one must cost the
+    # slot its extra tools, not the run.
+    ns = _runtime_ns();
+    ns["os"].environ["SIGIL_SKILL_TOOLS"] = "{not json";
+    assert ns["_skill_tools"]() == [];
+    ns["os"].environ["SIGIL_SKILL_TOOLS"] = "[{\"no_name\": 1}]";
+    ns["_SKILL_TOOL_CACHE"] = None;
+    assert ns["_skill_tools"]() == [];
+    ns["os"].environ.pop("SIGIL_SKILL_TOOLS", None);
+}

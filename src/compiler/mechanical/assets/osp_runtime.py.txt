@@ -498,6 +498,97 @@ def _live_tool(name, args):
             return "[live fetch %s failed: %s]" % (name, str(e)[:200])
     return "[live source '%s' unavailable in the batch harness]" % name
 
+# ---- sibling skills as tools: the library, reachable from inside a run ----
+# Sigil hands a run the OTHER compiled skills it is allowed to use through
+# SIGIL_SKILL_TOOLS (JSON; written by sigil_runtime.execute_module, already
+# filtered by the operator's tool policy and with THIS skill removed so a
+# procedure cannot call itself into a loop). Each becomes a byLLM tool on the
+# autonomy slots that already carry tools, so a compiled procedure can hand a
+# sub-job to a compiled procedure instead of re-deriving it.
+#
+# Sibling runs go out to their own `jac run` subprocess — the same isolation the
+# parent got, for the same reason: one interpreter per run, no shared graph, no
+# way for a callee's crash to take the caller down.
+#
+# No env (an ejected artifact, a bench workdir, any harness that is not Sigil) =
+# an empty list, and the slot keeps exactly the tools it was compiled with.
+_SKILL_TOOL_CACHE = None
+
+def _skill_run(mod, task, timeout=900):
+    import os, subprocess, sys, tempfile
+    marker = "<<<SIGIL_REPORT>>>"
+    body = (
+        "import from crystallized.%s { run }\n"
+        "import from jaclang.byllm.lib { Model }\n"
+        "import os;\n"
+        "with entry:__main__ {\n"
+        "    m = Model(model_name=os.getenv(\"SIGIL_MODEL\", \"gpt-4o-mini\"));\n"
+        "    out = run(os.getenv(\"SIGIL_TASK\", \"\"), m, \"\");\n"
+        "    print(\"%s\");\n"
+        "    print(out);\n"
+        "}\n"
+    ) % (mod, marker)
+    fd, path = tempfile.mkstemp(suffix=".jac", prefix="_skilltool_", dir=os.getcwd())
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(body)
+        env = dict(os.environ)
+        env["SIGIL_TASK"] = str(task or "")
+        # A nested run must not inherit the manifest, or skill A calling skill B
+        # hands B the same shelf and the depth is bounded only by the timeout.
+        env.pop("SIGIL_SKILL_TOOLS", None)
+        env.pop("AGIR_PROGRESS", None)   # the parent's node trace is not the child's
+        p = subprocess.run([sys.executable, "run", path], cwd=os.getcwd(), env=env,
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "[skill %s timed out after %ss]" % (mod, timeout)
+    except Exception as e:
+        return "[skill %s failed to start: %s]" % (mod, str(e)[:200])
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+    out = p.stdout or ""
+    if marker in out:
+        return out.split(marker, 1)[1].strip() or "[skill %s produced no report]" % mod
+    return "[skill %s failed: %s]" % (mod, (p.stderr or out)[-400:])
+
+def _skill_tools():
+    global _SKILL_TOOL_CACHE
+    if _SKILL_TOOL_CACHE is not None:
+        return list(_SKILL_TOOL_CACHE)
+    _SKILL_TOOL_CACHE = []
+    raw = os.environ.get("SIGIL_SKILL_TOOLS", "")
+    if not raw:
+        return []
+    try:
+        from jaclang.byllm.lib import Tool
+        rows = _json.loads(raw)
+    except Exception:
+        return []
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            name = str(row["name"])
+            mod = str(row["module"])
+            desc = str(row.get("description") or name)
+
+            def _mk(_mod, _name, _desc):
+                def _call(task=""):
+                    return _tui_tool(_name, [("task", task)], lambda t=task: _skill_run(_mod, t))
+                _call.__name__ = _name
+                _call.__qualname__ = _name
+                _call.__annotations__ = {"task": str, "return": str}
+                _call.__doc__ = _desc
+                _call._jac_semstr = _desc
+                _call._jac_semstr_inner = {"task": "The sub-task to hand to this skill, in plain language."}
+                return Tool(func=_call)
+
+            _SKILL_TOOL_CACHE.append(_mk(mod, name, desc))
+        except Exception:
+            continue
+    return list(_SKILL_TOOL_CACHE)
+
 def _scoped_author_run(context, out_path=None, tries=3):
     # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
     # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
