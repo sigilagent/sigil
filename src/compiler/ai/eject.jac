@@ -110,6 +110,13 @@ def copy_skill_sidecars(skill_dir: str, out_path: str) -> list[str] {
             if (rd == ".") and (str(f) in _SIDECAR_SKIP) { continue; }
             src = os.path.join(dpath, str(f));
             dst = os.path.join(dest, rel);
+            # Never let a sidecar land ON the artifact. Guarding the SOURCE
+            # only catches copying a file onto itself; the real hazard is a
+            # DIFFERENT file whose destination is the ejected path — a skill
+            # directory that ships its own `agent.jac` silently overwrote the
+            # program that was just compiled, so the eject was the skill's
+            # hand-written agent rather than sigil's output.
+            if os.path.abspath(dst) == os.path.abspath(out_path) { continue; }
             if os.path.abspath(src) == os.path.abspath(out_path) { continue; }
             try {
                 os.makedirs(os.path.dirname(dst), exist_ok=True);

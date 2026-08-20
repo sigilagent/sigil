@@ -110,3 +110,34 @@ test "sidecar copying never fails a compile" {
     assert copy_skill_sidecars("", ep) == [];
     assert copy_skill_sidecars(os.path.join(out, "does-not-exist"), ep) == [];
 }
+
+
+test "a sidecar never overwrites the artifact it ships beside" {
+    import os;
+    import shutil;
+    import tempfile;
+    # A skill directory that ships its own agent.jac — the shape that silently
+    # replaced the compiled program with the skill's hand-written one.
+    sd = tempfile.mkdtemp(prefix="sigil_skill_");
+    od = tempfile.mkdtemp(prefix="sigil_out_");
+    try {
+        with open(os.path.join(sd, "SKILL.md"), "w") as f { f.write("# skill\n"); }
+        with open(os.path.join(sd, "agent.jac"), "w") as f { f.write("HAND WRITTEN, NOT THE COMPILER OUTPUT"); }
+        os.makedirs(os.path.join(sd, "scripts"), exist_ok=True);
+        with open(os.path.join(sd, "scripts", "check.py"), "w") as f { f.write("print(1)\n"); }
+
+        ep = os.path.join(od, "agent.jac");
+        with open(ep, "w") as f { f.write("COMPILED OUTPUT"); }
+
+        copied = copy_skill_sidecars(sd, ep);
+
+        with open(ep) as f { got = f.read(); }
+        assert got == "COMPILED OUTPUT", "sidecar copy clobbered the ejected program: " + got[:60];
+        assert "agent.jac" not in copied, "agent.jac must not be copied onto the artifact: " + str(copied);
+        # the real sidecars still ship
+        assert os.path.exists(os.path.join(od, "scripts", "check.py")), "sidecars were not copied at all";
+    } finally {
+        shutil.rmtree(sd, ignore_errors=True);
+        shutil.rmtree(od, ignore_errors=True);
+    }
+}
