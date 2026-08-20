@@ -788,7 +788,10 @@ def _body_lines(body: str, params: list) -> list {
         script = "\n".join(cmds);
         out.append("    # non-Python tool body (shell) -> subprocess");
         out.append("    import subprocess as _sp");
-        out.append("    _r = _sp.run(" + repr(script) + ", shell=True, capture_output=True, text=True)");
+        # executable=bash: shell=True would otherwise hand a bash-drafted
+        # script to dash, which fails on the first "(" with exit 2
+        out.append("    _r = _sp.run(" + repr(script) + ", shell=True, capture_output=True,"
+                   + " text=True, executable=(__import__('shutil').which('bash') or '/bin/sh'))");
         out.append("    return _r.stdout if _r.returncode == 0 else _r.stderr");
     } else {
         out.append("    # non-Python tool body (CSS/JSON/template) -> returned string");

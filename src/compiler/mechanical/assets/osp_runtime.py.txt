@@ -398,15 +398,39 @@ def _run_cmd(prefix, args):
             extra.append(shlex.quote(str(v)))
     if extra:
         cmd = cmd + " " + " ".join(extra)
+    # Debian images ship python3 with no `python` alias, but a model drafts
+    # "python x.py" by habit — the artifact then dies with
+    # "[Errno 2] No such file or directory: 'python'", which reads as a task
+    # failure. Rewrite only the COMMAND WORD, and only when python is absent.
+    cmd = _py_fix(cmd)
     _tui_sub("$", _C, _fmt_val(cmd, 88))
     try:
-        r = _subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
+        # `shell=True` runs /bin/sh — dash on Debian/Ubuntu — while a model drafts
+        # BASH. dash then dies on the first "(" with exit 2 and the artifact reports
+        # a failure that looks like a task error. Observed live on the SkillsBench
+        # geospatial skill: three identical `/bin/sh: Syntax error: "(" unexpected`
+        # before the agent gave up. Name the interpreter instead of inheriting it.
+        r = _subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                            timeout=180, executable=_SHELL)
         out = ((r.stdout or "") + (r.stderr or "")).strip()
         _tui_sub("↳", _D, _fmt_val(out), "exit %s" % r.returncode)
         return out
     except Exception as e:
         _tui_sub("✗", "\033[31m", _fmt_val(e, 56))
         return "[cmd %s failed: %s]" % (cmd[:120], str(e)[:200])
+
+_HAS_PY = __import__("shutil").which("python") is not None
+_PY3 = __import__("shutil").which("python3") or "python3"
+
+def _py_fix(cmd):
+    if _HAS_PY:
+        return cmd
+    import re as _re
+    # command position only: start of string, or after ; | && || ( newline
+    return _re.sub(r"(?:(?<=^)|(?<=[;|&(\n]))(\s*)python(?=\s)",
+                   lambda m: m.group(1) + _PY3, cmd)
+
+_SHELL = __import__("shutil").which("bash") or "/bin/sh"
 
 _re_num = __import__("re").compile(r"-?\d+(?:\.\d+)?")
 
