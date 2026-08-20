@@ -587,6 +587,33 @@ def _unwrap(ret, key, idx=0, single=True):
         return "" if ret is None else ret
     return ""
 
+def _as_param(raw, default):
+    """Bind a caller-supplied param to a typed walker carry.
+
+    The MCP inputSchema declares every key as a string, so a list/dict/int input
+    arrives as JSON text. Non-str `role: input` carries used to be dropped from
+    the param surface entirely and kept their type defaults -- the walker then
+    ran on [] / {} / 0 and, because empty-input checks pass vacuously, reported
+    success while doing nothing.
+    """
+    if raw is None or raw == "":
+        return default
+    if not isinstance(raw, str):
+        return raw
+    import json as _pj
+    try:
+        v = _pj.loads(raw)
+    except Exception:
+        return default
+    if isinstance(default, bool):
+        return bool(v)
+    if isinstance(default, (int, float)) and isinstance(v, (int, float)) and not isinstance(v, bool):
+        return type(default)(v)
+    if isinstance(default, (list, dict)):
+        return v if isinstance(v, type(default)) else default
+    return v
+
+
 def _outname(task, fallback="output.txt"):
     # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
@@ -605,10 +632,14 @@ def _outname(task, fallback="output.txt"):
             want = ext
             break
     cands = []
-    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    # No leading \b on the capture: a word boundary can never precede the '/' of
+    # an absolute path, so the match started one char late and "/app/out/x.json"
+    # came back as "app/out/x.json" -- then written, relative to cwd, to
+    # /app/app/out/x.json. _inname below already carries this stem.
+    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.[A-Za-z0-9]{1,5})\b', t, re.I)
     if m:
         cands.append(m.group(1))
-    cands += re.findall(r'\b([A-Za-z0-9_-]+\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js))\b', t, re.I)
+    cands += re.findall(r'([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js|npy|npz|nc|parquet|h5))\b', t, re.I)
     if want:
         for c in cands:
             ce = c.rsplit(".", 1)[-1].lower()
