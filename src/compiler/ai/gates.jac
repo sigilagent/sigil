@@ -592,6 +592,44 @@ def gate_type_unification(ir_text: str) -> list[str] {
             }
         }
     }
+    # -- every node must be reachable from the entry --
+    # `edges` is the walker's itinerary: a node no edge path reaches is authored,
+    # lowered, counted as a realization by the faithfulness closure, and then
+    # never executed. Measured on a 33-skill sweep: mcp-builder authored 37
+    # nodes and 6 edges, so 30 nodes — every MCP mandate the judge scored as
+    # MISSED — sat unreachable while a 7-node fragment ran to TERMINAL and
+    # reported success. Graphs carrying unreachable nodes averaged AMC2 52
+    # against 62 for fully reachable ones.
+    nlist: list = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict) and n.get("id")];
+    if nlist {
+        ids: list[str] = [str(n.get("id")) for n in nlist];
+        adj: dict = {};
+        for e in list(ir.get("edges") or []) {
+            if not isinstance(e, dict) { continue; }
+            a = str(e.get("from") or ""); b = str(e.get("to") or "");
+            if a and b { adj.setdefault(a, []).append(b); }
+        }
+        entry: str = str(ids[0]);
+        seen: dict = {};
+        stack: list[str] = [entry];
+        while stack {
+            cur: str = str(stack.pop());
+            if cur in seen { continue; }
+            seen[cur] = True;
+            nxts: list[str] = [str(x) for x in list(adj.get(cur, []))];
+            for nxt in nxts { stack.append(str(nxt)); }
+        }
+        unreached: list[str] = [i for i in ids if i not in seen];
+        if unreached {
+            shown: str = ", ".join([str(x) for x in unreached[:6]]);
+            if len(unreached) > 6 { shown = shown + ", ..."; }
+            n_un: int = len(unreached); n_all: int = len(ids);
+            issues.append("G9: " + str(n_un) + " of " + str(n_all)
+                + " nodes are unreachable from entry '" + entry + "' (" + shown + ") — no edge path"
+                + " reaches them, so they are authored and lowered but never execute. Wire them into"
+                + " the edge chain, or remove them and the obligations they claim");
+        }
+    }
     return issues;
 }
 
