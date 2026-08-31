@@ -81,3 +81,30 @@ test "log_error appends context + traceback to the sigil error log" {
         else { _ = os.environ.pop("SIGIL_HOME", None); }
     }
 }
+
+test "a missing Claude CLI is an install/PATH problem, not an unavailable model" {
+    # `claude` absent raises FileNotFoundError, and lowercased
+    # "filenotfounderror" CONTAINS "notfounderror" — so the generic 404 branch
+    # used to match first and blame the model, advising `sigil models set`,
+    # which cannot fix a PATH.
+    e = ("FileNotFoundError: [Errno 2] No such file or directory: 'claude'\n"
+         + "src.sigil_claude_cc.ClaudeCCError: `claude` not found on PATH — "
+         + "install Claude Code or set SIGIL_CLAUDE_BIN");
+    msg = friendly_llm_error(e, "claude-cc/opus", "frontier");
+    assert "Claude Code CLI isn't installed" in msg;
+    assert "SIGIL_CLAUDE_BIN" in msg;
+    assert "isn't available on this provider" not in msg;
+}
+
+test "a session limit reports when it resets, not just 'try again'" {
+    # The reset time is the only actionable part and was reaching the error log
+    # while stderr said only "wait a moment".
+    e = ("claude-cc: the CLI failed (429): You've hit your session limit · "
+         + "resets 11:20am (America/Detroit)");
+    msg = friendly_llm_error(e, "claude-cc/opus", "frontier");
+    assert "session limit" in msg;
+    assert "11:20am" in msg;
+    # an ordinary rate limit keeps the generic sentence
+    r = friendly_llm_error("litellm.RateLimitError: 429 slow down", "gpt-5");
+    assert "rate-limiting or overloaded" in r;
+}

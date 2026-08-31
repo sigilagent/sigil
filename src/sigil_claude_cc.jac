@@ -167,6 +167,13 @@ def auth_status() -> dict:
     and records the answer in ~/.claude.json. Returns
     {"mode": "subscription"|"api-key"|"none"|"unknown", "account": str}.
     """
+    # A long-lived token from `claude setup-token` IS a subscription credential,
+    # but it never writes `oauthAccount` to ~/.claude.json — so a headless box
+    # (CI, a server, any machine set up without an interactive browser login)
+    # was told "this machine has none" while `claude -p` worked there perfectly.
+    # The token is what the child is actually billed against, so trust it.
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return {"mode": "subscription", "account": "token"}
     try:
         with open(_config_path()) as f:
             cfg = json.load(f)
