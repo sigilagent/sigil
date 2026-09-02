@@ -283,6 +283,24 @@ def gate_env_binding(ir_text: str) -> list[str] {
         issues.append("G7: tool '" + str(kv[0]) + "' reads process IO (" + str(kv[1])
             + ") — a compiled tool receives inputs via its params, not argv/stdin. Re-author the body.");
     }
+    # input provenance, same family: a missing external artifact must reach the
+    # graph as a ROUTE, not as an exception that unwinds the walker before any
+    # slot runs (caught live: brand-guidelines scored 0 across 27 cells because
+    # a fabricated deck path was opened unguarded).
+    fab = mf.get("fabricated_path") or {};
+    for kv2 in fab.items() {
+        issues.append("G7: tool '" + str(kv2[0]) + "' invents a default input path ('"
+            + str(kv2[1]) + "') when its lookup fails — that turns 'no input' into 'wrong input', "
+            + "which the graph cannot tell from success. Return an empty/None sentinel and let a "
+            + "ROUTE branch on it.");
+    }
+    ung = mf.get("unguarded_read") or {};
+    for kv3 in ung.items() {
+        issues.append("G7: tool '" + str(kv3[0]) + "' opens an external artifact ("
+            + str(kv3[1]) + ") with no existence check or try — a missing file raises and takes "
+            + "the walker down before any slot runs. Guard the read and report absence so a ROUTE "
+            + "can handle it.");
+    }
     return issues;
 }
 
