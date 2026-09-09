@@ -29,6 +29,8 @@ import from .spec_loop { RuleSet }
 import from .ir_views { NodeType, Owner, StructCov }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle }
+# same-package import; report.jac pulls in only .ir_views, so no cycle.
+import from .report { gate_enabled }
 
 def _jac_bin() -> str {
     env = os.environ.get("SIGIL_JAC", "");
@@ -172,6 +174,7 @@ glob DET_MAX_MANDATES: int = 6;
 
 def det_overloaded(wf: WorkflowView) -> list[str] {
     out: list[str] = [];
+    if not gate_enabled("G12") { return out; }
     for n in wf.nodes {
         if n.owner != Owner.MODEL { continue; }
         k = len(n.traces_to);
@@ -652,7 +655,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
     # reported success. Graphs carrying unreachable nodes averaged AMC2 52
     # against 62 for fully reachable ones.
     nlist: list = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict) and n.get("id")];
-    if nlist {
+    if nlist and gate_enabled("G9_REACH") {
         ids: list[str] = [str(n.get("id")) for n in nlist];
         adj: dict = {};
         for e in list(ir.get("edges") or []) {

@@ -118,6 +118,13 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
         AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven[:6])
     ]);
     assert det_overloaded(at_limit) == [];
+
+    # On by default, with the same documented way out every gate has.
+    import os;
+    os.environ["SIGIL_GATE_G12"] = "0";
+    assert det_overloaded(over) == [];
+    del os.environ["SIGIL_GATE_G12"];
+    assert len(det_overloaded(over)) == 1;
 }
 
 test "G12-DET leaves code nodes and decomposed graphs alone" {
@@ -626,6 +633,28 @@ test "G9 flags nodes no edge path can reach" {
     assert "2 of 4 nodes" in hits[0], hits[0];
     assert "build_project" in hits[0], hits[0];
     assert hits[0].startswith("G9: "), hits[0];
+}
+
+
+test "the reachability gate is on by default and can be switched off" {
+    import os;
+    # Default ON: a gate nobody remembers to enable is a gate that is off.
+    assert [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+
+    # Single-gate kill switch, for a corpus the gate is wrong about.
+    os.environ["SIGIL_GATE_G9_REACH"] = "0";
+    assert not [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATE_G9_REACH"];
+
+    # The list form turns several off in one variable.
+    os.environ["SIGIL_GATES_OFF"] = "G12, G9_REACH";
+    assert not [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATES_OFF"];
+
+    # ...and an unrelated name in that list leaves this gate alone.
+    os.environ["SIGIL_GATES_OFF"] = "G12";
+    assert [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATES_OFF"];
 }
 
 

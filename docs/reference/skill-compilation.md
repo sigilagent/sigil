@@ -65,6 +65,27 @@ diagnostics attached rather than a bare error.
 `--strict` (or `SIGIL_STRICT=1`) restores fail-on-any-finding, which is what you
 want in CI.
 
+### Turning a gate off
+
+Every gate is **on by default** — one you have to remember to enable is one that
+is off. But a gate meets corpora its author never saw, and when it is wrong the
+cost is a skill that will not compile at all, so each has a way out that does not
+involve editing the compiler:
+
+```bash
+SIGIL_GATE_G12=0                  # turn one gate off
+SIGIL_GATE_G9_REACH=0             # ...including one check inside a shared id
+SIGIL_GATES_OFF=G12,G9_REACH      # or several, in one variable
+```
+
+Names are gate ids (`G12`) or `id_SUFFIX` where one id carries several distinct
+checks (`G9_REACH` is the reachability check inside G9). Values `0`, `false`,
+`no` and `off` all disable; anything else, including unset, leaves the gate on.
+
+Reach for these when a gate is demonstrably wrong about your corpus — not to get
+a compile through. A disabled gate does not make the shape it rejects lowerable;
+it only stops the compiler telling you about it.
+
 ## Linting a skill first
 
 An interactive compile offers to lint before it compiles. The lint reuses the
