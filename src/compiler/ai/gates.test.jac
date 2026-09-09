@@ -101,6 +101,60 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }
 
+test "G12-DET flags a mega-slot, counting mandates per model node" {
+    # The case this gate exists for: ONE owner=model node citing many mandates.
+    # It lowers to a single `by llm` slot, so no mandate in it can be certified
+    # on its own. Seven is over the limit; six is not.
+    seven = [f"r{i}" for i in range(7)];
+    over = WorkflowView(nodes=[
+        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven)
+    ]);
+    hits = det_overloaded(over);
+    assert len(hits) == 1;
+    assert "author_doc" in hits[0];
+    assert "folds 7 mandates" in hits[0];
+
+    at_limit = WorkflowView(nodes=[
+        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven[:6])
+    ]);
+    assert det_overloaded(at_limit) == [];
+}
+
+test "G12-DET leaves code nodes and decomposed graphs alone" {
+    # owner=code carries no slot to overload — a checklist gate legitimately
+    # cites every element it verifies.
+    gated = WorkflowView(nodes=[
+        AgirNode(id="check_all", ntype=NodeType.CODE, owner=Owner.CODE,
+                 traces_to=[f"r{i}" for i in range(20)])
+    ]);
+    assert det_overloaded(gated) == [];
+
+    # The shape the gate is steering toward: one node per mandate.
+    split = WorkflowView(nodes=[
+        AgirNode(id=f"s{i}", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=[f"r{i}"])
+        for i in range(20)
+    ]);
+    assert det_overloaded(split) == [];
+}
+
+test "G12-DET fires where the monolithic bucket cannot see" {
+    # Regression: counting StructCov's `monolithic` bucket missed this entirely.
+    # A mega-slot node HAS a dedicated slot def, so every mandate on it grades
+    # `slotted` and the monolithic bucket comes back empty — while G12 fires.
+    rules = [Rule(id=f"r{i}", quote="q", kind=RuleKind.STEP, modality=Modality.MANDATORY)
+             for i in range(7)];
+    spec = RuleSet(rules=rules);
+    wf = WorkflowView(nodes=[
+        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+                 traces_to=[f"r{i}" for i in range(7)])
+    ]);
+    src = "can n_author_doc with X entry {}\ndef author_doc(task: str) -> str by llm;";
+    sc = gate_struct_cov(spec, wf, src);
+    assert sc.monolithic == [];
+    assert len(sc.slotted) == 7;
+    assert len([i for i in sc.issues if i.startswith("G12:")]) == 1;
+}
+
 test "G5 does not score a HOLLOW code station as gated" {
     # The ability exists but its body is only the marker the mechanical half
     # emits when nothing bound a tool: the walker visits the station and does

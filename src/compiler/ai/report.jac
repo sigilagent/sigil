@@ -27,7 +27,7 @@ import from .ir_views { LiftResult }
 # in the lift — warn by default, hard only when the embedder opts in.
 glob _SEVERITY: dict = {
     "compile": "fatal",
-    "G3": "error", "G6": "error", "G8": "error", "G9": "error",
+    "G3": "error", "G6": "error", "G8": "error", "G9": "error", "G12": "error",
     "G1": "warn", "G5": "warn", "G7": "warn", "G10": "warn", "G11": "warn",
     "spec": "warn", "spine": "warn", "assemble": "warn",
 };
