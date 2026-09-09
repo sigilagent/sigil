@@ -76,6 +76,29 @@ def status_of(compiled: bool, findings: list, fixes: list, repairs: list) -> str
     return "clean";
 }
 
+# Per-gate kill switch, DEFAULT ON. A gate exists to reject a shape the compiler
+# cannot lower correctly, so the useful default is always "enforced" — a gate you
+# have to remember to turn on is a gate that is off. But a new gate meets corpora
+# its author never saw, and the cost of being wrong there is a skill that will not
+# compile at all, so every gate keeps a documented way out that does not involve
+# editing the compiler:
+#
+#   SIGIL_GATE_G9_REACH=0        turn one gate off
+#   SIGIL_GATES_OFF=G9_REACH,G12 turn several off in one variable
+#
+# Names are gate ids (G12) or id_suffix for a distinct check living inside a
+# shared gate id (G9_REACH). Accepts 0/false/no/off, case-insensitive.
+def gate_enabled(name: str) -> bool {
+    n = str(name).strip().upper();
+    one = str(os.environ.get("SIGIL_GATE_" + n, "")).strip().lower();
+    if one in ["0", "false", "no", "off"] { return False; }
+    off = str(os.environ.get("SIGIL_GATES_OFF", ""));
+    for tok in re.split(r"[,\s]+", off) {
+        if str(tok).strip().upper() == n { return False; }
+    }
+    return True;
+}
+
 def strict_mode() -> bool {
     return os.environ.get("SIGIL_STRICT", "") not in ["", "0", "false"];
 }

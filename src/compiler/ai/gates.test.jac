@@ -118,6 +118,13 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
         AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven[:6])
     ]);
     assert det_overloaded(at_limit) == [];
+
+    # On by default, with the same documented way out every gate has.
+    import os;
+    os.environ["SIGIL_GATE_G12"] = "0";
+    assert det_overloaded(over) == [];
+    del os.environ["SIGIL_GATE_G12"];
+    assert len(det_overloaded(over)) == 1;
 }
 
 test "G12-DET leaves code nodes and decomposed graphs alone" {
@@ -573,4 +580,89 @@ edges:
     } finally {
         os.environ["SIGIL_INFL_CAP"] = "12";
     }
+}
+
+
+# ===========================================================================
+# `edges` is the walker's itinerary. A node no edge path reaches is authored,
+# lowered, and counted as a realization — then never executed. Observed live:
+# mcp-builder authored 37 nodes and 6 edges, so 30 nodes (every MCP mandate the
+# judge scored MISSED) sat unreachable while a 7-node fragment ran to TERMINAL
+# and reported success.
+# ===========================================================================
+
+glob UNREACHABLE_IR: str = """---
+name: builder
+description: build a thing
+---
+agir_version: 0.1
+walker:
+  name: builder_agent
+  carries:
+    task: {type: str, role: input, doc: user task}
+nodes:
+  - id: draft
+    type: GEN-RAW
+    owner: model
+    doc: Draft the answer.
+    traces_to: [r1]
+  - id: done
+    type: TERMINAL
+    owner: code
+    doc: Report.
+    traces_to: []
+  - id: build_project
+    type: ACT
+    owner: code
+    doc: Run npm run build to verify compilation.
+    traces_to: [r2]
+  - id: review_errors
+    type: GEN-RAW
+    owner: model
+    doc: Review for consistent error handling.
+    traces_to: [r3]
+edges:
+  - {from: draft, to: done}
+""";
+
+
+test "G9 flags nodes no edge path can reach" {
+    issues = gate_type_unification(UNREACHABLE_IR);
+    hits = [i for i in issues if "unreachable from entry" in i];
+    assert len(hits) == 1, "expected one reachability finding, got: " + str(issues);
+    assert "2 of 4 nodes" in hits[0], hits[0];
+    assert "build_project" in hits[0], hits[0];
+    assert hits[0].startswith("G9: "), hits[0];
+}
+
+
+test "the reachability gate is on by default and can be switched off" {
+    import os;
+    # Default ON: a gate nobody remembers to enable is a gate that is off.
+    assert [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+
+    # Single-gate kill switch, for a corpus the gate is wrong about.
+    os.environ["SIGIL_GATE_G9_REACH"] = "0";
+    assert not [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATE_G9_REACH"];
+
+    # The list form turns several off in one variable.
+    os.environ["SIGIL_GATES_OFF"] = "G12, G9_REACH";
+    assert not [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATES_OFF"];
+
+    # ...and an unrelated name in that list leaves this gate alone.
+    os.environ["SIGIL_GATES_OFF"] = "G12";
+    assert [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
+    del os.environ["SIGIL_GATES_OFF"];
+}
+
+
+test "a fully wired graph raises no reachability finding" {
+    ir = UNREACHABLE_IR.replace(
+        "edges:\n  - {from: draft, to: done}",
+        "edges:\n  - {from: draft, to: build_project}\n"
+        "  - {from: build_project, to: review_errors}\n"
+        "  - {from: review_errors, to: done}");
+    assert not [i for i in gate_type_unification(ir) if "unreachable" in i], str(gate_type_unification(ir));
 }

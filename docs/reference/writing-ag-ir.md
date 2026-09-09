@@ -405,7 +405,8 @@ tribunal. Only G4 can make a lift `failed`; the rest attach findings.
 | **G6** HIL | are human-feedback routes `owner: code` with guards? | error |
 | **G7** env | do tool imports/binaries resolve in this runtime? | warn (advisory; `SIGIL_G7_HARD=1` to harden) |
 | **G8** concurrency | is any claimed parallelism real? | error (false parallelism); opportunities are advisory |
-| **G9** type unification | do carry types match the tools that consume them? | error |
+| **G9** type unification | do carry types match the tools that consume them? — and is every node reachable from the entry? | error |
+| **G12** determinization | does any one `owner: model` node fold more than six mandates into a single slot? | error |
 
 `error` findings are runtime crashes or violated mandates riding a green compile —
 fix them. `warn` findings are faithfulness/quality notes — worth addressing, but
