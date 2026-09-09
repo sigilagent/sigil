@@ -48,11 +48,23 @@ jobs:
         # shared runner IPs the unauthenticated limit (60/hr) causes flaky
         # failures. It honors GITHUB_TOKEN (5000/hr) — pass it, and retry for
         # plain network flakes.
+        #
+        # PINNED, deliberately. This used to install whatever was newest, which
+        # made every PR's CI depend on an upstream release nobody here chose. jac
+        # v0.37 removed `[scale.microservices]` from jac.toml and turned it into a
+        # hard config error, so `jac install` began exiting 2 before a single test
+        # ran — on branches that had touched nothing near it. Tracking latest also
+        # means the break lands on whoever pushes next rather than on whoever is
+        # ready to handle it. Upgrading is now an explicit commit that moves this
+        # number and carries the migration with it (see JAC_VERSION below).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Last version this tree is known green on. Bump WITH the migration.
+          JAC_VERSION: "0.36.1"
         run: |
           for i in 1 2 3; do
-            curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash && break
+            curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
+              | bash -s -- --version "$JAC_VERSION" && break
             echo "install attempt $i failed; retrying in $((i*10))s..."
             sleep $((i*10))
           done
