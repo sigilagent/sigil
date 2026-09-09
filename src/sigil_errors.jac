@@ -112,6 +112,17 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
                 + "top-level [byllm] section that turns jac's `llm` capability on)."
                 + hint);
     }
+    # Before the 404 branch: a missing `claude` binary raises FileNotFoundError,
+    # and "filenotfounderror" contains "notfounderror" — so the generic branch
+    # below claimed the MODEL was unavailable when the CLI simply was not on
+    # PATH. That misdirects to `sigil models set` for an install/PATH problem,
+    # which is unfixable there. Most specific signature wins.
+    if ("not found on path" in low) or ("install claude code" in low)
+            or ("sigil_claude_bin" in low) {
+        return ("the Claude Code CLI isn't installed (or not on PATH) — install it, "
+                + "point SIGIL_CLAUDE_BIN at the binary, or run without --claude mode."
+                + hint);
+    }
     if (("404" in low) or ("not_found" in low) or ("notfounderror" in low)
             or ("does not exist" in low) or ("may not exist" in low)) {
         return ("model '" + name + "' isn't available on this provider — it may be "
@@ -125,6 +136,14 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
     }
     if (("429" in low) or ("rate limit" in low) or ("ratelimit" in low)
             or ("quota" in low) or ("overloaded" in low) or ("529" in low)) {
+        # A subscription session limit names the time it resets. That is the one
+        # thing the user can act on ("wait until 11:20am" vs "wait a moment"),
+        # and it was reaching the error log while stderr said only "try again".
+        rs = re.search(r"(?i)(session limit[^.\n]*)", s);
+        if rs {
+            return ("the provider limited this session — " + str(rs.group(1)).strip()
+                    + "." + hint);
+        }
         return ("the provider is rate-limiting or overloaded right now — wait a moment "
                 + "and try again." + hint);
     }
