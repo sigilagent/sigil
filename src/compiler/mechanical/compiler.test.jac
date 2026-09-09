@@ -526,10 +526,15 @@ test "a ROUTE guard whose subject is no carry stays permissive" {
 # Carries the walker produces for itself still stay out of the spawn.
 test "spawn binding carries every caller input, typed, and skips produced ones" {
     src = transpile_ir(MIXED_INPUT_IR, "mixed");
+    # The decoded value is wrapped in the DECLARED jac type: `_as_param` is
+    # untyped python, so assigning it straight to a typed walker carry checks as
+    # <Unknown> and the module fails to compile (error[E1053]). A skill could
+    # reach FAITHFUL at the gate and still produce no artifact.
     assert ("spawn MixedAgent(task=task, src_path=str(params.get('src_path', task)),"
-            + " retries=_as_param(params.get('retries', ''), 0))") in src;
+            + " retries=int(_as_param(params.get('retries', ''), 0)))") in src;
     assert "retries=task" not in src;      # int input: the task text is not an int
     assert "retries=str(" not in src;      # nor a caller param bound as str
+    assert "retries=bool(" not in src;     # the cast follows the declared type
     assert "seen=task" not in src;         # produced by peek_it, not by the caller
     assert "seen=str(" not in src;
     assert "seen=_as_param" not in src;
