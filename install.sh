@@ -44,11 +44,20 @@ have() { command -v "$1" >/dev/null 2>&1; }
 printf '\n%s  ◆ Sigil installer%s\n\n' "$P" "$D"
 
 # ---- 1. native jac runtime ---------------------------------------------------
+# PINNED to the jac this release is known to work against. Unpinned, the line
+# below installed whatever jac had published most recently, which is a moving
+# dependency on someone else's release schedule: jac v0.37 made the
+# `[scale.microservices]` table in jac.toml a hard config error, so every fresh
+# Sigil install after that release provisioned a runtime its own jac.toml could
+# not parse. Bump this WITH the migration, never ahead of it.
+JAC_VERSION="${JAC_VERSION:-0.36.1}"
+
 if have jac; then
   info "Found jac: $(jac --version 2>/dev/null | head -1)"
 else
-  info "Installing the native jac runtime…"
-  curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash \
+  info "Installing the native jac runtime (v${JAC_VERSION})…"
+  curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
+    | bash -s -- --version "$JAC_VERSION" \
     || die "jac install failed. See https://www.jac-lang.org for manual instructions."
   export PATH="$HOME/.local/bin:$PATH"
 fi
@@ -112,8 +121,21 @@ fi
 # a dependency added there but missed here breaks that feature on a fresh install
 # (this is exactly how `sigil chat` shipped broken with "No module named 'rich'").
 info "Provisioning dependencies (LLM runtime, chat REPL, everything jac.toml declares)…"
-( cd "$SIGIL_HOME" && jac install >/dev/null 2>&1 ) \
-  || warn "dependency install failed — run \`jac install\` in $SIGIL_HOME before your first solve."
+# Keep the output: this is the first place an incompatible jac shows itself, and
+# discarding stderr turned "your runtime cannot parse jac.toml" into a one-line
+# warning nobody could act on. Same reasoning as the byLLM probe below — an
+# install that reports success while being unusable is the failure worth catching.
+if ! dep_log="$( cd "$SIGIL_HOME" && jac install 2>&1 )"; then
+  warn "dependency install failed — Sigil will not run until this is fixed:"
+  printf '%s\n' "$dep_log" | sed 's/^/    /' >&2
+  case "$dep_log" in
+    *"jac.toml is invalid"*)
+      warn "  this jac ($(jac --version 2>/dev/null | head -1)) cannot parse Sigil's jac.toml."
+      warn "  install the pinned runtime: curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version $JAC_VERSION"
+      ;;
+    *) warn "  re-run \`jac install\` in $SIGIL_HOME before your first solve." ;;
+  esac
+fi
 
 # An install that "succeeds" with no model backend is the one failure worth catching
 # here, because nothing else notices until the user's first solve. Ask byLLM directly
