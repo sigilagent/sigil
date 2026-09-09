@@ -108,3 +108,50 @@ test "preflight binds closure-visibly: artifact-local target, closure pip, hones
     assert "probed %s" in src;
     assert "python-docx" in src;
 }
+
+test "a fabricated input path and an unguarded external read are both flagged" {
+    # verbatim shape of the live fault: brand-guidelines made 0 model calls in
+    # all 27 cells across 3 models because find_deck_path fell back to a
+    # literal and inspect_deck opened it with no guard, so the walker died
+    # before its first slot and the skill scored a legitimate-looking 0.
+    ir = _ir_with_tools({
+        "find_deck_path": {
+            "sig": "(task) -> path",
+            "body": "import re\nm = re.search(r'([\\w.-]+\\.pptx)', task)\nreturn m.group(1) if m else \"presentation.pptx\""
+        },
+        "inspect_deck": {
+            "sig": "(deck_path) -> str",
+            "body": "prs = Presentation(deck_path)\nreturn str(len(prs.slides))"
+        }
+    });
+    m = extract_manifest(ir);
+    assert "find_deck_path" in m["fabricated_path"];
+    assert m["fabricated_path"]["find_deck_path"] == "presentation.pptx";
+    assert "inspect_deck" in m["unguarded_read"];
+}
+
+test "well-formed IO tools are not flagged" {
+    # negative control: a sentinel-returning resolver, an exists-guarded read,
+    # a try-wrapped read, and a read of a literal the tool just wrote.
+    ir = _ir_with_tools({
+        "resolve_input": {
+            "sig": "(task) -> path",
+            "body": "import re\nm = re.search(r'([\\w.-]+\\.docx)', task)\nreturn m.group(1) if m else \"\""
+        },
+        "read_guarded": {
+            "sig": "(p) -> str",
+            "body": "import os\nif not os.path.exists(p):\n    return ''\nreturn open(p).read()"
+        },
+        "read_try": {
+            "sig": "(p) -> str",
+            "body": "try:\n    return open(p).read()\nexcept FileNotFoundError:\n    return ''"
+        },
+        "write_then_read": {
+            "sig": "(text) -> path",
+            "body": "open(\"out.html\", \"w\").write(text)\nreturn \"out.html\""
+        }
+    });
+    m = extract_manifest(ir);
+    assert m["fabricated_path"] == {};
+    assert m["unguarded_read"] == {};
+}

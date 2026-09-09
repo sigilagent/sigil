@@ -176,7 +176,9 @@ def extract_manifest(ir: any) -> dict {
     bins: dict = {};
     stdlib = _stdlib_names();
     tools = ir.get("tools") if isinstance(ir, dict) else None;
-    if not isinstance(tools, dict) { return {"py": {}, "bin": {}}; }
+    if not isinstance(tools, dict) {
+        return {"py": {}, "bin": {}, "proc_io": {}, "unguarded_read": {}, "fabricated_path": {}};
+    }
     for kv in tools.items() {
         tname = str(kv[0]);
         t = kv[1];
@@ -205,7 +207,9 @@ def extract_manifest(ir: any) -> dict {
             }
         }
     }
-    return {"py": py, "bin": bins, "proc_io": _proc_io_tools(tools)};
+    return {"py": py, "bin": bins, "proc_io": _proc_io_tools(tools),
+            "unguarded_read": _unguarded_read_tools(tools),
+            "fabricated_path": _fabricated_path_tools(tools)};
 }
 
 # Tool bodies that read PROCESS-level IO instead of their params. A skill's
@@ -224,6 +228,62 @@ def _proc_io_tools(tools: dict) -> dict {
         if not body.strip() { continue; }
         m = re.search(r"sys\.argv|sys\.stdin|(?<![\w.])input\(\)", body);
         if m { hits[str(kv[0])] = str(m.group(0)); }
+    }
+    return hits;
+}
+
+# Tool bodies that OPEN an external artifact with no not-found route, and
+# tools that INVENT the path they hand downstream. Both turn a missing input
+# into a walker-killing exception instead of a branch (caught live:
+# brand-guidelines made 0 model calls in all 27 cells across 3 models —
+# find_deck_path fell back to the literal "presentation.pptx" and inspect_deck
+# opened it unguarded, so PackageNotFoundError killed every run before its
+# first slot, and the skill scored a legitimate-looking 0). A compiled tool
+# reports "absent" so the graph can route; it does not guess a filename.
+def _unguarded_read_tools(tools: dict) -> dict {
+    import re;
+    # opener(...) calls whose argument is a NAME (a param/carry), not a literal
+    opener = re.compile(
+        r"(?<![\w.])(?:open|Presentation|Document|load_workbook|Image\.open"
+        r"|pd\.read_\w+|json\.load|yaml\.safe_load)\s*\(\s*([A-Za-z_]\w*)\s*[,)]");
+    # any of these makes the read defensive enough to route or recover
+    guard = re.compile(
+        r"os\.path\.(?:exists|isfile)|(?<![\w.])Path\([^)]*\)\.exists\(\)"
+        r"|\.exists\(\)|(?<![\w.])try\s*:|os\.access\(");
+    hits: dict = {};
+    for kv in tools.items() {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        body = str(t.get("body") or "");
+        if not body.strip() { continue; }
+        if guard.search(body) { continue; }
+        m = opener.search(body);
+        if m { hits[str(kv[0])] = str(m.group(0)).strip(); }
+    }
+    return hits;
+}
+
+# A SENSE tool that RESOLVES a path must not manufacture one. Returning a
+# plausible literal when the lookup fails converts "no input" into "wrong
+# input", which the graph cannot distinguish from success.
+def _fabricated_path_tools(tools: dict) -> dict {
+    import re;
+    # a filename literal used as a fallback: `... else "x.ext"`, `or "x.ext"`,
+    # or a default arg `= "x.ext"` — extension list kept to real artifacts
+    fab = re.compile(
+        r"(?:else|or|=)\s*[\"\']([\w./-]+\.(?:pptx|potx|docx|xlsx|pdf|csv|json|ya?ml"
+        r"|html?|md|txt|png|jpe?g|zip))[\"\']");
+    hits: dict = {};
+    for kv in tools.items() {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        sig = str(t.get("sig") or "");
+        body = str(t.get("body") or "");
+        if not body.strip() { continue; }
+        # only tools whose job is to produce a path downstream
+        if ("path" not in sig.lower()) and ("path" not in str(kv[0]).lower()) { continue; }
+        m = fab.search(body);
+        if m { hits[str(kv[0])] = str(m.group(1)); }
     }
     return hits;
 }
