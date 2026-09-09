@@ -1396,7 +1396,7 @@ with entry:__main__ {
         if not irp {
             print("usage: gate <file.agir> [name]");
         } else {
-            import from src.compiler.ai.gates { compile_gate, gate_type_unification }
+            import from src.compiler.ai.gates { compile_gate, gate_type_unification, det_overloaded }
             with open(user_path(irp)) as f { ir_src = f.read(); }
             gname = _arg(argv, 2) if len(argv) > 2 else os.path.splitext(os.path.basename(irp))[0];
             gv = compile_gate(ir_src, gname);
@@ -1409,6 +1409,17 @@ with entry:__main__ {
             if g9 {
                 print("gate: FAILED  (G4 ok, G9-TY found " + str(len(g9)) + " issue(s))");
                 for i9 in g9 { print("  - " + str(i9)); }
+                sys.exit(1);
+            }
+            # Same helper the lift's gate battery uses, so `sigil gate` and the
+            # author loop cannot disagree about what counts as a mega-slot.
+            import from src.compiler.ai.author_direct { _views_from_ir }
+            (_wfdet, _vbdet) = _views_from_ir(ir_src);
+            _det = det_overloaded(_wfdet);
+            if _det {
+                print("gate: FAILED  (G12-DET: mega-slot lumping, "
+                      + str(len(_det)) + " node(s))");
+                for _d in _det { print("  - " + str(_d)); }
                 sys.exit(1);
             }
             print("gate: ok  (" + str(len(gv.module_src.splitlines())) + " lines lowered)");

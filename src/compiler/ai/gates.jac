@@ -156,6 +156,36 @@ def _lowered_hollow(node_id: str, module_src: str) -> bool {
     return False;
 }
 
+# G12-DET (determinization). One AG-IR node lowers to exactly ONE `by llm` slot
+# (compiler.jac emits a single `def <slot>(...) -> <ret> by llm`), so a node
+# citing N mandates asks one prompt to satisfy all N. Nothing in that slot's
+# output can be attributed back to an individual mandate, so every one of them
+# falls to the judge instead of being certified per-mandate — the shared-slot
+# miss class. Decomposition is the fix: one node per independently-checkable
+# mandate, and an owner=code gate wherever the obligation is mechanical.
+#
+# Counted per NODE, not off StructCov's monolithic bucket: a mega-slot node has
+# a dedicated slot def, so gate_struct_cov classifies all N of its mandates
+# `slotted` and the monolithic bucket stays empty on exactly the case this gate
+# exists to catch.
+glob DET_MAX_MANDATES: int = 6;
+
+def det_overloaded(wf: WorkflowView) -> list[str] {
+    out: list[str] = [];
+    for n in wf.nodes {
+        if n.owner != Owner.MODEL { continue; }
+        k = len(n.traces_to);
+        if k > DET_MAX_MANDATES {
+            out.append("G12: node '" + str(n.id) + "' folds " + str(k)
+                + " mandates into ONE owner=model slot (max " + str(DET_MAX_MANDATES)
+                + "). DECOMPOSE: give each independently-checkable mandate its own"
+                + " node; prefer an owner=code gate for mechanical ones (exact"
+                + " values, required-element checklists, format rules).");
+        }
+    }
+    return out;
+}
+
 def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructCov {
     # For each MANDATORY STEP/IO rule: how does the compiled agent realize it?
     #   gated      owner=code ability  -> guaranteed by construction
@@ -216,6 +246,9 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
             sc.issues.append("G5: rule '" + r.id + "' traced to node(s) that never lowered to an ability — structural gap");
         }
     }
+    # G12-DET: slot load is a property of the graph, not of this rule loop —
+    # see det_overloaded for why it is counted per node.
+    for _d in det_overloaded(wf) { sc.issues.append(_d); }
     return sc;
 }
 
