@@ -584,14 +584,14 @@ def setup_wizard() {
         ["persona", "In a line, how should your agent describe itself? (optional)", ""]
     ];
     for st in steps {
-        key = st[0]; question = st[1]; default = st[2];
-        hint = ("  [" + default + "]") if default else "  (optional)";
+        key = st[0]; question = st[1]; dflt = st[2];
+        hint = ("  [" + dflt + "]") if dflt else "  (optional)";
         console.print("  [cyan]" + question + "[/cyan][dim]" + hint + "[/dim]");
         val = "";
         try { val = str(prompt_text(session, "  › ")).strip(); }
         except EOFError as e { console.print(); return; }
         except KeyboardInterrupt as e { console.print(); return; }
-        if (not val) and default { val = default; }
+        if (not val) and dflt { val = dflt; }
         if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); _commit_ui(console, "setup"); }
         console.print();
     }

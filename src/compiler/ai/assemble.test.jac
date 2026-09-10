@@ -141,8 +141,8 @@ test "a HIL point injects a real ask_user gate: SENSE served + Mind autonomy bel
     spec = _spec(); wf = _wf(); vb = _views();
     # gate the model Mind node (summarize) and pretend parse waits on a human
     vb.hil = HILView(points=[
-        HILPoint(node="summarize", kind="CONFIRM", prompt="proceed with this summary?"),
-        HILPoint(node="parse", kind="INPUT", prompt="which file should I parse?")
+        HILPoint(`node="summarize", kind="CONFIRM", prompt="proceed with this summary?"),
+        HILPoint(`node="parse", kind="INPUT", prompt="which file should I parse?")
     ]);
     res = assemble(spec, wf, vb, "csv-toy");
     assert "ask_user_summarize" in res.ir_text;
@@ -156,7 +156,7 @@ test "a HIL point injects a real ask_user gate: SENSE served + Mind autonomy bel
 test "a HIL gate asks the RUNTIME question, falling back to the lifted text" {
     spec = _spec(); wf = _wf(); vb = _views();
     vb.hil = HILView(points=[
-        HILPoint(node="parse", kind="INPUT", prompt="which file should I parse?")
+        HILPoint(`node="parse", kind="INPUT", prompt="which file should I parse?")
     ]);
     res = assemble(spec, wf, vb, "csv-toy");
     v = compile_gate(res.ir_text, "csv_toy_hil_q");
@@ -172,7 +172,7 @@ test "a HIL point with no lifted prompt still asks the model's question" {
     spec = _spec(); wf = _wf(); vb = _views();
     # brainstorming's clarify loop lifts with an EMPTY prompt — the case that
     # produced a bare "INPUT:" with no question in a live run.
-    vb.hil = HILView(points=[HILPoint(node="parse", kind="INPUT", prompt="")]);
+    vb.hil = HILView(points=[HILPoint(`node="parse", kind="INPUT", prompt="")]);
     res = assemble(spec, wf, vb, "csv-toy");
     v = compile_gate(res.ir_text, "csv_toy_hil_empty");
     assert v.ok, v.errors;

@@ -315,7 +315,7 @@ def _json_text(payload: dict) -> str {
     # becomes its string form rather than an exception — an endpoint returning a
     # slightly lossy answer beats one returning a 500 because a value was a node.
     import json;
-    try { return str(json.dumps(payload, default=_stringify)); }
+    try { return str(json.dumps(payload, `default=_stringify)); }
     except Exception { return "{\"ok\": false, \"data\": null, \"error\": \"unencodable result\"}"; }
 }
 
@@ -1509,7 +1509,7 @@ with entry:__main__ {
         elif sub == "approve" { print(approve(_arg(argv, 2), _arg(argv, 3) if len(argv) > 3 else "allow-once")); }
         elif sub == "elevate" { print(approvals_elevate(int(_arg(argv, 2)) if _arg(argv, 2) else 15)); }
         elif sub == "deescalate" { print(approvals_deescalate()); }
-        elif sub == "audit" { a = elevated_audit(); if not a { print("(no elevated allows recorded)"); } for e in a { print("  " + str(e["cmd"])); } }
+        elif sub == "audit" { aud = elevated_audit(); if not aud { print("(no elevated allows recorded)"); } for e in aud { print("  " + str(e["cmd"])); } }
         elif sub == "pending" {
             pend = approvals_pending();
             if not pend { print("(nothing waiting on you)"); }

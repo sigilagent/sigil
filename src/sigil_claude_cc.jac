@@ -266,7 +266,7 @@ def _render(messages: list) -> str:
     return "\n\n".join(blocks)
 
 
-def _argv(model: str) -> list:
+def _argv(model: str) -> list[str]:
     argv = [_bin()] + list(_FLAGS)
     alias = _alias(model)
     if alias:

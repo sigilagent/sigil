@@ -71,11 +71,14 @@ default_model = "gpt-4o-mini"
 [scale.database]
 shelf_db_path = ".jac/data/sigil.db"
 
-# The client's `sv import from src.sigil` makes `jac start` auto-detect a
-# microservice split (gateway + src.sigil subprocess). Sigil is one agent on one
-# graph — force the single-process server so the Observatory and API share it.
-[scale.microservices]
-enabled = false
+# The client's `sv import from src.sigil` makes jac auto-detect a microservice
+# split (gateway + src.sigil subprocess). Sigil is one agent on one graph, so the
+# apps must stay colocated in one process or the Observatory and the API stop
+# sharing it. jac 0.37 removed `[scale.microservices] enabled = false`; the
+# replacement is the gateway's `colocate`, the same instruction to the same
+# machinery under the name it has now.
+[scale.gateway]
+colocate = true
 
 [dependencies.npm]
 react = "^18.2.0"
