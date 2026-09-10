@@ -226,7 +226,7 @@ test "G6: a model-owned route consuming human feedback is flagged; code-owned pa
     bad_route = AgirNode(id="approved_route", ntype=NodeType.ROUTE, owner=Owner.MODEL,
                          reads=["feedback"], traces_to=["r1"]);
     wf = WorkflowView(nodes=[wait_n, bad_route]);
-    vb = ViewBundle(hil=HILView(points=[HILPoint(node="wait_review", kind="APPROVE", prompt="review the spec")]));
+    vb = ViewBundle(hil=HILView(points=[HILPoint(`node="wait_review", kind="APPROVE", prompt="review the spec")]));
     issues = gate_hil_gates(wf, vb);
     assert len(issues) == 1, issues;
     assert "'approved_route'" in issues[0] and "model-owned" in issues[0];

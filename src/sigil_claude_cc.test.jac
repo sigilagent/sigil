@@ -26,7 +26,9 @@ test "_argv: a named tier passes --model, an unnamed one does not" {
 }
 
 test "_argv: the session is toolless — that is what keeps byLLM's protocol intact" {
-    argv = _argv("claude-cc/opus");
+    # jac 0.37 will not infer element types through a ::py:: return annotation,
+    # so name it here or every argv[...] below checks as Unknown.
+    argv: list[str] = [str(x) for x in _argv("claude-cc/opus")];
     spec = json.loads(argv[argv.index("--agents") + 1]);
     assert spec["sigil-slot"]["tools"] == [];
     assert argv[argv.index("--agent") + 1] == "sigil-slot";
@@ -104,7 +106,9 @@ test "_response: usage folds Claude Code's cache split into prompt_tokens" {
         # either, because litellm is what dispatches to it
         assert not install();
     } else {
-        r = _response("claude-cc/haiku", {
+        # _response builds a litellm ModelResponse in a ::py:: body, so jac has
+        # no type for it; `any` permits the attribute reads, Unknown does not.
+        r: any = _response("claude-cc/haiku", {
             "result": "hi",
             "stop_reason": "end_turn",
             "total_cost_usd": 0.5,

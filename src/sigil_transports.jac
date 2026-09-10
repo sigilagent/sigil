@@ -159,8 +159,8 @@ def normalize_inbound(kind: str, body: dict) -> dict {
     }
     if k == "whatsapp" {
         try {
-            entry = list(b.get("entry") or [])[0];
-            change = list(dict(entry).get("changes") or [])[0];
+            wh_entry = list(b.get("entry") or [])[0];
+            change = list(dict(wh_entry).get("changes") or [])[0];
             value = dict(dict(change).get("value") or {});
             msg = dict(list(value.get("messages") or [])[0]);
         } except Exception as e {

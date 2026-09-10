@@ -40,7 +40,7 @@ test "the column-aligned flow map that loses its space is not strict YAML" {
 test "the relaxer still reads it, so nothing downstream ever noticed" {
     ir = load_agir(MALFORMED_IR);
     assert ir.get("shape") == "pipeline";
-    carries = ir.get("walker").get("carries");
+    carries = dict(dict(ir.get("walker")).get("carries"));
     assert "pdftotext_command" in carries;
     assert carries["pdftotext_command"]["produced_by"] == "build_command";
 }
@@ -50,21 +50,21 @@ test "dump_agir canonicalizes it: the round-trip output IS strict YAML" {
     assert strict_parses(out);
     # and it still reads back to the same mapping
     again = load_agir(out);
-    assert again.get("walker").get("carries")["pdftotext_command"]["produced_by"] == "build_command";
+    assert dict(again.get("walker")).get("carries")["pdftotext_command"]["produced_by"] == "build_command";
 }
 
 test "the frontmatter survives the round-trip as a --- prelude" {
     out = dump_agir(load_agir(MALFORMED_IR));
     assert out.startswith("---\n");
     assert "name: pdf" in out;
-    assert load_agir(out).get("_frontmatter").get("name") == "pdf";
+    assert dict(load_agir(out).get("_frontmatter")).get("name") == "pdf";
 }
 
 test "a multi-line tool body is emitted as a | block, not an escaped one-liner" {
     out = dump_agir(load_agir(MALFORMED_IR));
     assert "body: |" in out;
     assert "\\n" not in out.split("body:")[1].split("walker:")[0];
-    body = load_agir(out).get("tools").get("build_command").get("body");
+    body = str(dict(dict(load_agir(out).get("tools")).get("build_command")).get("body"));
     assert "def build_command" in body;
     assert "\n" in body;
 }

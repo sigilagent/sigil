@@ -663,9 +663,9 @@ def gate_type_unification(ir_text: str) -> list[str] {
             a = str(e.get("from") or ""); b = str(e.get("to") or "");
             if a and b { adj.setdefault(a, []).append(b); }
         }
-        entry: str = str(ids[0]);
+        entry_id: str = str(ids[0]);
         seen: dict = {};
-        stack: list[str] = [entry];
+        stack: list[str] = [entry_id];
         while stack {
             cur: str = str(stack.pop());
             if cur in seen { continue; }
@@ -679,7 +679,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
             if len(unreached) > 6 { shown = shown + ", ..."; }
             n_un: int = len(unreached); n_all: int = len(ids);
             issues.append("G9: " + str(n_un) + " of " + str(n_all)
-                + " nodes are unreachable from entry '" + entry + "' (" + shown + ") — no edge path"
+                + " nodes are unreachable from entry '" + entry_id + "' (" + shown + ") — no edge path"
                 + " reaches them, so they are authored and lowered but never execute. Wire them into"
                 + " the edge chain, or remove them and the obligations they claim");
         }

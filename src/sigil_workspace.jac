@@ -282,8 +282,12 @@ def ws_grep(pattern: str, path: str = ".") -> str {
         fpath = str(fp);
         if len(hits) >= max_hits { break; }
         if not _is_texty(fpath) { continue; }
+        # jac 0.37 does not infer the `with ... as f` target inside a try, so
+        # `f.read()` checks as Unknown and every use of a line below it fails
+        # (E1032). Name the type once, here, instead of at each use.
+        flines: list[str] = [];
         try {
-            with open(fpath, "r") as f { flines = f.read().split(chr(10)); }
+            with open(fpath, "r") as f { flines = [str(x) for x in str(f.read()).split(chr(10))]; }
         } except Exception as e { continue; }
         i = 0;
         for ln in flines {

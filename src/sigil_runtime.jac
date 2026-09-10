@@ -122,10 +122,10 @@ def store_path() -> str {
     # whole job is answering "which agent am I talking to?" — then named a
     # store the CLI had not written to since.
     data = os.path.join(project_root(), ".jac", "data");
-    entry = Path(entry_script());
-    try { at_root = (str(entry.parent.resolve()) == str(Path(project_root()).resolve())); }
+    entry_p = Path(entry_script());
+    try { at_root = (str(entry_p.parent.resolve()) == str(Path(project_root()).resolve())); }
     except Exception as e { at_root = False; }
-    stem = project_name() if at_root else entry.stem;
+    stem = project_name() if at_root else entry_p.stem;
     return os.path.join(data, stem + ".db");
 }
 

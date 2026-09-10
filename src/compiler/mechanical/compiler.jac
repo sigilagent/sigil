@@ -23,7 +23,7 @@ import re;
 import from .toolib { builtin, builtin_names, builtin_catalogue }
 import from .envbind { extract_manifest, preflight_src }
 import from ...sigil_agir_yaml { load_agir }
-import glob;
+import glob as _glob;
 import textwrap;
 import traceback;
 import yaml;
@@ -685,8 +685,8 @@ def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any, sense: bool =
     # `if op==X: return tool()` per (tool,op) pair -> duplicate keys, only the first ran.)
     ops: list = [];
     by_op: dict = {};
-    for entry in toollist {
-        tn = entry[0]; params = entry[1]; serves = entry[2];
+    for te in toollist {
+        tn = te[0]; params = te[1]; serves = te[2];
         bound = _j(", ", [_bind_arg(p, arg_fields, sense) for p in params]);
         for op in serves {
             if str(op) not in by_op { by_op[str(op)] = []; ops.append(str(op)); }
@@ -2488,7 +2488,7 @@ def _main() {
     repo = _repo_root();
     out_dir = os.path.join(repo, "agir-playground", "generated");
     os.makedirs(out_dir, exist_ok=True);
-    irs = sorted(glob.glob(os.path.join(repo, "**", "agent*.ir"), recursive=True));
+    irs = sorted(_glob.glob(os.path.join(repo, "**", "agent*.ir"), recursive=True));
     print(f"found {len(irs)} agent.ir files\n");
     ok = 0;
     for p in irs {

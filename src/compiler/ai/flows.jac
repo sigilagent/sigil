@@ -82,7 +82,7 @@ obj KnowledgeView {
 sem KnowledgeView = "The snippet sort (A.4): a snippet whose op is a function of its inputs becomes a TOOL (verbatim body, runs unchanged); a snippet that grounds an open-ended judgment stays KNOWLEDGE a GEN node reads.";
 
 obj HILPoint {
-    has node: str = "";
+    has `node: str = "";
     has kind: str = "CONFIRM";
     has prompt: str = "";
     has traces_to: str = "";
