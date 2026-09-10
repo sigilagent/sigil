@@ -101,6 +101,39 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }
 
+test "G13 flags a slot prompt that carries its document, not its mandate" {
+    # An absolute cap, not a ratio: the property is that a slot prompt stays
+    # BOUNDED as the source skill grows. A ratio would punish a short skill for
+    # nothing -- the repo's corpus runs 8.6%-29.1% of source length and every one
+    # of those prompts is small in absolute terms.
+    small = "sem make_tldr =\n\"\"\"Summarize the document.\"\"\";";
+    assert gate_slot_prompt_bloat(small) == [];
+
+    big = "sem make_tldr =\n\"\"\"" + ("x" * (SLOT_PROMPT_CAP + 1)) + "\"\"\";";
+    hits = gate_slot_prompt_bloat(big);
+    assert len(hits) == 1, str(hits);
+    assert "make_tldr" in hits[0];
+    assert hits[0].startswith("G13: "), hits[0];
+
+    # exactly at the cap is fine -- the cap is a ceiling, not a target
+    at = "sem make_tldr =\n\"\"\"" + ("x" * SLOT_PROMPT_CAP) + "\"\"\";";
+    assert gate_slot_prompt_bloat(at) == [];
+}
+
+test "G13 is on by default and can be switched off" {
+    import os;
+    big = "sem s =\n\"\"\"" + ("x" * (SLOT_PROMPT_CAP + 1)) + "\"\"\";";
+    assert gate_slot_prompt_bloat(big);
+    os.environ["SIGIL_GATE_G13"] = "0";
+    assert gate_slot_prompt_bloat(big) == [];
+    del os.environ["SIGIL_GATE_G13"];
+    os.environ["SIGIL_GATES_OFF"] = "G13";
+    assert gate_slot_prompt_bloat(big) == [];
+    del os.environ["SIGIL_GATES_OFF"];
+    assert gate_slot_prompt_bloat(big);
+}
+
+
 test "G12-DET flags a mega-slot, counting mandates per model node" {
     # The case this gate exists for: ONE owner=model node citing many mandates.
     # It lowers to a single `by llm` slot, so no mandate in it can be certified

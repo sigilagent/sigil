@@ -97,6 +97,7 @@ involve editing the compiler:
 
 ```bash
 SIGIL_GATE_G12=0                  # turn one gate off
+SIGIL_GATE_G13=0                  # ...prompt-bloat, reachability, any of them
 SIGIL_GATE_G9_REACH=0             # ...including one check inside a shared id
 SIGIL_GATES_OFF=G12,G9_REACH      # or several, in one variable
 ```
