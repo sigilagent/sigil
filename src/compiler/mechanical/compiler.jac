@@ -1653,7 +1653,20 @@ def _emit_walker(ir: any) -> list {
         out.append(f"    has {gf2}: any = None;");
         ckeys.append(gf2);
     }
-    out.append("    has report: str = \"\";");
+    # `report` is a jac keyword (it is in RESERVED above, and a `report` statement
+    # is real syntax), so the field name needs the backtick escape. Every other
+    # `has` here goes through _safe(), which renames a reserved carry to `name_`;
+    # this one is hardcoded and so escaped in place instead — renaming it would
+    # move `agent.report`, the artifact's whole output surface. A leading backtick
+    # only, never a closing one. References stay bare: after a dot no escape is
+    # needed, so `self.report` and `agent.report` are unchanged.
+    #
+    # jac accepted the bare name through 0.36 and began rejecting it in 0.37
+    # (error[E0013]), which broke EVERY emitted artifact at once — the corpus
+    # compiled clean on the pinned toolchain and not at all on the next one. The
+    # escape is valid on 0.34.5, 0.36.1 and 0.37.10 alike, so this is safe to
+    # carry now rather than at migration time.
+    out.append("    has `report: str = \"\";");
     out.append("");
 
     route_field = "op";

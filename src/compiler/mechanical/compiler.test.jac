@@ -517,6 +517,23 @@ test "a ROUTE guard whose subject is no carry stays permissive" {
     assert "if True {" in src;
 }
 
+# `report` is a jac keyword, and the walker's report field is the one `has` the
+# emitter hardcodes rather than routing through _safe(). jac tolerated the bare
+# name through 0.36 and rejects it in 0.37 (error[E0013]) — which broke every
+# emitted artifact at once, invisibly, because the corpus type-checks clean on
+# the pinned toolchain. Pin the escape so a toolchain bump cannot reintroduce it.
+test "the emitted report field escapes its keyword name" {
+    src = transpile_ir(MIXED_INPUT_IR, "mixed");
+    assert "has `report: str" in src;
+    # the bare declaration must be gone -- but only the DECLARATION. References
+    # sit after a dot, where no escape is needed and none should appear.
+    assert "    has report: str" not in src;
+    assert "self.report" in src;
+    assert "self.`report" not in src;
+    assert "agent.`report" not in src;
+}
+
+
 # A caller-supplied carry must REACH the walker whatever its type. A non-`str`
 # `role: input` used to be dropped from the spawn entirely, so the walker kept
 # the type default and ran on [] / {} / 0 — and because empty-input checks pass
