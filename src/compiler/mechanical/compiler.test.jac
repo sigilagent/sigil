@@ -517,6 +517,111 @@ test "a ROUTE guard whose subject is no carry stays permissive" {
     assert "if True {" in src;
 }
 
+glob BUDGET_IR: str = """---
+name: researcher
+description: Look something up and summarize it.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types:
+  Verdict:
+    kind: enum
+    members: [PASS, FAIL]
+tools:
+  lookup:
+    sig: "(term: str) -> str"
+    surface: SENSE
+    doc: "Look a term up."
+    body: |
+      def lookup(term):
+          return "def of " + term
+walker:
+  name: ResearchAgent
+  carries:
+    task: {type: str, role: input}
+    summary: {type: str, produced_by: research}
+    verdict: {type: Verdict, produced_by: judge}
+    report: {type: str, produced_by: done}
+nodes:
+  - id: research
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [summary]
+    traces_to: [r1]
+    doc: "Research the task."
+    autonomy: {tools: [lookup]}
+  - id: judge
+    type: GEN-ENUM
+    owner: model
+    reads: [summary]
+    writes: [verdict]
+    traces_to: [r2]
+    doc: "Judge it."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: research, to: judge, modality: mandatory}
+  - {from: judge, to: done, modality: mandatory}
+""";
+
+
+# An uncapped slot has no reason to stop. Measured on the compliance suite, slots
+# ran to 30-70k characters and a weak model's graph stalled part-way; the nodes
+# downstream never fired and the cell scored as non-compliance rather than as the
+# stall it was. The budget comes from the slot's DECLARED output type.
+test "each slot carries an output budget sized to its declared type" {
+    src = transpile_ir(BUDGET_IR, "researcher");
+    # enum: one member name can never need more.
+    assert "def judge(summary: str) -> Verdict by llm(max_tokens=32);" in src;
+    # prose keeps the value measured sufficient on the suite, not a tidy one.
+    assert "max_tokens=2500" in src;
+    # no slot may go out uncapped
+    assert "by llm;" not in src;
+}
+
+test "the budget merges with a slot's tools instead of replacing them" {
+    # Regression: `tools` arrives as a complete "(tools=[...])", so appending a
+    # second option group would emit `by llm(tools=[..])(max_tokens=..)`. The
+    # corpus has no tool-bearing slot, so nothing else covers this path.
+    src = transpile_ir(BUDGET_IR, "researcher");
+    assert "def research(task: str) -> str by llm(tools=[lookup, *_skill_tools()], max_tokens=2500);" in src;
+    # the bug this guards is two option groups on ONE slot line, not ")(" anywhere
+    for ln in src.splitlines() {
+        if "by llm(" in ln { assert ")(" not in ln, ln; }
+    }
+}
+
+test "a fan-out worker is budgeted too" {
+    # It runs unattended, N at a time, and nothing downstream reads it but the
+    # join -- the slot most likely to ramble was the one with no cap.
+    src = transpile_ir(MIXED_INPUT_IR, "mixed");
+    assert "_worker(task: str) -> str by llm;" not in src;
+}
+
+test "SIGIL_SLOT_BUDGET=0 emits no cap at all" {
+    # 0 is byllm's own "no cap" (filter_params drops it), so the off switch does
+    # not need a second code path in the emitter.
+    import os;
+    os.environ["SIGIL_SLOT_BUDGET"] = "0";
+    src = transpile_ir(BUDGET_IR, "researcher");
+    del os.environ["SIGIL_SLOT_BUDGET"];
+    assert "max_tokens" not in src;
+    assert "by llm(tools=[lookup, *_skill_tools()]);" in src;
+}
+
+test "SIGIL_SLOT_BUDGET=<n> overrides the prose budget only" {
+    import os;
+    os.environ["SIGIL_SLOT_BUDGET"] = "600";
+    src = transpile_ir(BUDGET_IR, "researcher");
+    del os.environ["SIGIL_SLOT_BUDGET"];
+    assert "max_tokens=600" in src;
+    # a type that bounds its own output is not raised or lowered by the override
+    assert "max_tokens=32" in src;
+}
+
+
 # `report` is a jac keyword, and the walker's report field is the one `has` the
 # emitter hardcodes rather than routing through _safe(). jac tolerated the bare
 # name through 0.36 and rejects it in 0.37 (error[E0013]) — which broke every
@@ -795,16 +900,16 @@ test "an untyped carry takes its type from the tool that consumes it" {
     src = transpile_ir(CONSUMER_TYPE_IR, "header_consumer");
     # the slot must produce what the consumer reads, parameterized so byLLM can
     # schematize it (a bare `dict` raises "Untyped dict is not supported").
-    assert "def fill_fields(task: str) -> dict[str, str] by llm;" in src;
-    assert "-> str by llm;" not in src;
+    assert "def fill_fields(task: str) -> dict[str, str] by llm(max_tokens=" in src;
+    assert "-> str by llm(" not in src;
 }
 
 test "a bare dict/list slot return is widened so byLLM can schematize it" {
     ir = CONSUMER_TYPE_IR.replace("      type: any\n      produced_by: fill_fields",
                                   "      type: dict\n      produced_by: fill_fields");
     src = transpile_ir(ir, "header_bare_dict");
-    assert "-> dict[str, str] by llm;" in src;
-    assert "-> dict by llm;" not in src;
+    assert "-> dict[str, str] by llm(max_tokens=" in src;
+    assert "-> dict by llm(" not in src;
 }
 
 # A tool LIFT authored as a standalone stdin-script: a def plus a __main__ harness.

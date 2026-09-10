@@ -355,8 +355,8 @@ test "an autonomy slot can reach the rest of the library; a plain slot is untouc
     # A slot with NO tools must stay toolless — tools turn a single typed
     # generation into a ReAct loop with a finish_tool, a different program.
     src = transpile_ir(SKILL_TOOL_IR, "shelf_agent");
-    assert "def think(task: str) -> str by llm(tools=[read_rows, *_skill_tools()]);" in src, src[-2000:];
-    assert "def wrap(notes: str) -> str by llm;" in src, src[-2000:];
+    assert "def think(task: str) -> str by llm(tools=[read_rows, *_skill_tools()], max_tokens=" in src, src[-2000:];
+    assert "def wrap(notes: str) -> str by llm(max_tokens=" in src, src[-2000:];
     # SPLAT, not `+`: the helper is defined in the ::py:: prelude, so `list + Unknown`
     # would be a type error and G4 (the compile oracle runs jac's checker) would fail.
     assert "] + _skill_tools()" not in src;

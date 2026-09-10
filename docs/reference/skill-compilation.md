@@ -65,6 +65,29 @@ diagnostics attached rather than a bare error.
 `--strict` (or `SIGIL_STRICT=1`) restores fail-on-any-finding, which is what you
 want in CI.
 
+### The per-slot output budget
+
+Every `by llm` slot is emitted with a `max_tokens` budget derived from its
+**declared output type** — an enum slot gets 32, a bool 8, a filled object or
+dict 1500, a list 2000, prose 2500. An uncapped slot has no reason to stop: on
+the compliance suite, slots ran to 30–70k characters and a weak model's graph
+stalled part-way, so the nodes downstream never fired and the run scored as
+non-compliance rather than as the stall it was.
+
+```bash
+SIGIL_SLOT_BUDGET=0      # emit no cap at all
+SIGIL_SLOT_BUDGET=1200   # override the PROSE budget (bounded types keep theirs)
+```
+
+A denser graph wants a smaller prose budget — the suite used 1200 for a 44-slot
+agent against 2500 elsewhere.
+
+**If output looks cut off, raise this before suspecting the model.** byLLM
+surfaces `finish_reason == "length"` as an error only for *tool calls*; a
+truncated plain-text answer comes back as ordinary content, so too small a budget
+shortens a deliverable quietly. The defaults are the values measured sufficient
+on the suite, not values chosen to be tidy.
+
 ### Turning a gate off
 
 Every gate is **on by default** — one you have to remember to enable is one that
