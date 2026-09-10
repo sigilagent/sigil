@@ -33,7 +33,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, autofix_carry_types }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, gate_slot_prompt_bloat, autofix_carry_types }
 import from .repair { repair_compile_loop, pin_repair_llm }
 import from .autofix { autofix_ir }
 import from .report { finding, auto_gate, resolved_by, status_of }
@@ -117,6 +117,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list, name: str, skill_dir: str,
     findings: list = [];
     if g4.ok {
         for i9 in gate_type_unification(ir_text) { findings.append(finding("G9", str(i9))); }
+        for i13 in gate_slot_prompt_bloat(g4.module_src) { findings.append(finding("G13", str(i13))); }
         sc = gate_struct_cov(sr.spec, wf, g4.module_src);
         for i2 in sc.issues { findings.append(finding(auto_gate(str(i2), "G5"), str(i2))); }
     }

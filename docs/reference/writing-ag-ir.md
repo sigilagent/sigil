@@ -407,6 +407,7 @@ tribunal. Only G4 can make a lift `failed`; the rest attach findings.
 | **G8** concurrency | is any claimed parallelism real? | error (false parallelism); opportunities are advisory |
 | **G9** type unification | do carry types match the tools that consume them? — and is every node reachable from the entry? | error |
 | **G12** determinization | does any one `owner: model` node fold more than six mandates into a single slot? | error |
+| **G13** slot-prompt bloat | does a slot's prompt carry the surrounding document rather than its own mandate? | warn |
 
 `error` findings are runtime crashes or violated mandates riding a green compile —
 fix them. `warn` findings are faithfulness/quality notes — worth addressing, but

@@ -29,6 +29,9 @@ glob _SEVERITY: dict = {
     "compile": "fatal",
     "G3": "error", "G6": "error", "G8": "error", "G9": "error", "G12": "error",
     "G1": "warn", "G5": "warn", "G7": "warn", "G10": "warn", "G11": "warn",
+    # G13 is a performance note, not a defect: the artifact is correct, it will
+    # just carry more prose per decision than it needs to.
+    "G13": "warn",
     "spec": "warn", "spine": "warn", "assemble": "warn",
 };
 

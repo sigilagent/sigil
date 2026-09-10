@@ -189,6 +189,40 @@ def det_overloaded(wf: WorkflowView) -> list[str] {
     return out;
 }
 
+# G13 (slot-prompt bloat). A slot prompt should carry the mandate and the slot's
+# typed inputs -- not the document the mandate came from. Measured on the
+# compliance suite: shortening bloated skill documents into ordered procedures was
+# where an independent prose optimizer got its gains (dora 26k->15k chars, +18.8
+# pp; soc2 25k->14k, +9.6), and its single worst regression came from DOUBLING one
+# (hipaa 7.9k->14.6k, -6.9). Mandate count did not predict the direction, so the
+# effect is prose volume per decision, not procedure length.
+#
+# The property is that a slot prompt stays BOUNDED as the source skill grows, so
+# this is an absolute cap, not a ratio. A ratio would punish a short skill for
+# nothing: the repo's own corpus runs 8.6%-29.1% of source length and every one of
+# those prompts is small in absolute terms (164-1404 chars). The cap is set well
+# clear of that ceiling -- it is here to catch a slot carrying its whole document,
+# not to tune healthy ones.
+glob SLOT_PROMPT_CAP: int = 6000;
+
+def gate_slot_prompt_bloat(module_src: str) -> list[str] {
+    out: list[str] = [];
+    if not gate_enabled("G13") { return out; }
+    # Block-literal sems (`sem x =\n"""..."""`) carry the resident knowledge; the
+    # quoted one-liners are short by construction but measured the same way.
+    pairs: list = list(re.findall(r'(?s)sem ([A-Za-z_0-9]+) =\s*"""(.*?)"""', str(module_src)));
+    for pr in pairs {
+        nm = str(pr[0]); body = str(pr[1]);
+        if len(body) > SLOT_PROMPT_CAP {
+            out.append("G13: slot '" + nm + "' carries a " + str(len(body))
+                + "-character prompt (cap " + str(SLOT_PROMPT_CAP) + ") — that is the"
+                + " surrounding document, not the mandate. Scope the knowledge"
+                + " resident on this node to what the slot actually reads.");
+        }
+    }
+    return out;
+}
+
 def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructCov {
     # For each MANDATORY STEP/IO rule: how does the compiled agent realize it?
     #   gated      owner=code ability  -> guaranteed by construction
