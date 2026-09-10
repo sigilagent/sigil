@@ -41,6 +41,50 @@ glob GUARD_SENTINELS: list = ["", "otherwise", "default", "else", "always", "tru
 # attempt plus one verdict per check and blows straight past six.
 glob SLOT_ARITY_CAP: int = 12;
 
+# Per-slot output budget. An uncapped slot has no reason to stop: measured on the
+# compliance suite, slots ran to 30-70k characters and a weak model's graph
+# stalled part-way through -- the nodes downstream never fired at all, and the
+# cell scored as non-compliance rather than as the stall it was. Capping the
+# slots took those cells to 100. The budget is derived from the slot's DECLARED
+# output type, which is the mechanical form of "answer only this".
+#
+# TRUNCATION IS THE COST, and it is worth stating plainly: byllm surfaces
+# `finish_reason == "length"` as an error only for TOOL CALLS (it retries them);
+# a truncated plain-text answer comes back as ordinary content. So a budget that
+# is too small silently shortens a deliverable. Hence two rules here:
+#   - types that BOUND their own output (enum, bool, int, float) get tight caps
+#     they cannot legitimately exceed -- pure protection, no truncation risk;
+#   - prose gets PROSE_BUDGET, the value measured sufficient on the suite, not a
+#     value chosen to be tidy. Raise it before suspecting the model.
+glob PROSE_BUDGET: int = 2500;
+glob BUDGET_BY_KIND: dict = {
+    "bool": 8, "int": 16, "float": 16,
+    "enum": 32,          # one member name
+    "obj": 1500,         # a filled schema
+    "list": 2000,
+};
+
+def _slot_budget(ret: str, types: any) -> int {
+    # 0 means "no cap" to byllm's filter_params, and is how the operator turns
+    # the whole feature off without the emitter growing a second code path.
+    env = str(os.environ.get("SIGIL_SLOT_BUDGET", "")).strip().lower();
+    if env in ["0", "off", "false", "no"] { return 0; }
+    r = str(ret).strip();
+    if r in ["bool", "int", "float"] { return int(BUDGET_BY_KIND[r]); }
+    if r.startswith("list[") or (r == "list") { return int(BUDGET_BY_KIND["list"]); }
+    # a dict return is a filled schema, the same shape of answer as an object --
+    # bounded by its keys, not open prose.
+    if r.startswith("dict[") or (r == "dict") { return int(BUDGET_BY_KIND["obj"]); }
+    if r in types {
+        k = str(types[r].get("kind") or "");
+        if k == "enum" { return int(BUDGET_BY_KIND["enum"]); }
+        if k == "object" { return int(BUDGET_BY_KIND["obj"]); }
+    }
+    # prose (str, or anything that fell back to it)
+    if env.isdigit() and int(env) > 0 { return int(env); }
+    return int(PROSE_BUDGET);
+}
+
 # Tool params that name a DESTINATION rather than a value — an ACT tool's write
 # path. Kept in sync with the `ppar` sniff in the embodiment ladder.
 glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
@@ -1301,7 +1345,15 @@ def _emit_slots(ir: any) -> str {
                 wreal = [tt for tt in _list(wau.get("tools")) if tt != "SENSE"];
                 if wreal { wtools = f"(tools=[{_j(', ', [_safe(tt) for tt in wreal])}, *_skill_tools()])"; }
             }
-            out.append(f"def {wname}(task: str) -> str by llm{wtools};");
+            # A fan-out worker is prose like any other slot, and is the one most
+            # likely to ramble: it runs unattended, N at a time, and nothing
+            # downstream reads it but the join. Budget it the same way.
+            _wopts: list = [];
+            if wtools { _wopts.append(str(wtools)[1:-1]); }
+            _wbud = _slot_budget("str", types);
+            if _wbud > 0 { _wopts.append(f"max_tokens={_wbud}"); }
+            _wllm = ("(" + _j(", ", _wopts) + ")") if _wopts else "";
+            out.append(f"def {wname}(task: str) -> str by llm{_wllm};");
             wdoc = str(n.get("doc") or "").strip();
             wsem = (wdoc + " " if wdoc else "") + "You are ONE parallel worker handling a single sub-task from a larger fan-out. Do just this sub-task fully and return a short result of what you did and where any output landed.";
             out.append(f"sem {wname} = {_q(wsem)};");
@@ -1368,7 +1420,14 @@ def _emit_slots(ir: any) -> str {
             }
         }
         psig = _j(", ", params);
-        out.append(f"def {slot}({psig}) -> {ret} by llm{tools};");
+        # `tools` already arrives as a complete "(tools=[...])" or "". Options are
+        # merged rather than appended so a slot can carry both.
+        _opts: list = [];
+        if tools { _opts.append(str(tools)[1:-1]); }
+        _bud = _slot_budget(ret, types);
+        if _bud > 0 { _opts.append(f"max_tokens={_bud}"); }
+        _llmopts = ("(" + _j(", ", _opts) + ")") if _opts else "";
+        out.append(f"def {slot}({psig}) -> {ret} by llm{_llmopts};");
         seed = _slot_seed(ir, n["id"]);
         doc = str(n.get("doc") or "");
         semtext = doc + seed;
