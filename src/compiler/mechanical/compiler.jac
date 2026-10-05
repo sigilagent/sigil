@@ -57,9 +57,14 @@ glob SLOT_ARITY_CAP: int = 12;
 #   - prose gets PROSE_BUDGET, the value measured sufficient on the suite, not a
 #     value chosen to be tidy. Raise it before suspecting the model.
 glob PROSE_BUDGET: int = 2500;
+# Scalars/enums used to get 8/16/32 tokens. A reasoning runtime (glm-5.2) spends
+# its first tokens thinking and the budget was gone before the answer: 17 typed-
+# output failures across the glm arm (8 float, 3 bool, 3 dict, 2 int, 1 list).
+# Measured: bool/int/float/list all answer at 64; 96 leaves headroom and costs
+# nothing on a non-reasoning model (it stops at the value anyway).
 glob BUDGET_BY_KIND: dict = {
-    "bool": 8, "int": 16, "float": 16,
-    "enum": 32,          # one member name
+    "bool": 96, "int": 96, "float": 96,
+    "enum": 96,          # one member name (+ a reasoning model's preamble)
     "obj": 1500,         # a filled schema
     "list": 2000,
 };
@@ -566,7 +571,17 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     # never stops. _as_num is total (parses a number out of an Unknown py return,
     # else keeps the default) and the builtin wrap gives the checker a known type.
     if tt == "int" { return f"        self.{_safe(str(tgt))} = int(_as_num({expr}, self.{_safe(str(tgt))}, True));"; }
-    if tt == "float" { return f"        self.{_safe(str(tgt))} = float(_as_num({expr}, self.{_safe(str(tgt))}, False));"; }
+    # float() is NOT the same as int() here: `int` accepts an Unknown argument but
+    # `float`'s signature is `str | Buffer | SupportsFloat | SupportsIndex`, and a
+    # py-block return is Unknown to the checker — so the bare wrap that works for
+    # int raises E1053 ("Cannot assign <Unknown> to parameter 'x'") and the whole
+    # artifact comes out `uncompilable`. Annotating the helper does not help; jac
+    # does not read annotations inside `::py::`. `str()` takes any object and
+    # yields a type float() accepts, and _as_num is total — it returns a real
+    # number or the carry's own float default — so the round-trip always parses.
+    # Latent since the arm was written: mesh-analysis was the first skill with a
+    # float carry, and it failed G4 on this line alone.
+    if tt == "float" { return f"        self.{_safe(str(tgt))} = float(str(_as_num({expr}, self.{_safe(str(tgt))}, False)));"; }
     return f"        {expr};  # -> {tgt} ({tt}); carry keeps default";
 }
 
@@ -844,11 +859,43 @@ def _strip_main_guard(body: str) -> str {
     return "\n".join(out).rstrip();
 }
 
+# Indent a Python tool body to nest it inside its `__impl` wrapper WITHOUT touching
+# the interior of a multi-line string literal. Blindly prefixing every line put four
+# spaces inside the `src = '''import numpy...'''` block of a code-EMITTING tool, so
+# the string the tool returned was valid on its first line and indented on every line
+# after it — `exec()` of that carry died with "IndentationError: unexpected indent
+# (<string>, line 2)". Both runtimes, identically (live: drone-planning-control's
+# planner_src AND controller_src; the files the same tool wrote to disk were fine,
+# which is why it read as a model failure). Only strings span lines in Python — every
+# other construct is tokenised per line — so any token whose end line is past its
+# start line marks interior lines that must be emitted verbatim.
+def _indent_py(body: str, pad: str) -> list {
+    import io, tokenize;
+    inside: dict = {};
+    try {
+        for tk in tokenize.generate_tokens(io.StringIO(str(body)).readline) {
+            if tk.end[0] > tk.start[0] {
+                r = tk.start[0] + 1;
+                while r <= tk.end[0] { inside[r] = True; r += 1; }
+            }
+        }
+    } except Exception { inside = {}; }
+    out: list = [];
+    i = 1;
+    for ln in str(body).splitlines() {
+        if inside.get(i) { out.append(ln); }
+        elif ln.strip() { out.append(pad + ln); }
+        else { out.append(""); }
+        i += 1;
+    }
+    return out;
+}
+
 def _body_lines(body: str, params: list) -> list {
     out: list = [];
     if _py_ok(body) {
         body = _strip_main_guard(body);
-        for ln in body.splitlines() { out.append(("    " + ln) if ln.strip() else ""); }
+        for ln in _indent_py(body, "    ") { out.append(ln); }
         tail = _delegating_call(body, params);
         if tail { out.append(tail); }
         return out;
@@ -1231,7 +1278,16 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
         # lowers to `any` (bare `any`, unions like `path | str`, etc.) is demoted to a
         # `str` slot param, so the `any` carry needs a str() cast at the call.
         jt = str(_jac_type(c.get("type"), types)[0]) if isinstance(c, dict) else "";
-        if "any" in jt { parts.append(f"str(self.{_safe(r)})"); }
+        # str inputs to a MODEL slot are capped (see _cap_in): a whole data file
+        # routed into a decision slot blew the context window (exoplanet,
+        # light-curve CSV into a GEN-ENUM). Code nodes take the full carry.
+        if "any" in jt { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
+        elif jt == "str" { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
+        # a list/dict carry is capped the same way, shape preserved: a whole light
+        # curve as {"time": [...], "flux": [...]} went into a decision slot verbatim
+        # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored)
+        elif jt.startswith("list") { parts.append(f"list(_cap_seq(self.{_safe(r)}))"); }
+        elif jt.startswith("dict") { parts.append(f"dict(_cap_seq(self.{_safe(r)}))"); }
         else { parts.append(f"self.{_safe(r)}"); }
     }
     return _j(", ", parts);
@@ -1787,6 +1843,12 @@ def _emit_walker(ir: any) -> list {
                     body.append("        _tui_llm_out(\"(advisory)\");");
                 } else {
                     body.append(f"        self.{_safe(tgt)} = {val};");
+                    if tt == "str" {
+                        # an EMPTY text answer is retried once without thinking: glm-5.2 under
+                        # reasoning_effort=low returned "" for a whole solver script (exam-block:
+                        # empty model file -> "no JSON payload"); think=False returned it
+                        body.append(f"        if not str(self.{_safe(tgt)}).strip() {{ _nothink_push(); self.{_safe(tgt)} = {val}; _nothink_pop(); }}");
+                    }
                     body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
                     # MULTI-WRITE GEN slot: the IR may declare a model node that produces
                     # SEVERAL carries (`writes: [selected_cluster, target_file]`), but only
@@ -2266,9 +2328,22 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
                 elif _jt == "float" { _cast = "float"; }
                 elif _jt == "dict" { _cast = "dict"; }
                 elif _jt == "list" or _jt.startswith("list[") { _cast = "list"; }
-                extra_in.append(f"{sk}={_cast}(_as_param(params.get('{sk}', ''), {_jd}))");
+                # float(<Unknown>) is the one cast jac's checker rejects
+                # (E1053: the SupportsFloat union); route it through str()
+                # exactly as the float carry-assignment arm does
+                _wrap = f"_as_param(params.get('{sk}', ''), {_jd})";
+                if _cast == "float" { _wrap = f"str({_wrap})"; }
+                extra_in.append(f"{sk}={_cast}({_wrap})");
             }
         }
+        # Record the task-named input and every file the task names that already
+        # exists, so no write target can ever resolve onto one of them (the
+        # runtime write guard redirects such a write to <path>.out).
+        out.append("    _note_input_path(_inname(task));");
+        out.append("    _note_task_files(task, params.get('output_path', ''));");
+        # deliverable-format contract (after the input registry, so a .json the
+        # task only READS does not trigger it; names no file, so the scrapes hold)
+        out.append("    task = str(_note_task_text(_format_contract(task)));");
         sargs = _j(", ", ["task=task"] + extra_in);
         out.insert(0, f"glob _EJ_PARAM_KEYS: list = {pkeys};");
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
