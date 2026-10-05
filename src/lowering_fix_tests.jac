@@ -667,3 +667,60 @@ test "a JSON deliverable that misses the schema the task shows says so" {
     # and a non-JSON destination is never second-guessed
     assert ns["_schema_gap"](os.path.join(d, "notes.md"), "# hello") == "";
 }
+
+# PIP NOISE. An installer the caller did not capture wrote pip's own diagnostics —
+# a ~20K-char traceback on a failed build — into the terminal of whoever called the
+# program; the agent read all of it on every call (SkillsBench travel: 20,124 of
+# 27,206 chars). Uncaptured installs now go to a log; captured output is untouched.
+import from .compiler.mechanical.envbind { preflight_src }
+
+::py::
+def _popen_probe(ns):
+    """Drive the runtime's Popen wrapper with a stand-in for the real __init__ and
+    return the keyword arguments each call would have spawned with."""
+    seen = []
+    def fake(self, args, *a, **kw):
+        seen.append(dict(kw))
+    ns["_orig_popen_init"] = fake
+    pin = ns["_popen_init"]
+    pin(None, ["python3", "-m", "pip", "install", "pandas"])
+    pin(None, ["python3", "-m", "pip", "install", "pandas"], stdout=-1, stderr=-1)
+    pin(None, ["python3", "script.py"])
+    return seen
+::py::
+
+test "an uncaptured pip install is routed to a log; everything else is untouched" {
+    ns = _runtime_ns();
+    isp = ns["_is_pip_install"];
+    assert isp(["/usr/bin/python3", "-m", "pip", "install", "pandas"]);
+    assert isp(["pip", "install", "-q", "pandas"]);
+    assert isp("pip3 install pandas==2.0");
+    assert isp(["/opt/venv/bin/pip", "install", "x"]);
+    assert not isp(["python3", "-m", "pip", "list"]);
+    assert not isp(["python3", "script.py", "install"]);
+    assert not isp("echo pip install");
+    seen = _popen_probe(ns);
+    # an uncaptured installer is diverted to the log
+    assert ("stdout" in seen[0]) and ("stderr" in seen[0]);
+    assert str(seen[0]["stderr"].name).endswith(".log");
+    # a caller's own capture always wins
+    assert (seen[1]["stdout"] == -1) and (seen[1]["stderr"] == -1);
+    # anything that is not an installer is untouched
+    assert "stdout" not in seen[2];
+}
+
+test "the dependency preflight captures every pip call it makes" {
+    pf = preflight_src({"py": {"pandas": {"pip": "pandas"}}, "bin": {}});
+    runs = [ln for ln in pf.split("\n") if "_sp.run(" in ln];
+    assert len(runs) >= 3, pf[:400];
+    for ln in runs { assert "capture_output=True" in ln, ln; }
+}
+
+test "the tuning hooks are default-on with an opt-out, and SIGIL_THINK stays opt-in" {
+    rt = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compiler", "mechanical", "assets", "osp_runtime.py.txt")).read();
+    # the Popen patch is global, so it has a switch; the litellm hook only installs when asked
+    assert "if _sigil_on(\"SUBPROCESS_FIX\"):" in rt;
+    assert "if mode in (\"\", \"off\", \"default\"):" in rt;
+    pf = preflight_src({"py": {"pandas": {"pip": "pandas"}}, "bin": {}});
+    assert "SIGIL_VERSION_PARITY" in pf, "version parity has no opt-out";
+}

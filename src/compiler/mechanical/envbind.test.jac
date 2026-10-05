@@ -155,3 +155,18 @@ test "well-formed IO tools are not flagged" {
     assert m["fabricated_path"] == {};
     assert m["unguarded_read"] == {};
 }
+
+test "the preflight binds the version the task image pins, not the latest release" {
+    # earthquake-plate-calculation: the image pins pyproj==3.7.0 / geopandas==1.0.1, the artifact
+    # bound the latest, and EPSG:4087 distances differ by 0.3% between PROJ releases — the tool
+    # returned 3866.83 km where the image's own stack returns 3878.27, against a 0.01 km tolerance.
+    src = preflight_src({"py": {"geopandas": {"pip": "geopandas", "tools": ["load_points_gdf"]}}, "bin": {}});
+    assert "_image_version" in src, "no image-version probe in the preflight";
+    assert "importlib.metadata" in src, "the probe must ask the image interpreter for its version";
+    assert "_p + \"==\" + _ver" in src, "the bind must pin to the image's version";
+    # the fallback path is still there for a module the image does not have
+    assert "--upgrade" in src, "a module the image lacks must still bind the latest";
+    # present-but-different is also a miss: the earthquake cell still returned 3866.83 after the
+    # first parity fix because geopandas was already importable, so nothing was ever re-bound
+    assert "_have != _img" in src, "a version that disagrees with the image must be re-bound";
+}

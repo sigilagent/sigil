@@ -68,9 +68,11 @@ want in CI.
 ### The per-slot output budget
 
 Every `by llm` slot is emitted with a `max_tokens` budget derived from its
-**declared output type** — an enum slot gets 32, a bool 8, a filled object or
-dict 1500, a list 2000, prose 2500. An uncapped slot has no reason to stop: on
-the compliance suite, slots ran to 30–70k characters and a weak model's graph
+**declared output type** — a bool, int, float or enum slot gets 96, a filled
+object or dict 1500, a list 2000, prose 2500. The scalar floor is 96 rather than
+the handful of tokens the value needs because a reasoning model spends its first
+tokens thinking; a non-reasoning model still stops at the value. An uncapped
+slot has no reason to stop: on the compliance suite, slots ran to 30–70k characters and a weak model's graph
 stalled part-way, so the nodes downstream never fired and the run scored as
 non-compliance rather than as the stall it was.
 
@@ -137,6 +139,31 @@ SIGIL_INPUT_CAPS=0     # hand model slots their full inputs
 Values `0`, `false`, `no` and `off` disable; anything else, including unset,
 leaves the guard on. As with gates, these are for a task the heuristic is wrong
 about.
+
+Three more switches concern the environment the program runs in rather than its
+output:
+
+```bash
+SIGIL_SUBPROCESS_FIX=0   # leave subprocess.Popen exactly as Python ships it
+SIGIL_VERSION_PARITY=0   # preflight binds the latest release, not the image's pin
+SIGIL_THINK=low          # opt-in: reasoning effort for glm/deepseek/qwen3/… slots
+```
+
+- **Subprocess fix** (on by default). A tool that spawns `python` on an image
+  with only `python3`, or runs a script with the program's own embedded
+  interpreter, is pointed at the image's `python3`. An installer whose output the
+  caller did not capture writes to `$TMPDIR/sigil_pip_<pid>.log` instead of the
+  caller's terminal.
+- **Version parity** (on by default). The dependency preflight asks the image's
+  `python3` which version of each module it pins, binds that version, and
+  re-pins any distribution in the bind directory that disagrees with the image.
+- **`SIGIL_THINK`** (off unless set). `low`/`medium`/`high` becomes
+  `reasoning_effort`, `false` turns thinking off. A text slot that comes back
+  empty is retried once with thinking off either way.
+
+An ejected program serving MCP (`--mcp`) bounds each call at
+`SIGIL_CALL_TIMEOUT` seconds (default 840, under a 900 s client cap) and answers
+with the files produced so far when the procedure is still running.
 
 ## Linting a skill first
 

@@ -574,7 +574,7 @@ edges:
 test "each slot carries an output budget sized to its declared type" {
     src = transpile_ir(BUDGET_IR, "researcher");
     # enum: one member name can never need more.
-    assert "def judge(summary: str) -> Verdict by llm(max_tokens=32);" in src;
+    assert "def judge(summary: str) -> Verdict by llm(max_tokens=96);" in src;   # enum floor 96 (reasoning runtimes)
     # prose keeps the value measured sufficient on the suite, not a tidy one.
     assert "max_tokens=2500" in src;
     # no slot may go out uncapped
@@ -618,7 +618,7 @@ test "SIGIL_SLOT_BUDGET=<n> overrides the prose budget only" {
     del os.environ["SIGIL_SLOT_BUDGET"];
     assert "max_tokens=600" in src;
     # a type that bounds its own output is not raised or lowered by the override
-    assert "max_tokens=32" in src;
+    assert "max_tokens=96" in src;
 }
 
 

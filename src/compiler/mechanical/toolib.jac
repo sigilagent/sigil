@@ -48,7 +48,7 @@ try:
         _data = _f.read()
 except Exception as _e:
     return "[read_file failed: %s]" % str(_e)[:200]
-return _data if len(_data) <= 200000 else (_data[:200000] + "\\n... [truncated]")
+return _data if len(_data) <= 20000000 else (_data[:20000000] + "\\n... [truncated]")
 """
     },
     "list_dir": {
@@ -338,7 +338,7 @@ try:
         _body = _r.read().decode("utf-8", "replace")
 except Exception as _e:
     return "[http_get failed: %s]" % str(_e)[:200]
-return _body if len(_body) <= 200000 else (_body[:200000] + "\\n... [truncated]")
+return _body if len(_body) <= 20000000 else (_body[:20000000] + "\\n... [truncated]")
 """
     }
 };

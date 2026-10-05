@@ -57,9 +57,14 @@ glob SLOT_ARITY_CAP: int = 12;
 #   - prose gets PROSE_BUDGET, the value measured sufficient on the suite, not a
 #     value chosen to be tidy. Raise it before suspecting the model.
 glob PROSE_BUDGET: int = 2500;
+# Scalars/enums used to get 8/16/32 tokens. A reasoning runtime (glm-5.2) spends
+# its first tokens thinking and the budget was gone before the answer: 17 typed-
+# output failures across the glm arm (8 float, 3 bool, 3 dict, 2 int, 1 list).
+# Measured: bool/int/float/list all answer at 64; 96 leaves headroom and costs
+# nothing on a non-reasoning model (it stops at the value anyway).
 glob BUDGET_BY_KIND: dict = {
-    "bool": 8, "int": 16, "float": 16,
-    "enum": 32,          # one member name
+    "bool": 96, "int": 96, "float": 96,
+    "enum": 96,          # one member name (+ a reasoning model's preamble)
     "obj": 1500,         # a filled schema
     "list": 2000,
 };
@@ -1838,6 +1843,12 @@ def _emit_walker(ir: any) -> list {
                     body.append("        _tui_llm_out(\"(advisory)\");");
                 } else {
                     body.append(f"        self.{_safe(tgt)} = {val};");
+                    if tt == "str" {
+                        # an EMPTY text answer is retried once without thinking: glm-5.2 under
+                        # reasoning_effort=low returned "" for a whole solver script (exam-block:
+                        # empty model file -> "no JSON payload"); think=False returned it
+                        body.append(f"        if not str(self.{_safe(tgt)}).strip() {{ _nothink_push(); self.{_safe(tgt)} = {val}; _nothink_pop(); }}");
+                    }
                     body.append(f"        _tui_llm_out(self.{_safe(tgt)});");
                     # MULTI-WRITE GEN slot: the IR may declare a model node that produces
                     # SEVERAL carries (`writes: [selected_cluster, target_file]`), but only

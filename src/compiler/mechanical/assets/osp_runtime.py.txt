@@ -523,6 +523,105 @@ def _py_fix(cmd):
 
 _SHELL = __import__("shutil").which("bash") or "/bin/sh"
 
+def _looks_python_file(p):
+    import os
+    try:
+        q = str(p or "")
+        if not (os.path.isfile(q) and not os.access(q, os.X_OK)):
+            return False
+        with open(q, "rb") as f:
+            head = f.read(600)
+        return (b"import " in head) or (b"def " in head) or head.startswith(b"\x23!") or (b"print(" in head)
+    except Exception:
+        return False
+
+def _fix_argv(args):
+    # Every subprocess a tool body spawns passes through here.
+    #  * `python` on a Debian image with no alias -> the image's python3
+    #    (court-form-filling: FileNotFoundError 'python' at the first node)
+    #  * [sys.executable, "script.py"]: this interpreter is jac's EMBEDDED
+    #    python, which has none of the task's libraries -> run task scripts on
+    #    the image's python3 instead (exam-block-sequencing: pyscipopt missing
+    #    although installed in the image). `-m pip` stays on the embedded one,
+    #    that is the preflight installing modules for in-process import.
+    #  * a generated, non-executable script used as the COMMAND WORD
+    #    (energy-ac: `script_file.out: command not found`, exit 127) -> prefix
+    #    the interpreter instead of failing.
+    import os, sys as _s
+    try:
+        if isinstance(args, (list, tuple)) and args:
+            a = [str(x) for x in args]
+            if a[0] == "python" and not _HAS_PY:
+                return [_PY3] + a[1:]
+            if a[0] == _s.executable or a[0].endswith("/jac") or a[0] == "jac":
+                if "-m" in a[:3] and "pip" in a[:4]:
+                    return args
+                if any(x.endswith(".py") or x.endswith(".out") or x == "-c" for x in a[1:3]):
+                    return [_PY3] + a[1:]
+                return args
+            if _looks_python_file(a[0]):
+                return [_PY3] + a
+            return args
+        if isinstance(args, str):
+            t = args.strip()
+            if not _HAS_PY:
+                t = _py_fix(t)
+            first = t.split()[0] if t.split() else ""
+            if _looks_python_file(first):
+                t = _PY3 + " " + t
+            return t
+    except Exception:
+        pass
+    return args
+
+def _is_pip_install(args):
+    # `python -m pip install ...`, `pip install ...`, `pip3 install ...` — list or string form
+    try:
+        s = [str(x) for x in args] if isinstance(args, (list, tuple)) else str(args).split()
+        if not s:
+            return False
+        # pip must be the COMMAND (`pip install`, `/venv/bin/pip3 install`) or the
+        # module an interpreter runs (`python3 -m pip install`) — never a word
+        # inside some other command (`echo pip install`)
+        if s[0].rsplit("/", 1)[-1] in ("pip", "pip3") and "install" in s[1:3]:
+            return True
+        if len(s) > 3 and s[1] == "-m" and s[2] in ("pip", "pip3") and "install" in s[3:5]:
+            return True
+    except Exception:
+        pass
+    return False
+
+_PIP_LOG = {}
+def _pip_log():
+    # one append-mode log per program process; opened lazily, never raises
+    if "fh" not in _PIP_LOG:
+        import os as _o, tempfile as _t
+        _PIP_LOG["path"] = _o.path.join(_t.gettempdir(), "sigil_pip_%d.log" % _o.getpid())
+        _PIP_LOG["fh"] = open(_PIP_LOG["path"], "a")
+    return _PIP_LOG["fh"]
+
+_orig_popen_init = _subprocess.Popen.__init__
+def _popen_init(self, args, *a, **kw):
+    fixed = _fix_argv(args)
+    # An installer the caller did not capture writes pip's own diagnostics — on a
+    # failed build a ~20K-char internal traceback — straight into the terminal of
+    # whoever called the program, and an agent calling it reads every byte
+    # (SkillsBench travel: 20,124 of 27,206 chars per program call). Route that
+    # output to a log instead; the caller still gets the return code, so its own
+    # error handling and its one-line status are unchanged. Output the caller DID
+    # capture (stdout/stderr passed, or run(capture_output=True)) is never touched.
+    if (not a) and ("stdout" not in kw) and ("stderr" not in kw) and _is_pip_install(fixed):
+        try:
+            lg = _pip_log()
+            kw["stdout"] = lg
+            kw["stderr"] = lg
+        except Exception:
+            pass
+    return _orig_popen_init(self, fixed, *a, **kw)
+# a global patch: SIGIL_SUBPROCESS_FIX=0 leaves Popen exactly as python ships it
+if _sigil_on("SUBPROCESS_FIX"):
+    _subprocess.Popen.__init__ = _popen_init
+
 
 _re_num = __import__("re").compile(r"-?\d+(?:\.\d+)?")
 
@@ -889,6 +988,66 @@ def _cap_in(v, n=60000):
     except Exception:
         pass
     return v
+
+
+# ---- runtime thinking-effort knob (SIGIL_THINK) -----------------------------
+# glm-5.2 thinks before every typed answer; with the default effort a bool/int
+# slot spent its whole budget thinking and the arm collected 17 typed-output
+# failures. byLLM has no per-model setting for this and the call sites are
+# compiled, so the knob is applied at the litellm boundary: SIGIL_THINK=low
+# (or medium/high) -> reasoning_effort; SIGIL_THINK=false -> think=False.
+# Only reasoning-model families are touched; litellm drops unknown params for
+# the rest (drop_params is on in byLLM's config).
+def _install_think_hook():
+    import os
+    mode = os.environ.get("SIGIL_THINK", "").strip().lower()
+    if mode in ("", "off", "default"):
+        return ""
+    try:
+        import litellm
+    except Exception:
+        return ""
+    fam = ("glm", "deepseek", "qwen3", "qwq", "gpt-oss", "magistral")
+    def _inject(kw):
+        mode = os.environ.get("SIGIL_THINK", "").strip().lower()
+        if not mode:
+            return kw
+        m = str(kw.get("model", "")).lower()
+        if any(f in m for f in fam) and "think" not in kw and "reasoning_effort" not in kw:
+            if mode in ("false", "no", "none"):
+                kw["think"] = False
+            else:
+                kw["reasoning_effort"] = mode
+        return kw
+    try:
+        _oc = litellm.completion
+        def _c(*a, **kw):
+            return _oc(*a, **_inject(kw))
+        litellm.completion = _c
+        _oa = litellm.acompletion
+        async def _ac(*a, **kw):
+            return await _oa(*a, **_inject(kw))
+        litellm.acompletion = _ac
+    except Exception:
+        return ""
+    return mode
+_SIGIL_THINK = _install_think_hook()
+
+_NOTHINK_STACK = []
+
+def _nothink_push():
+    # a str slot that came back EMPTY under a reasoning mode is retried once without
+    # thinking: glm-5.2 at reasoning_effort=low returned "" for a whole solver script
+    # (exam-block: an empty model file -> "no JSON payload"), think=False returned it
+    _NOTHINK_STACK.append(os.environ.get("SIGIL_THINK"))
+    os.environ["SIGIL_THINK"] = "false"
+
+def _nothink_pop():
+    prev = _NOTHINK_STACK.pop() if _NOTHINK_STACK else None
+    if prev is None:
+        os.environ.pop("SIGIL_THINK", None)
+    else:
+        os.environ["SIGIL_THINK"] = prev
 
 
 _INPUT_PATHS = set()
