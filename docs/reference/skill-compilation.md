@@ -110,6 +110,34 @@ Reach for these when a gate is demonstrably wrong about your corpus — not to g
 a compile through. A disabled gate does not make the shape it rejects lowerable;
 it only stops the compiler telling you about it.
 
+### Runtime guards in the compiled program
+
+The emitted program also guards what it writes and what it feeds a model slot.
+Both are **on by default** and switched off the same way as a gate, at run time:
+
+```bash
+SIGIL_WRITE_GUARDS=0   # write every deliverable verbatim
+SIGIL_INPUT_CAPS=0     # hand model slots their full inputs
+```
+
+- **Write guards.** A write that would land on a file the run was handed as
+  input goes to `<path>.out` instead. Empty content never creates or overwrites
+  a file. Text is never written into a binary format (`.xlsx`, `.pdf`, …); it is
+  parked as `<path>.txt`. A `.json` or `.csv` path must receive that format: a
+  document wrapped in a fence or prose is recovered, anything else is parked as
+  `<stem>.md` and the refusal says so. When the task shows a JSON example for
+  the file, a missing top-level key is reported with the write. The task text
+  every slot reads gains a one-paragraph `[DELIVERABLE FORMAT]` note when the
+  task names a `.json` deliverable.
+- **Input caps.** A text input to a model slot is cut at 60k characters, and a
+  list or dict input keeps its shape but at most 400 elements per sequence
+  (fewer, until it fits in ~60k characters of JSON). Code nodes always get the
+  full value.
+
+Values `0`, `false`, `no` and `off` disable; anything else, including unset,
+leaves the guard on. As with gates, these are for a task the heuristic is wrong
+about.
+
 ## Linting a skill first
 
 An interactive compile offers to lint before it compiles. The lint reuses the

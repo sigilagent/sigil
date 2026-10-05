@@ -31,23 +31,43 @@ def _ensure_path():
     if here and os.path.isdir(os.path.join(here, ".git")):
         return
     if here and here != cwd and os.path.isdir(here):
+        # Only SKILL RESOURCES cross into cwd. The bundle dir is also where a
+        # host wrapper keeps its own things — run.sh, a .env file with live
+        # keys, a private HOME/cache for the runtime — and staging those put
+        # the keys into a graded task workspace and copytree'd a 828M runtime
+        # tree (symlink followed) into it on every boot (caught live:
+        # SkillsBench MCP cells). Dot-entries, wrappers, env files, homes and
+        # caches never stage; symlinks stage AS symlinks.
         _skip = {"agent.jac", "voodoo-bench.toml", ".jac", "__pycache__",
-                 "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt"}
+                 "agent_result.txt", "res", "SKILL.md", "agent.ir", "LICENSE.txt",
+                 "run.sh", "home", "cache", "node_modules"}
         for _name in os.listdir(here):
-            if _name in _skip or _name.endswith((".jir", ".pyc", ".bak")):
+            if _name in _skip or _name.startswith(".") or _name.endswith((".jir", ".pyc", ".bak", ".log")):
                 continue
+            if _name.startswith(("agent.", "build.", "compile.")) and _name != "agent.jac":
+                continue  # compile provenance (agent.agir, build.json, compile.log) is not a resource
             _src = os.path.join(here, _name); _dst = os.path.join(cwd, _name)
-            if os.path.exists(_dst):
+            if os.path.exists(_dst) or os.path.islink(_dst):
                 continue
             try:
-                if os.path.isdir(_src):
-                    shutil.copytree(_src, _dst)
+                if os.path.islink(_src):
+                    os.symlink(os.readlink(_src), _dst)
+                elif os.path.isdir(_src):
+                    shutil.copytree(_src, _dst, symlinks=True)
                 else:
                     shutil.copy2(_src, _dst)
             except Exception:
                 pass
 
 _ensure_path()
+
+# ---- runtime hardening switches: on by default, SIGIL_<NAME>=0 turns one off ----
+# Same contract as the compiler's gate flags: 0/false/no/off disable; anything
+# else, including unset, leaves the behaviour on. An escape hatch for a task the
+# heuristic is wrong about, not a tuning knob.
+def _sigil_on(name):
+    import os
+    return str(os.environ.get("SIGIL_" + str(name).upper(), "")).strip().lower() not in ("0", "false", "no", "off")
 
 # ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
 def _progress(node):
@@ -256,7 +276,78 @@ def _strip_fences(code):
         if lines and lines[-1].strip().startswith("```"):
             lines = lines[:-1]
         c = "\n".join(lines)
+    c = _dedent_code(c)
+    # A code carry that does not PARSE as-is (glm's planner: "IndentationError:
+    # unexpected indent (<string>, line 2)" three times, drone 0.50 vs 0.77) is
+    # tried in the shapes a model actually emits: the first fenced block inside
+    # prose, the text after a one-line preamble, the whole thing dedented. The
+    # first candidate that parses wins; otherwise the text is returned unchanged
+    # (a non-Python carry -- a report, JSON -- must never be rewritten here).
+    try:
+        import ast as _ast, re as _re, textwrap as _tw
+        try:
+            _mod = _ast.parse(c)
+            # a "revise the script" slot answered with the script as a Python string
+            # constant (`build_code = ('from openpyxl ...')`): that parses, but running it
+            # does nothing. Unwrap when the module is ONE assignment of a string that is
+            # itself a Python program (xlsx revise_build_script, both runtimes).
+            try:
+                if len(_mod.body) == 1 and isinstance(_mod.body[0], _ast.Assign):
+                    _v = _mod.body[0].value
+                    _inner = None
+                    if isinstance(_v, _ast.Constant) and isinstance(_v.value, str):
+                        _inner = _v.value
+                    elif isinstance(_v, _ast.BinOp):
+                        _parts = []
+                        def _walk(_n):
+                            if isinstance(_n, _ast.BinOp) and isinstance(_n.op, _ast.Add):
+                                _walk(_n.left); _walk(_n.right)
+                            elif isinstance(_n, _ast.Constant) and isinstance(_n.value, str):
+                                _parts.append(_n.value)
+                            else:
+                                raise ValueError("not a string concat")
+                        _walk(_v)
+                        _inner = "".join(_parts)
+                    if _inner and "\n" in _inner:
+                        _ast.parse(_inner)
+                        return _inner.strip("\n")
+            except Exception:
+                pass
+            return c
+        except SyntaxError:
+            pass
+        cands = []
+        for m in _re.finditer(r"```[a-zA-Z0-9_+-]*[ \t]*\n(.*?)```", str(code), _re.S):
+            cands.append(m.group(1))
+        lines = c.splitlines()
+        if len(lines) > 1:
+            cands.append("\n".join(lines[1:]))
+        cands.append(_tw.dedent(c))
+        for cand in cands:
+            cand = _tw.dedent(cand).strip("\n")
+            if not cand.strip():
+                continue
+            try:
+                _ast.parse(cand)
+                return cand
+            except SyntaxError:
+                continue
+    except Exception:
+        pass
     return c
+
+def _dedent_code(src):
+    # A GEN slot's code carry can arrive indented as a block ("    import x")
+    # — exec() then dies with IndentationError: unexpected indent (caught live:
+    # drone-planning-control, position-controller planner_src, both runtimes).
+    import textwrap
+    t = str(src or "")
+    lines = t.splitlines()
+    first = next((ln for ln in lines if ln.strip()), "")
+    if first[:1] in (" ", "\t"):
+        return textwrap.dedent(t)
+    return t
+
 
 def _clean_strlist(v):
     # byLLM's structured output over a small local model leaks JSON structure into
@@ -432,6 +523,7 @@ def _py_fix(cmd):
 
 _SHELL = __import__("shutil").which("bash") or "/bin/sh"
 
+
 _re_num = __import__("re").compile(r"-?\d+(?:\.\d+)?")
 
 def _as_num(v, dflt, want_int=True):
@@ -455,21 +547,54 @@ def _as_num(v, dflt, want_int=True):
     except Exception:
         return dflt
 
+def _restructure(v, _depth=0):
+    # byLLM cannot schematize a bare `dict`, so the lowering widens such a slot to
+    # `dict[str, str]` — which forces EVERY value to a string. A spec whose values are
+    # nested (`states: ["T1","T2"]`, `f: ["-a*T1 + u1", ...]`) then arrives as the REPR
+    # of the list, and the consuming tool parses it as a scalar: sympify("['T1',...")
+    # -> "could not parse '['", float("[") -> ValueError. Both runtimes hit it, so it is
+    # structural, not a model fault (live: r2r-mpc-control both arms, exoplanet glm).
+    # Restore the structure the model actually produced: a string that parses as a JSON
+    # or Python list/dict becomes that list/dict. Scalars and prose are left alone —
+    # only bracket/brace-delimited strings are even attempted.
+    if _depth > 6:
+        return v
+    if isinstance(v, dict):
+        return {k: _restructure(x, _depth + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_restructure(x, _depth + 1) for x in v]
+    if isinstance(v, str):
+        s = v.strip()
+        if len(s) >= 2 and s[0] in "[{" and s[-1] in "]}":
+            p = None
+            try:
+                p = _json.loads(s)
+            except Exception:
+                try:
+                    import ast as _ast
+                    p = _ast.literal_eval(s)
+                except Exception:
+                    p = None
+            if isinstance(p, (list, dict)):
+                return _restructure(p, _depth + 1)
+    return v
+
 def _as_dict(v, dflt):
     # Total coercion for a dict-typed carry. An Unknown py-block return must not clobber
     # the carry with garbage — but silently KEEPING the default severed the whole
     # downstream dataflow (observed live: synthesize_requirement ran every node on
     # inputs={} and hallucinated ungrounded prose). Accept a real mapping, parse a
-    # JSON-object string, otherwise keep the default.
+    # JSON-object string, otherwise keep the default. Nested values that the
+    # dict[str, str] widening flattened into reprs are restored (_restructure).
     if isinstance(v, dict):
-        return v
+        return _restructure(v)
     if isinstance(v, str):
         try:
             p = _json.loads(v)
         except Exception:
             p = None
         if isinstance(p, dict):
-            return p
+            return _restructure(p)
     return dflt
 
 def _live_tool(name, args):
@@ -705,6 +830,153 @@ def _as_param(raw, default):
     return v
 
 
+def _cap_seq(v, n=400, chars=60000):
+    if not _sigil_on("INPUT_CAPS"):
+        return v
+    # A list/dict carry holding a whole DATA SET (exoplanet: the light curve as
+    # {"time": [...5000 floats], "flux": [...]}) went into a decision slot verbatim:
+    # 801,120 tokens on a 128k model, every downstream tool errored. Keep the
+    # shape (a list stays a list, a dict a dict) but at most `n` elements per
+    # sequence and ~`chars` of JSON overall; a decision needs a sample, not the set.
+    import json as _j
+    def _cap(x, depth=0):
+        if isinstance(x, list):
+            return [_cap(e, depth + 1) for e in x[:n]] + ([("... %d more" % (len(x) - n))] if len(x) > n else [])
+        if isinstance(x, dict):
+            out = {}
+            for i, (k, val) in enumerate(x.items()):
+                if i >= n:
+                    out["..."] = "%d more keys" % (len(x) - n)
+                    break
+                out[k] = _cap(val, depth + 1)
+            return out
+        if isinstance(x, str) and len(x) > 4000:
+            return x[:4000] + "... [truncated]"
+        return x
+    try:
+        if not isinstance(v, (list, dict)):
+            return v
+        c = _cap(v)
+        try:
+            if len(_j.dumps(c, default=str)) <= chars:
+                return c
+        except Exception:
+            return c
+        # still too big: halve the per-sequence cap until it fits (floor 20)
+        m = n
+        while m > 20:
+            m = m // 2
+            n = m
+            c = _cap(v)
+            try:
+                if len(_j.dumps(c, default=str)) <= chars:
+                    return c
+            except Exception:
+                return c
+        return c
+    except Exception:
+        return v
+
+def _cap_in(v, n=60000):
+    # A model slot fed a whole data file (exoplanet: the light-curve CSV went
+    # into a GEN-ENUM decision) blows the context window; nothing an enum or a
+    # plan needs lives past the first 60k chars. Code nodes never pass here.
+    if not _sigil_on("INPUT_CAPS"):
+        return v
+    try:
+        if isinstance(v, str) and len(v) > n:
+            return v[:n] + "\n... [input truncated: %d more chars]" % (len(v) - n)
+    except Exception:
+        pass
+    return v
+
+
+_INPUT_PATHS = set()
+_DEST_PATHS = set()   # paths the task names after a write/output verb
+_WRITTEN_PATHS = set()   # files THIS run produced: never "inputs" even when re-read later
+
+def _note_written_path(p):
+    import os
+    try:
+        q = str(p or "").strip()
+        if q:
+            _WRITTEN_PATHS.add(os.path.abspath(q))
+            _WRITTEN_PATHS.add(os.path.basename(q))
+    except Exception:
+        pass
+
+def _note_input_path(p):
+    # Files the caller handed to this run (or the task-named input). A write
+    # target must never resolve onto one of them: _outname once scraped the
+    # task's INPUT `/root/network.json` as the deliverable and the tool
+    # overwrote the case file, killing every later tool in the cell (caught
+    # live: energy-unit-commitment, both runtimes, 0/14).
+    import os
+    try:
+        q = str(p or "").strip()
+        # a file the run itself wrote and later re-reads (xlsx's repair_file.py in its
+        # build/verify loop) is NOT an input: registering it made the next write to it
+        # a "refused: INPUT" message, which the build step then executed as a command
+        if q and (os.path.abspath(q) in _WRITTEN_PATHS or os.path.basename(q) in _WRITTEN_PATHS):
+            return
+        if q:
+            _INPUT_PATHS.add(os.path.abspath(q))
+            _INPUT_PATHS.add(os.path.basename(q))
+    except Exception:
+        pass
+
+def _note_task_files(task, out_path=None):
+    # Files the task text names that ALREADY EXIST are inputs by definition —
+    # the run did not create them. _outname once scraped `/root/test.bib` (the
+    # bibliography under review) as the write target for a derived .bib and the
+    # validator overwrote the file it was checking (citation-check, glm, 9/9 -> 1/9).
+    # The caller's own output path is exempt (in-place deliverables stay legal).
+    import os, re
+    try:
+        outp = os.path.abspath(str(out_path)) if out_path else ""
+        seen = set()
+        for m in re.finditer(r'((?:/[A-Za-z0-9_.~-]+)+\.[A-Za-z0-9]{1,6}|\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z0-9]{1,5})\b', str(task or "")):
+            cand = m.group(1)
+            if cand in seen:
+                continue
+            seen.add(cand)
+            if not (os.path.isfile(cand) and os.path.abspath(cand) != outp):
+                continue
+            # A path the task names as the DESTINATION is not an input, even when a
+            # file already sits there (a stub, or a previous run's output). Registering
+            # it made the write guard refuse the deliverable itself: "Write your script
+            # at: /root/workspace/solution.py" became an INPUT, the artifact wrote
+            # solution.py.out instead, and the verifier found nothing
+            # (crystallographic-wyckoff, both runtimes).
+            head = str(task or "")[max(0, m.start() - 60):m.start()].lower()
+            # the gap may carry "your script at:" or "the result to" — only a sentence
+            # break (a period or newline) severs the verb from the path it governs
+            if re.search(r"(write|save|output|emit|store|produce|create|put|place|export)\b[^.\n]{0,48}$", head):
+                # Remember it as a DESTINATION. Declining to register it here is
+                # not enough: the parameter binding registers the same file as an
+                # input, so the write guard still refused the deliverable and the
+                # refusal text was executed as a command downstream.
+                try:
+                    _DEST_PATHS.add(os.path.abspath(cand))
+                    _DEST_PATHS.add(os.path.basename(cand))
+                except Exception:
+                    pass
+                continue
+            _note_input_path(cand)
+    except Exception:
+        pass
+
+def _is_input_path(p):
+    import os
+    q = str(p or "").strip()
+    if not q:
+        return False
+    # a path the task names as the destination wins over the input guard:
+    # in-place deliverables ("Output answers in test-supply.xlsx") are legal
+    if os.path.abspath(q) in _DEST_PATHS or os.path.basename(q) in _DEST_PATHS:
+        return False
+    return os.path.abspath(q) in _INPUT_PATHS or os.path.basename(q) in _INPUT_PATHS
+
 def _outname(task, fallback="output.txt"):
     # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
@@ -727,10 +999,15 @@ def _outname(task, fallback="output.txt"):
     # an absolute path, so the match started one char late and "/app/out/x.json"
     # came back as "app/out/x.json" -- then written, relative to cwd, to
     # /app/app/out/x.json. _inname below already carries this stem.
-    m = re.search(r'(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.[A-Za-z0-9]{1,5})\b', t, re.I)
+    # The verb must START a word that is not a path component: "Save result to
+    # `/output/scenario_3.json`" matched `output` inside the path and captured
+    # "/scenario_3.json" — a root-level file the run could not create (civ6:
+    # "wrote (not written) instead"). Any task with an /output/ directory hit it.
+    m = re.search(r'(?<![/\w])(?:save|output|write|export|emit|produce)\b[^.\n]{0,60}?([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.[A-Za-z0-9]{1,5})\b', t, re.I)
     if m:
         cands.append(m.group(1))
     cands += re.findall(r'([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.(?:html?|pdf|docx|xlsx|pptx|csv|json|txt|md|gif|png|jpe?g|svg|tsx?|jsx?|py|js|npy|npz|nc|parquet|h5))\b', t, re.I)
+    cands = [c for c in cands if not _is_input_path(c)]
     if want:
         for c in cands:
             ce = c.rsplit(".", 1)[-1].lower()
@@ -768,10 +1045,223 @@ def _inname(task, fallback=""):
             return bm.group(1)
     return fallback
 
+def _extract_json(text):
+    # A str slot asked for a JSON deliverable often wraps the document in a code
+    # fence or a sentence ("Here is the report:\n{...}"). Return the canonical
+    # JSON text when ONE whole document can be recovered, else None. Never invents.
+    import json as _j, re as _re
+    t = str(text or "").strip()
+    if not t:
+        return None
+    for cand in (t, _strip_fences(t)):
+        try:
+            return _j.dumps(_j.loads(cand), indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    m = _re.search(r"```(?:json)?\s*([\[{].*?[\]}])\s*```", t, _re.S)
+    if m:
+        try:
+            return _j.dumps(_j.loads(m.group(1)), indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    # outermost document first: whichever bracket opens earlier in the text
+    pairs = sorted((("{", "}"), ("[", "]")), key=lambda pc: (t.find(pc[0]) < 0, t.find(pc[0])))
+    for o, c in pairs:
+        i = t.find(o)
+        k = t.rfind(c)
+        if i >= 0 and k > i:
+            try:
+                return _j.dumps(_j.loads(t[i:k + 1]), indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+    return None
+
+def _json_guard(path, text):
+    # -> (text_to_write, recovered?). A .json path names a FORMAT, not just a
+    # location: recover a fenced/prose-wrapped document, else None so the caller
+    # parks the text in a .md sibling and says so (an absent deliverable is
+    # recoverable by the agent; a corrupt one is not).
+    import os as _o, json as _j
+    t = text if isinstance(text, str) else str(text)
+    if _o.path.splitext(str(path or ""))[1].lower() != ".json" or not t.strip():
+        return (t, False)
+    try:
+        _j.loads(t)
+        return (t, False)
+    except Exception:
+        pass
+    ex = _extract_json(t)
+    if ex is not None:
+        return (ex, True)
+    return (None, False)
+
+def _refuse_json_write(path, text):
+    import os as _o, sys as _s
+    _alt = _o.path.splitext(str(path))[0] + ".md"
+    try:
+        _write_artifact_raw(text, _alt)
+    except Exception:
+        _alt = ""
+    if _alt:
+        return ("[write_file refused: %s must contain JSON but this content is not JSON, so it was saved "
+                "as %s instead. If the task needs JSON at %s, produce it yourself from that file.]" % (path, _alt, path))
+    return ("[write_file refused: %s must contain JSON but this content is not JSON, and the fallback file "
+            "could not be written either (check the directory). Produce the JSON at %s yourself.]" % (path, path))
+
+_TASK_TEXT = {"t": ""}
+
+def _note_task_text(task):
+    # The task text is the only place a required OUTPUT SCHEMA is written down, and a
+    # skill's tools are generic by design, so nothing downstream can check the shape it
+    # produced against the shape the task asked for.
+    _TASK_TEXT["t"] = str(task or "")
+    return task
+
+def _schema_gap(path, content):
+    # When the task shows a JSON example for the file being written, name the top-level
+    # keys it declares that the content does not carry. energy-market-pricing asks for
+    # {"base_case": ..., "counterfactual": ...}; the LMP skill wrote its own generic
+    # report and reported success, and the verifier failed on a missing base_case.
+    import json as _j, re as _re
+    try:
+        if not str(path or "").lower().endswith(".json"):
+            return ""
+        task = _TASK_TEXT.get("t") or ""
+        if not task:
+            return ""
+        want = []
+        for blk in _re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", task):
+            probe = _re.sub(r"\.\.\.", "", blk)
+            try:
+                obj = _j.loads(probe)
+            except Exception:
+                obj = None
+                for k in _re.findall(r'^\s{2}"([A-Za-z0-9_]+)"\s*:', blk, _re.M):
+                    if k not in want:
+                        want.append(k)
+            if isinstance(obj, dict):
+                for k in obj:
+                    if k not in want:
+                        want.append(k)
+        if not want:
+            return ""
+        try:
+            got = _j.loads(str(content or ""))
+        except Exception:
+            return ""
+        if not isinstance(got, dict):
+            return ""
+        missing = [k for k in want if k not in got]
+        if not missing:
+            return ""
+        return (" [schema gap: the task specifies %s at the top level of this file; wrote %s. "
+                "Produce the missing key(s) yourself before delivering.]"
+                % (", ".join(want), ", ".join(sorted(got)) or "an empty object"))
+    except Exception:
+        return ""
+
+def _format_contract(task):
+    # The deliverable FORMAT is part of the contract every slot must honour: a
+    # str slot that "authors the report" wrote Markdown into the report.json the
+    # task asked for (3d-scan, azure-bgp, fix-visual-stability, civ6 — both
+    # runtimes) and the write was refused. Say it once, in the task text that
+    # every slot reads. Names no file, so the _outname/_inname scrapes are unmoved.
+    import re as _re
+    t = str(task or "")
+    if (not _sigil_on("WRITE_GUARDS")) or "[DELIVERABLE FORMAT]" in t:
+        return t
+    names = [n for n in _re.findall(r'([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.json)\b', t) if not _is_input_path(n)]
+    if not names:
+        return t
+    return (t + "\n\n[DELIVERABLE FORMAT] Every deliverable FILE whose filename ends in .json must contain "
+            "exactly one valid JSON document and nothing else: no Markdown, no prose, no code fences, "
+            "no comments. Use exactly the keys and structure the task specifies. This concerns the file's "
+            "contents only: intermediate steps (drafts, entries, notes, analyses) keep their own natural format.")
+
+
+def _csv_guard(path, text):
+    # A .csv deliverable written with a Markdown report (gravitational-wave: the
+    # matched-filter REPORT landed in detection_results.csv, "Missing required
+    # columns. Found: ['# Matched Filter Report']") is the CSV twin of the JSON
+    # refusal. -> (text_to_write, recovered?) or (None, False) to refuse. A
+    # fenced ```csv block inside prose is recovered; never invents rows.
+    import os as _o, re as _re
+    t = text if isinstance(text, str) else ("" if text is None else str(text))
+    if _o.path.splitext(str(path or ""))[1].lower() != ".csv" or not t.strip():
+        return (t, False)
+    def _looks_csv(u):
+        lines = [l for l in u.strip().splitlines() if l.strip()]
+        if not lines:
+            return False
+        head = lines[0].lstrip()
+        if head.startswith("#") or head.startswith("```"):
+            return False
+        return any(d in head for d in (",", "\t", ";", "|"))
+    if _looks_csv(t):
+        return (t, False)
+    m = _re.search(r"```(?:csv)?\s*\n(.*?)```", t, _re.S)
+    if m and _looks_csv(m.group(1)):
+        return (m.group(1).strip() + "\n", True)
+    return (None, False)
+
+def _refuse_csv_write(path, text):
+    import os as _o
+    _alt = _o.path.splitext(str(path))[0] + ".md"
+    try:
+        _write_artifact_raw(text, _alt)
+    except Exception:
+        _alt = ""
+    if _alt:
+        return ("[write_file refused: %s must contain CSV rows but this content is a report/prose, so it was saved "
+                "as %s instead. If the task needs CSV at %s, produce the rows yourself from that file.]" % (path, _alt, path))
+    return "[write_file refused: %s must contain CSV rows but this content is a report/prose; produce the CSV at %s yourself.]" % (path, path)
+
 def _write_artifact(content, path):
+    if not _sigil_on("WRITE_GUARDS"):
+        return _write_artifact_raw(content, path)
+    # EMPTY content never creates or overwrites a deliverable: an upstream carry that
+    # came out "" (citation-management: format_bibtex found no entries) was written
+    # over the task's answer.json as a 0-byte file — worse than no file, since the
+    # caller then sees the deliverable "present". Say so instead.
+    _c0 = content if isinstance(content, str) else ("" if content is None else str(content))
+    if not _c0.strip():
+        return "[write skipped: nothing to write for " + str(path) + " (empty content); the file was not created or changed]"
+    # never clobber a file the caller handed in as INPUT (see _note_input_path)
+    if _is_input_path(path):
+        import os as _o
+        _alt = str(path) + ".out"
+        _write_artifact.__dict__["_redirected"] = _alt
+        return "[write refused: " + str(path) + " is an INPUT of this run; wrote " + _alt + " instead] " + str(_write_artifact_raw(content, _alt))
+    _bin_ext = (".xlsx", ".xlsm", ".xls", ".docx", ".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".zip", ".parquet", ".h5", ".npz", ".sqlite", ".db", ".civ6map")
+    if os.path.splitext(str(path))[1].lower() in _bin_ext:
+        # text can never be a valid binary document: park it beside the path instead
+        _alt1 = str(path) + ".txt"
+        try:
+            _write_artifact_raw(_c0, _alt1)
+        except Exception:
+            _alt1 = "(not written)"
+        return ("[write refused: %s is a binary document format and this content is text; saved it as %s instead. "
+                "Produce the real file with the proper library.]" % (path, _alt1))
+    _txt, _rec = _json_guard(path, content)
+    if _txt is None:
+        return _refuse_json_write(path, content if isinstance(content, str) else str(content))
+    _txt, _rec2 = _csv_guard(path, _txt)
+    if _txt is None:
+        return _refuse_csv_write(path, content if isinstance(content, str) else str(content))
+    _rec = _rec or _rec2
+    if _rec:
+        import sys as _s
+        print("[write: recovered the JSON document from surrounding text for " + str(path) + "]", file=_s.stderr)
+    _out = _write_artifact_raw(_txt, path)
+    # a generic skill cannot know a task's required report shape; say so rather than
+    # reporting a bare path the caller will trust
+    return str(_out) + _schema_gap(path, _txt)
+
+def _write_artifact_raw(content, path):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         f.write(content if isinstance(content, str) else str(content))
+    _note_written_path(path)
     return path
 
 def _artifact_text(v, limit=8000):

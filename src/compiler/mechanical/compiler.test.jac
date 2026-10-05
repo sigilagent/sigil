@@ -785,7 +785,8 @@ test "a repair slot inherits the reads of the node that produced its carry" {
 test "a slot keeps every declared read, and its call site matches its arity" {
     src = transpile_ir(REPAIR_IR, "fixer");
     decl = src.split("def fixit(")[1].split(")")[0];
-    call = src.split("fixit(self.")[1].split(");")[0];
+    # the first arg is a list carry, now wrapped `list(_cap_seq(self.source))`: split on the call itself
+    call = [l for l in src.splitlines() if ("fixit(" in l) and ("def fixit" not in l)][0].split("fixit(", 1)[1].rsplit(");", 1)[0];
     # scope the check to the SIGNATURE — the walker also declares `has c6: bool`,
     # so searching the whole module would pass even with the read truncated away.
     assert "c6: bool" in decl;

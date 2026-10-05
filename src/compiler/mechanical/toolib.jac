@@ -131,18 +131,167 @@ return "\\n".join(_hits) if _hits else "no matches for /%s/ under %s" % (pattern
     "write_file": {
         "sig": "(path: str, content: str) -> str",
         "surface": "ACT.artifact",
-        "doc": "Write text to a file, creating parent directories. Returns the path.",
+        "doc": "Write text to a file, creating parent directories. Returns the path. A path whose extension declares a structured format is only written when the content IS that format.",
         "body": """
-import os
+import os, json as _json
 p = os.path.expanduser(str(path or ""))
 if not p:
     return "[write_file: no path given]"
+_text = str(content or "")
+# SIGIL_WRITE_GUARDS=0 (or false/no/off) writes verbatim: the escape hatch for a
+# task the guards below are wrong about. On by default.
+if str(os.environ.get("SIGIL_WRITE_GUARDS", "")).strip().lower() in ("0", "false", "no", "off"):
+    try:
+        _d = os.path.dirname(os.path.abspath(p))
+        if _d:
+            os.makedirs(_d, exist_ok=True)
+        with open(p, "w") as _f:
+            _f.write(_text)
+    except Exception as _e:
+        return "[write_file failed: %s]" % str(_e)[:200]
+    return p
+# NEVER overwrite a file the run was handed as INPUT (the registry the runtime keeps in
+# _INPUT_PATHS): xlsx's repair step wrote its Python script INTO the caller's workbook
+# (/root/data/openipf.xlsx) and the verifier found a corrupt zip (powerlifting 0/11, both
+# runtimes). `globals()` is how a self-contained body reaches the module registry.
+_reg = globals().get("_INPUT_PATHS") or set()
+try:
+    if p and (os.path.abspath(p) in _reg or os.path.basename(p) in _reg):
+        _alt0 = p + ".out"
+        with open(_alt0, "w") as _f0:
+            _f0.write(_text)
+        return "[write_file refused: %s is an INPUT of this run - wrote %s instead]" % (p, _alt0)
+except Exception:
+    pass
+# a BINARY document format never accepts text content (a script, a report, JSON): the
+# file would be corrupt whatever the text says. Park the text beside it and say so.
+_bin_ext = (".xlsx", ".xlsm", ".xls", ".docx", ".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".zip", ".parquet", ".h5", ".npz", ".sqlite", ".db", ".civ6map")
+if os.path.splitext(p)[1].lower() in _bin_ext and _text.strip():
+    _alt1 = p + ".txt"
+    try:
+        _d1 = os.path.dirname(os.path.abspath(_alt1))
+        if _d1:
+            os.makedirs(_d1, exist_ok=True)
+        with open(_alt1, "w") as _f1:
+            _f1.write(_text)
+    except Exception as _e1:
+        _alt1 = ""
+    return ("[write_file refused: %s is a binary document format and this content is text (a script/report cannot be a valid %s); "
+            "saved the text as %s instead. Produce the real file with the proper library.]" % (p, os.path.splitext(p)[1], _alt1 or "(not written)"))
+if not _text.strip():
+    # empty content never creates or overwrites a deliverable (a 0-byte answer.json
+    # reads as "present" to the caller and hides that nothing was produced)
+    return "[write_file skipped: nothing to write for %s (empty content); the file was not created or changed]" % p
+# A deliverable path names a FORMAT, not just a location. The output-name
+# fallback reads the filename out of the task, so a skill that produces a
+# Markdown report will happily write it to the report.json the task asked
+# for -- and the caller cannot tell a corrupt deliverable from a correct
+# one (caught live: energy-ac wrote "# Network Data Report" into
+# report.json; all 24 checks died on JSONDecodeError at char 0, and the
+# agent, which had the analysis and could have written real JSON, found
+# the file already there). Refuse the write and say so: an absent
+# deliverable is recoverable, a corrupt one is not.
+_ext = os.path.splitext(p)[1].lower()
+if _ext == ".json" and _text.strip():
+    _ok = False
+    try:
+        _json.loads(_text)
+        _ok = True
+    except Exception:
+        pass
+    if not _ok:
+        # not JSON: recover ONE wrapped document (a code fence, or prose around
+        # {...}) -- a str slot asked for a JSON deliverable does this constantly
+        # (3d-scan, azure-bgp, civ6, both runtimes). Never invents content.
+        import re as _re
+        _t = _text.strip()
+        _cands = []
+        if _t.startswith("```"):
+            _ls = _t.splitlines()[1:]
+            if _ls and _ls[-1].strip().startswith("```"):
+                _ls = _ls[:-1]
+            _cands.append("\\n".join(_ls))
+        _m = _re.search(r"```(?:json)?\\s*([\\[{].*?[\\]}])\\s*```", _t, _re.S)
+        if _m:
+            _cands.append(_m.group(1))
+        # outermost document first: whichever bracket opens earlier in the text
+        _pairs = [("{", "}"), ("[", "]")]
+        if _t.find("[") >= 0 and (_t.find("{") < 0 or _t.find("[") < _t.find("{")):
+            _pairs.reverse()
+        for _o, _c in _pairs:
+            _i = _t.find(_o)
+            _k = _t.rfind(_c)
+            if _i >= 0 and _k > _i:
+                _cands.append(_t[_i:_k + 1])
+        for _cnd in _cands:
+            try:
+                _text = _json.dumps(_json.loads(_cnd), indent=2, ensure_ascii=False)
+                _ok = True
+                break
+            except Exception:
+                continue
+    if not _ok:
+        # refuse: park the text in a .md sibling and say so (an absent deliverable
+        # is recoverable by the caller; a corrupt one is not)
+        _alt = os.path.splitext(p)[0] + ".md"
+        try:
+            _d2 = os.path.dirname(os.path.abspath(_alt))
+            if _d2:
+                os.makedirs(_d2, exist_ok=True)
+            with open(_alt, "w") as _f2:
+                _f2.write(_text)
+        except Exception as _e2:
+            _alt = ""
+        if _alt:
+            return ("[write_file refused: %s must contain JSON but this content is not JSON, so it was saved "
+                    "as %s instead. If the task needs JSON at %s, produce it yourself from that file.]" % (p, _alt, p))
+        return ("[write_file refused: %s must contain JSON but this content is not JSON, and the fallback file "
+                "could not be written either (check the directory). Produce the JSON at %s yourself.]" % (p, p))
+if _ext == ".csv" and _text.strip():
+    # the CSV twin of the JSON guard: a .csv deliverable written with a Markdown
+    # report (gravitational-wave: "Missing required columns. Found: ['# Matched
+    # Filter Report']"). Rows pass; a fenced ```csv block inside prose is recovered;
+    # prose/report text is parked in a .md sibling and the caller is told.
+    import re as _re2
+    _ls = [_l for _l in _text.strip().splitlines() if _l.strip()]
+    _h = _ls[0].lstrip() if _ls else ""
+    _ok = bool(_ls) and (not _h.startswith("#")) and (not _h.startswith("```")) and (("," in _h) or ("\\t" in _h) or (";" in _h) or ("|" in _h))
+    if not _ok:
+        _m2 = _re2.search(r"```(?:csv)?\\s*\\n(.*?)```", _text, _re2.S)
+        if _m2:
+            _b = _m2.group(1)
+            _ls2 = [_l2 for _l2 in _b.strip().splitlines() if _l2.strip()]
+            _h2 = _ls2[0].lstrip() if _ls2 else ""
+            if _ls2 and (not _h2.startswith("#")) and (("," in _h2) or ("\\t" in _h2) or (";" in _h2) or ("|" in _h2)):
+                _text = _b.strip() + "\\n"
+                _ok = True
+    if not _ok:
+        _alt = os.path.splitext(p)[0] + ".md"
+        try:
+            _d3 = os.path.dirname(os.path.abspath(_alt))
+            if _d3:
+                os.makedirs(_d3, exist_ok=True)
+            with open(_alt, "w") as _f3:
+                _f3.write(_text)
+        except Exception as _e3:
+            _alt = ""
+        if _alt:
+            return ("[write_file refused: %s must contain CSV rows but this content is a report/prose, so it was saved "
+                    "as %s instead. If the task needs CSV at %s, produce the rows yourself from that file.]" % (p, _alt, p))
+        return "[write_file refused: %s must contain CSV rows but this content is a report/prose; produce the CSV at %s yourself.]" % (p, p)
 try:
     _d = os.path.dirname(os.path.abspath(p))
     if _d:
         os.makedirs(_d, exist_ok=True)
     with open(p, "w") as _f:
-        _f.write(str(content or ""))
+        _f.write(_text)
+    try:
+        _wp = globals().get("_WRITTEN_PATHS")
+        if _wp is not None:
+            _wp.add(os.path.abspath(p))
+            _wp.add(os.path.basename(p))
+    except Exception:
+        pass
 except Exception as _e:
     return "[write_file failed: %s]" % str(_e)[:200]
 return p
