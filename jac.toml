@@ -108,12 +108,10 @@ tailwindcss = "^4.0.0"
 plugins = ["tailwindcss()"]
 lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 
-# The Observatory's dedicated port — same 8199 the `sigil` launcher's
-# SIGIL_PORT defaults to. `sigil serve` claims it strictly (_claim_port);
-# a bare `jac start observatory.jac` also lands here, but only `sigil serve`
-# guards against jac's silent port-in-use fallback.
-[serve]
-port = 8199
+# No [serve] port: under jac >=0.37 a configured port is an implicit --port on
+# EVERY `jac run`, and on a run that executes (--no-serve, the whole CLI) that
+# is a hard error. The Observatory's 8199 is passed explicitly instead —
+# OBSERVATORY_PORT in src/main.jac, SIGIL_PORT in the `sigil` launcher.
 
 # Served page identity — same brand as the website (docs/index.html).
 [client.app_meta_data]
