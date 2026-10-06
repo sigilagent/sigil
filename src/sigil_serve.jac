@@ -37,7 +37,7 @@ def serve_log_path() -> str {
     return os.path.join(log_dir(), "observatory.log");
 }
 
-def _port_owner(port: str) -> list {
+def _port_owner(port: str) -> list[any] {
     # [pid, command] of whatever LISTENs on the port, or [] if it is free.
     try {
         r = subprocess.run(["lsof", "-ti", "tcp:" + str(port), "-sTCP:LISTEN"],
@@ -96,7 +96,7 @@ def unmark_serving() -> None {
     return None;
 }
 
-def serve_start(port: str = "", ready_timeout_s: int = 5) -> dict {
+def serve_start(port: str = "", ready_timeout_s: int = 5) -> dict[str, any] {
     # Spawn the ordinary foreground supervisor, detached: the prompt comes back
     # and the build output goes to the log, never to the terminal.
     #
@@ -125,7 +125,7 @@ def serve_start(port: str = "", ready_timeout_s: int = 5) -> dict {
     } except Exception as e {
         return {"ok": False, "error": "cannot open log " + serve_log_path() + ": " + str(e)[:120]};
     }
-    argv = [_jac_bin(), "run", entry_script(), "--", "serve", prt];
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "serve", prt];
     try {
         # start_new_session detaches it from this terminal's process group, so
         # closing the shell does not take the server with it, and its output
@@ -213,7 +213,7 @@ def serve_starting() -> bool {
     } except Exception as e { return False; }
 }
 
-def ensure_server(port: str = "", wait_s: float = 2.0) -> dict {
+def ensure_server(port: str = "", wait_s: float = 2.0) -> dict[str, any] {
     if str(os.environ.get("SIGIL_NO_SERVE") or "") == "1" {
         return {"started": False, "reason": "SIGIL_NO_SERVE"};
     }
@@ -247,7 +247,7 @@ def ensure_server(port: str = "", wait_s: float = 2.0) -> dict {
         handle = open(serve_log_path(), "a");
         import from .sigil_runtime { _jac_bin, entry_script }
         proc = subprocess.Popen(
-            [_jac_bin(), "run", entry_script(), "--", "serve", prt],
+            [_jac_bin(), "run", "--no-serve", entry_script(), "--", "serve", prt],
             cwd=project_root(), stdout=handle, stderr=handle,
             stdin=subprocess.DEVNULL, start_new_session=True);
     } except Exception as ex {
@@ -272,7 +272,7 @@ def ensure_server(port: str = "", wait_s: float = 2.0) -> dict {
     return {"started": True, "reason": "still coming up", "port": prt};
 }
 
-def serve_stop(timeout_s: int = 30) -> dict {
+def serve_stop(timeout_s: int = 30) -> dict[str, any] {
     # Marked first, and marked even when nothing was running — `serve stop`
     # means "stay stopped", or the next CLI command starts it straight back up.
     mark_serve_stopped();
@@ -341,12 +341,12 @@ def serve_stop(timeout_s: int = 30) -> dict {
             + " — `kill -9` it if you are sure"};
 }
 
-def serve_status() -> dict {
+def serve_status() -> dict[str, any] {
     prt = serve_port();
     owner = _port_owner(prt);
     pid = read_pid(SERVE_PID);
     running = bool(owner) or serve_running();
-    out: dict = {
+    out: dict[str, any] = {
         "running": running,
         "pid": pid if (pid > 0) else (int(owner[0]) if owner else 0),
         "port": prt,

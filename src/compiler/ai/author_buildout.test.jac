@@ -198,7 +198,7 @@ edges:
   - {from: read_input, to: done}
 """;
 
-glob GAP_MSG: list = [
+glob GAP_MSG: list[any] = [
     "DROPPED IO/MANDATORY rule 'r2' — no EMBODIED_WRITE realization. add an ACT "
     "(write-tool or content read) traced to 'r2' that writes the deliverable: write the summary"
 ];

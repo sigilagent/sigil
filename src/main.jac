@@ -65,10 +65,10 @@ import from src.sigil_sessions { session_note, session_show, session_reset, sess
 glob _CLAUDE_MODE: bool = False;   # set by the global `--claude` flag, read at dispatch
 glob _QUIET: bool = False;         # set by the global `--quiet` flag: never stream model output
 
-def cli_args(raw: list) -> list {
+def cli_args(raw: list[any]) -> list[any] {
     # jac leaves its own flags in sys.argv (e.g. -s <session> -- <cmd>). Take
     # everything after '--' if present, else drop argv[0] and skip -s <file>.
-    args: list = [];
+    args: list[any] = [];
     if "--" in raw {
         args = raw[raw.index("--") + 1:];
     } else {
@@ -81,7 +81,7 @@ def cli_args(raw: list) -> list {
     }
     # `--claude` is global, not per-command: strip it wherever it lands so no
     # command's positional args shift, and record it for the dispatch below.
-    out: list = [];
+    out: list[any] = [];
     for a in args {
         if a == "--claude" { _CLAUDE_MODE = True; }
         elif (a == "--quiet") or (a == "-q") { _QUIET = True; }
@@ -90,8 +90,8 @@ def cli_args(raw: list) -> list {
     return out;
 }
 
-glob _CV: dict = {"open": "", "line": ""};          # current in-flight stage: label + rendered line
-glob _HB: dict = {"on": False, "t0": 0.0, "gen": 0}; # the stage heartbeat (see _hb_tick)
+glob _CV: dict[str, any] = {"open": "", "line": ""};          # current in-flight stage: label + rendered line
+glob _HB: dict[str, any] = {"on": False, "t0": 0.0, "gen": 0}; # the stage heartbeat (see _hb_tick)
 
 def _hb_start() -> None {
     # Start a fresh heartbeat, retiring any prior one. `gen` fences a stale
@@ -137,7 +137,7 @@ def _hb_tick(mygen: int) -> None {
 # the current line only works when nothing else is writing to it, and here
 # something is. Stages print as a scrolling transcript instead.
 # ---------------------------------------------------------------------------
-glob _VB: dict = {"on": False, "col": 0, "open": False, "w": 100, "kind": "", "nl": 0};
+glob _VB: dict[str, any] = {"on": False, "col": 0, "open": False, "w": 100, "kind": "", "nl": 0};
 
 def _term_cols() -> int {
     # A pty with no winsize set reports 0 rather than raising, and 0 silently
@@ -222,7 +222,7 @@ def _install_stream_view() -> bool {
     } except Exception as e { return False; }
 }
 
-def _compile_ev(ev: dict) -> None {
+def _compile_ev(ev: dict[str, any]) -> None {
     # live build view: start opens the stage line, done rewrites it with counts
     # + timing. Only ever touches the CURRENT line (portable ANSI). The stage
     # label and summary come from sigil.jac so chat's trace says the same thing.
@@ -268,7 +268,7 @@ def _compile_ev(ev: dict) -> None {
     }
 }
 
-def _arg(argv: list, i: int) -> str {
+def _arg(argv: list[any], i: int) -> str {
     return str(argv[i]) if len(argv) > i else "";
 }
 
@@ -310,7 +310,7 @@ def _to_int(s: str, dflt: int) -> int {
     try { return int(str(s).strip()); } except Exception { return dflt; }
 }
 
-def _json_text(payload: dict) -> str {
+def _json_text(payload: dict[str, any]) -> str {
     # One JSON line for the `api` command. Anything the encoder cannot represent
     # becomes its string form rather than an exception — an endpoint returning a
     # slightly lossy answer beats one returning a 500 because a value was a node.
@@ -364,7 +364,7 @@ def _clarify_ask_tui(question: str) -> str {
 # One live status line for the spec loop, cooking-show style: which round, which
 # phase, how many obligations found so far. `_CV["line"]` is the heartbeat's
 # canvas — set it here and the ticker keeps elapsed time counting beside it.
-def _lint_spec_status(ev: dict) -> None {
+def _lint_spec_status(ev: dict[str, any]) -> None {
     purple = chr(27) + "[38;5;135m";
     dim = chr(27) + "[2m";
     rst = chr(27) + "[0m";
@@ -384,7 +384,7 @@ def _lint_spec_status(ev: dict) -> None {
     _CV["line"] = "  " + purple + chr(0x25D0) + rst + " lint  " + where + verb;
 }
 
-def _lint_review_tui(path: str, source: str) -> dict {
+def _lint_review_tui(path: str, source: str) -> dict[str, any] {
     import from src.compiler.ai.lint { apply_edits }
     import from src.compiler.ai.spec_loop { set_spec_progress }
     amber = chr(27) + "[38;5;220m";
@@ -418,7 +418,7 @@ def _lint_review_tui(path: str, source: str) -> dict {
     fixable = [f for f in findings if f.applicable];
     print("  lint: " + str(len(findings)) + " finding(s), " + str(len(fixable))
           + " with a suggested fix" + (":" if fixable else "."));
-    accepted: list = [];
+    accepted: list[any] = [];
     stop = False;
     for f in findings {
         one = str(f.quote).replace(chr(10), " ")[:90];
@@ -498,7 +498,7 @@ def _align_guest_root(data_dir: str) -> bool {
 # docs' curl examples target it. Keep all three in sync.
 glob OBSERVATORY_PORT: str = "8199";
 
-def _port_owner(port: str) -> list {
+def _port_owner(port: str) -> list[any] {
     # [pid, command] of whatever LISTENs on the port, or [] if it is free.
     try {
         r = subprocess.run(["lsof", "-ti", "tcp:" + port, "-sTCP:LISTEN"],
@@ -520,7 +520,7 @@ def _claim_port(port: str) -> bool {
     if not owner { return True; }
     pid = str(owner[0]);
     cmd = str(owner[1]);
-    stale = ("observatory.jac" in cmd) or ("jac start" in cmd);
+    stale = ("observatory.jac" in cmd) or ("jac start" in cmd) or ("--serve" in cmd);
     print("observatory port " + port + " is already in use by pid " + pid
           + (" (looks like a previous observatory run):" if stale else ":"));
     print("  " + cmd[:140]);
@@ -570,7 +570,9 @@ def serve_observatory(port: str) {
     port = str(port) if port else OBSERVATORY_PORT;
     if not _claim_port(port) { return; }
     aligned = _align_guest_root(data);
-    cmdline = [_jac_bin(), "start", os.path.join(proj, "observatory.jac"), "--port", port];
+    # jac >=0.37 retired `jac start`: `jac run --serve` is the server, and a web-app
+    # defaults to --dev (HMR) — the Observatory is a production serve
+    cmdline = [_jac_bin(), "run", "--serve", "--no-dev", "--port", port, os.path.join(proj, "observatory.jac")];
     p = subprocess.Popen(cmdline, cwd=proj);
     # Record ourselves as THE observatory, whether this is a terminal run or the
     # detached child of `serve start` — otherwise `serve status` would only ever
@@ -1040,7 +1042,7 @@ with entry:__main__ {
         if (not sig) or (not outd) {
             print("usage: eject-agent <signature|all> <dir> [name]");
         } else {
-            sigs: list = [] if sig == "all" else [sig];
+            sigs: list[any] = [] if sig == "all" else [sig];
             r = eject_agent(_arg(argv, 3), user_path(outd), sigs, "");
             if not r["ok"] { print("xx " + str(r["error"]), file=sys.stderr); sys.exit(1); }
             leaks = list(r["compiler_leaks"]);
@@ -1072,9 +1074,9 @@ with entry:__main__ {
         import json;
         name = _arg(argv, 1);
         raw = _arg(argv, 2) if len(argv) > 2 else "{}";
-        a: dict = {};
+        a: dict[str, any] = {};
         try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
-        payload: dict = {"ok": True, "data": None, "error": ""};
+        payload: dict[str, any] = {"ok": True, "data": None, "error": ""};
         try {
             if name == "soul" { payload["data"] = describe_soul(); }
             elif name == "graph" {
@@ -1132,7 +1134,7 @@ with entry:__main__ {
                 };
             }
             elif name == "models" {
-                _data: list = [];
+                _data: list[any] = [];
                 for tier in ["frontier", "small", "router"] {
                     _data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
                 }

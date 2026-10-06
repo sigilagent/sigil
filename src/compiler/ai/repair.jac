@@ -121,7 +121,7 @@ def _sigil_bin() -> str {
     return local if os.path.exists(local) else "sigil";
 }
 
-def claude_repair(ir_text: str, name: str, diagnostic: str) -> dict {
+def claude_repair(ir_text: str, name: str, diagnostic: str) -> dict[str, any] {
     # Run a Claude Code agent over the failing IR in a scratch workspace. Returns
     # {"ir_text": the IR the agent left behind (or ""), "attempts": [...]}. Never
     # raises into the compile: an escalation that fails is simply no repair.

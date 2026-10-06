@@ -71,7 +71,7 @@ test "fold_untraced_prohibitions traces the prohibition on model nodes only" {
     folded = fold_untraced_prohibitions(FOLD_IR, spec, ["r_forbid"]);
     assert folded;
     pir = parse_ir(folded);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for n in pir.nodes { by_id[n.id] = n; }
     # the model node carries the prohibition + trace; code/terminal untouched
     assert "r_forbid" in by_id["fix"].traces_to;
@@ -114,7 +114,7 @@ test "fold falls back to code nodes when the pipeline is fully deterministic" {
     folded = fold_untraced_prohibitions(ALL_CODE_IR, spec, ["r_policy"]);
     assert folded;
     pir = parse_ir(folded);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for n in pir.nodes { by_id[n.id] = n; }
     assert "r_policy" in by_id["parse"].traces_to;
     assert "r_policy" in by_id["emit"].traces_to;

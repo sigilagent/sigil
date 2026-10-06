@@ -139,7 +139,7 @@ def _strip_fence(s: str) -> str {
 }
 
 
-def author_buildout(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict {
+def author_buildout(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict[str, any] {
     # Phase 0 (mechanical) + Phases 1..n (one bounded model call per region).
     notes: list[str] = [];
     ir: str = skeleton_ir(spec, name);
@@ -235,7 +235,7 @@ def close_gaps(guide: str, skill: str, ir_so_far: str, gaps: str) -> str by buil
 
 
 def repair_localized(skill: str, spec: RuleSet, ir_text: str, msgs: list[str],
-                     size: int = 0) -> dict {
+                     size: int = 0) -> dict[str, any] {
     # Close `msgs` (the gate's own drop directives) against an existing IR, a
     # bounded chunk at a time. Adoption is per chunk and monotone: a candidate
     # that fails to parse or loses any realization is discarded and the prior

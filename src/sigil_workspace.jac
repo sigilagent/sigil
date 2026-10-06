@@ -46,13 +46,13 @@ import from .sigil_secrets { resolve_refs, redact_secrets }
 # ---------------------------------------------------------------------------
 # Live tool trace + inline approver (wired by the REPL; None = silent/scripted)
 # ---------------------------------------------------------------------------
-glob TRACE: list = [];        # [{tool, detail, ok}] — every tool call this process
+glob TRACE: list[any] = [];        # [{tool, detail, ok}] — every tool call this process
 glob _SINK: any = None;       # callback(tool, detail, ok) — live render hook
 glob _APPROVER: any = None;   # callback(command)->bool — inline approve of a pending exec
 
 def set_trace_sink(fn: any) -> None { _SINK = fn; }
 def set_approver(fn: any) -> None { _APPROVER = fn; }
-def drain_trace() -> list { out = list(TRACE); TRACE = []; return out; }
+def drain_trace() -> list[any] { out = list(TRACE); TRACE = []; return out; }
 
 def ask_approval(subject: str) -> bool {
     # The one door to whoever is at the prompt. Headless (daemon, channel, a
@@ -217,7 +217,7 @@ def ws_edit(path: str, old: str, new: str) -> str {
 # agent understand a codebase before diving in: ws_tree for structure, ws_grep to
 # locate. Noise dirs are pruned so a repo with node_modules/.git stays readable.
 # ---------------------------------------------------------------------------
-glob _SKIP_DIRS: list = [".git", "node_modules", "__pycache__", ".jac", ".venv", "venv",
+glob _SKIP_DIRS: list[any] = [".git", "node_modules", "__pycache__", ".jac", ".venv", "venv",
                          "dist", "build", ".mypy_cache", ".pytest_cache", ".idea",
                          ".next", "target", ".gradle", "vendor"];
 
@@ -333,7 +333,7 @@ def _docker_available() -> bool {
     return shutil.which("docker") is not None;
 }
 
-def _docker_argv(command: str) -> list {
+def _docker_argv(command: str) -> list[any] {
     # sandbox=docker: the command runs in a locked-down container with only the
     # workspace mounted. Still no timeout — a container is a boundary, not a clock.
     img = os.getenv("SIGIL_SANDBOX_IMAGE", "python:3.13-slim");
@@ -382,10 +382,10 @@ def _job_forget(jid: str) -> None {
     return None;
 }
 
-def _disk_jobs() -> list {
+def _disk_jobs() -> list[any] {
     # Every recorded job, with whether its process is still alive. Records for
     # jobs that finished long ago are pruned as they are noticed.
-    out: list = [];
+    out: list[any] = [];
     try {
         names = sorted(os.listdir(_jobs_dir()));
     } except Exception as e {
@@ -405,7 +405,7 @@ def _disk_jobs() -> list {
     return out;
 }
 
-def _find_disk_job(jid: str) -> dict {
+def _find_disk_job(jid: str) -> dict[str, any] {
     for r in _disk_jobs() { if str(r["id"]) == str(jid) { return dict(r); } }
     return {};
 }
@@ -598,7 +598,7 @@ def ws_jobs() -> str {
 # The chat trace is one row per event, so a raw token stream would drown it. The
 # model's output is buffered to whole lines instead: you still watch the artifact
 # being written, at the granularity this surface can render.
-glob _GEN: dict = {"buf": ""};
+glob _GEN: dict[str, any] = {"buf": ""};
 
 def _gen_sink(kind: str, text: str) -> None {
     if str(kind) != "text" { return; }        # thinking stays out of the transcript
@@ -634,7 +634,7 @@ def _stream_view_off() -> None {
     } except Exception as e {}
 }
 
-def _compile_stage(ev: dict) -> None {
+def _compile_stage(ev: dict[str, any]) -> None {
     # The same staged build view `sigil compile` prints on the CLI, streamed onto
     # the chat trace: a line when a stage opens, and the stage again with its counts
     # and timing when it lands. The CLI rewrites one line in place; a trace is
@@ -782,7 +782,7 @@ def web_fetch(url: str) -> str {
 # challenges, not results — same reason OpenClaw uses Brave/Firecrawl/LLM-native
 # search, never scraping). Keys come from the environment (document them with
 # `secret add` if you like). Brave is tried first, then Firecrawl.
-def _fmt_results(items: list) -> str {
+def _fmt_results(items: list[any]) -> str {
     out: list = [];
     i = 0;
     for it in items[:6] {
@@ -793,7 +793,7 @@ def _fmt_results(items: list) -> str {
     return "\n".join(out);
 }
 
-def _search_brave(query: str, key: str) -> list {
+def _search_brave(query: str, key: str) -> list[any] {
     url = "https://api.search.brave.com/res/v1/web/search?count=6&q=" + quote_plus(query);
     req = Request(url, headers={"X-Subscription-Token": key, "Accept": "application/json", "User-Agent": "sigil/0.1"});
     resp = urlopen(req, timeout=20);
@@ -803,7 +803,7 @@ def _search_brave(query: str, key: str) -> list {
     return [{"title": str(r.get("title", "")), "url": str(r.get("url", "")), "desc": str(r.get("description", ""))} for r in results];
 }
 
-def _search_firecrawl(query: str, key: str) -> list {
+def _search_firecrawl(query: str, key: str) -> list[any] {
     data = json.dumps({"query": query, "limit": 6}).encode("utf-8");
     req = Request("https://api.firecrawl.dev/v1/search", data=data,
                   headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "User-Agent": "sigil/0.1"});
@@ -825,7 +825,7 @@ def _claude_search_ready() -> bool {
     } except Exception as e { return False; }
 }
 
-def _search_claude(query: str) -> list {
+def _search_claude(query: str) -> list[any] {
     import from .sigil_claude_cc { web_search as cc_search }
     return list(cc_search(query, 6));
 }
@@ -867,7 +867,7 @@ def web_search(query: str) -> str {
             "e.g. GitHub: web_fetch('https://api.github.com/repos/<org>/<repo>/pulls').");
 }
 
-def workspace_info() -> dict {
+def workspace_info() -> dict[str, any] {
     base = ws_root();
     n = 0;
     try { n = len(list(os.listdir(base))); } except Exception as e {}

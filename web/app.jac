@@ -15,13 +15,13 @@ the 2.5s poll covers only graph + token tail; soul/library/mcp re-fetch when the
 graph's counts change, and cron/ops load when their tab opens (or on ↻).
 """
 
-sv import from src.sigil {
+import from src.sigil {
     api_graph, api_observability, api_solve, api_soul, api_library, api_mcp,
     api_teach, api_recall, api_eval, api_relearn, api_forget,
     api_cron_list, api_cron_runs, api_cron_enable, api_cron_remove,
     api_skill_agir, api_tasks, api_hooks, api_channels, api_approvals
 }
-sv import from src.cron { api_cron_tick }
+import from src.cron { api_cron_tick }
 import from .graph_canvas { GraphCanvas }
 import from .agir_canvas { AgirCanvas }
 import from "./time_interop.js" { fmtWhen }
@@ -35,7 +35,7 @@ glob TILE: str = "rounded-lg border border-slate-200 dark:border-slate-800 p-2";
 
 # AG-IR legend: [key, dot colour, label] — mirrors agir_canvas._acolor, which
 # mirrors the primitive families in src/contracts/.
-glob AGIR_LEGEND: list = [
+glob AGIR_LEGEND: list[any] = [
     ["mind", "bg-[#a78bfa]", "model slot"],
     ["code", "bg-[#22d3ee]", "code"],
     ["boundary", "bg-[#38bdf8]", "sense / act"],
@@ -45,7 +45,7 @@ glob AGIR_LEGEND: list = [
 
 # graph legend: [label, dot colour, shape, blurb] — mirrors graph_canvas._vcolor
 # (the website's palette: gold soul, violet registry, cyan compiled core).
-glob LEGEND: list = [
+glob LEGEND: list[any] = [
     ["soul", "bg-[#f5c451]", "rounded-full", "identity + config"],
     ["registry", "bg-[#8b5cf6]", "rounded-full", "anchors the skills"],
     ["skill", "bg-[#22d3ee]", "rounded-full", "compiled procedure"],
@@ -83,11 +83,11 @@ def:pub App() -> JsxElement {
         tab: str = "chat",
         status: str = "connecting…",
         live: bool = True;
-    has graph: any = None,
+    has gdata: any = None,
         obs: any = None,
         soul: any = None,
-        lib: list = [],
-        mcp: list = [];
+        lib: list[any] = [],
+        mcp: list[any] = [];
     has libN: str = "?",
         memN: str = "?",
         mcpN: str = "?";
@@ -95,12 +95,12 @@ def:pub App() -> JsxElement {
         selSkill: str = "";
     has task: str = "",
         solving: bool = False;
-    has chat: list = [],
+    has chat: list[any] = [],
         traceOpen: int = -1;
-    has cron: list = [],
-        opsTasks: list = [],
-        hooks: list = [],
-        channels: list = [],
+    has cron: list[any] = [],
+        opsTasks: list[any] = [],
+        hooks: list[any] = [],
+        channels: list[any] = [],
         approvals: any = None,
         ticking: bool = False;
     has callSel: int = -1;
@@ -108,12 +108,12 @@ def:pub App() -> JsxElement {
         teachKind: str = "fact",
         teachMsg: str = "";
     has recallQ: str = "",
-        recallRes: list = [];
+        recallRes: list[any] = [];
     has agir: any = None,
         agirSig: str = "",
         agirNode: str = "",
         agirLoading: bool = False;
-    has cronRuns: dict = {},
+    has cronRuns: dict[str, any] = {},
         cronOpen: str = "",
         cronBusy: str = "";
     has probe: str = "",
@@ -236,7 +236,7 @@ def:pub App() -> JsxElement {
         if rg.reports {
             g = rg.reports[0];
             if (g is not None) and (not g.error) and g.nodes {
-                graph = g;
+                gdata = g;
                 status = str(g.skills) + " skills · " + str(g.memories) + " memories · " + str(g.mcp) + " mcp";
                 # the graph's counts are the change signal for the heavier fetches
                 if str(g.skills) != libN { libN = str(g.skills); fetchLibrary(); }
@@ -378,9 +378,9 @@ def:pub App() -> JsxElement {
         return lambda { clearInterval(iv); };
     }, [live, libN, memN, mcpN]);
 
-    gnodes = graph.nodes if graph is not None else [];
-    gedges = graph.edges if graph is not None else [];
-    calls: list = list(reversed(obs.calls)) if obs is not None else [];
+    gnodes = gdata.nodes if gdata is not None else [];
+    gedges = gdata.edges if gdata is not None else [];
+    calls: list[any] = list(reversed(obs.calls)) if obs is not None else [];
     selNodes = ([n for n in gnodes if str(n.id) == gSel]) if gSel else [];
 
     return

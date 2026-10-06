@@ -440,7 +440,7 @@ def _lock_release(fh: any) -> None {
     return None;
 }
 
-def graph_write(mutate: any, context: str = "") -> dict {
+def graph_write(mutate: any, context: str = "") -> dict[str, any] {
     # Run `mutate` — a zero-arg callable that READS the graph and mutates it —
     # as a serialized critical section, then commit it. Returns
     # {"ok": bool, "data": <mutate's return>, "error": str}; never raises, so
@@ -471,7 +471,7 @@ def graph_write(mutate: any, context: str = "") -> dict {
 def execute_module(module_path: str, task: str, model_name: str,
                    skill: str = "", workdir: str = ".", timeout: int = 1800,
                    mcp_json: str = "", signature: str = "",
-                   skill_tools: str = "") -> dict {
+                   skill_tools: str = "") -> dict[str, any] {
     mod = Path(module_path).stem;
     driver = Path(workdir) / f"_driver_{mod}.jac";
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER));

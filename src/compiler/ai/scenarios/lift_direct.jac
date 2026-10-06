@@ -81,8 +81,8 @@ edges:
   - {from: emit, to: done, modality: mandatory}
 """;
 
-glob _events: list = [];
-def _collect(ev: dict) -> None { _events.append(ev); }
+glob _events: list[any] = [];
+def _collect(ev: dict[str, any]) -> None { _events.append(ev); }
 
 with entry:__main__ {
     set_lift_progress(_collect);

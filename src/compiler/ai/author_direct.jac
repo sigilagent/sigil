@@ -73,11 +73,11 @@ def _guide_text() -> str {
 # A code example (toolib + task-filename binding) and a model example (typed
 # model->code boundary) — the two shapes that most anchor idiom without bloating
 # the prompt. Env GOLDEN_FEWSHOT overrides the picks (comma-separated names).
-glob _FEWSHOT_DEFAULT: list = ["word_frequency", "contact_to_csv"];
+glob _FEWSHOT_DEFAULT: list[any] = ["word_frequency", "contact_to_csv"];
 
 def _golden_fewshot() -> str {
     d = os.path.join(_docs_base(), "docs", "reference", "agir-cookbook");
-    picks: list = _FEWSHOT_DEFAULT;
+    picks: list[any] = _FEWSHOT_DEFAULT;
     env = os.environ.get("GOLDEN_FEWSHOT", "");
     if env { picks = [str(x).strip() for x in env.split(",") if str(x).strip()]; }
     blocks: list = [];
@@ -127,7 +127,7 @@ def _strip_fence(s: str) -> str {
 # `gaps` carries rule-scoped repair directives (raise2's faithfulness closure) —
 # appended to the frozen rule set so the SAME coherent author closes exactly the
 # named gaps and changes nothing else. Empty on a first pass.
-def author_direct(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict {
+def author_direct(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict[str, any] {
     notes: list = [];
     guide = _guide_text();
     if not guide { notes.append("direct author: guide not found — authoring against sem only"); }

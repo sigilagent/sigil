@@ -12,7 +12,7 @@ import subprocess;
 import from urllib.request { Request, urlopen }
 import from .sigil_core { awaken, Soul, teach }
 
-edge Observes {}   # Soul -> Hook
+edge Observes: any --> any {}   # Soul -> Hook
 
 node Hook {
     has name: str;
@@ -26,7 +26,7 @@ node Hook {
 
 def _hooks(soul: Soul) -> list[Hook] { return [soul -->[?:Hook]]; }
 
-def hook_add(name: str, event: str, action_kind: str, action: str) -> dict {
+def hook_add(name: str, event: str, action_kind: str, action: str) -> dict[str, any] {
     soul = awaken();
     for h in _hooks(soul) { if h.name == name { h.event = event; h.action_kind = action_kind; h.action = action; return {"name": name, "updated": True}; } }
     hk = Hook(name=name, event=event, action_kind=action_kind, action=action);
@@ -34,7 +34,7 @@ def hook_add(name: str, event: str, action_kind: str, action: str) -> dict {
     return {"name": name, "updated": False};
 }
 
-def hook_list() -> list {
+def hook_list() -> list[any] {
     soul = awaken();
     return [{"name": h.name, "event": h.event, "kind": h.action_kind,
              "enabled": h.enabled, "fired": h.fired} for h in _hooks(soul)];
@@ -73,11 +73,11 @@ def _run_action(h: Hook, payload: str) -> str {
     return "note: " + h.action;
 }
 
-def fire_hooks(event: str, payload: str = "") -> list {
+def fire_hooks(event: str, payload: str = "") -> list[any] {
     # Run every enabled hook registered for `event`. Called at solve start/end,
     # tool calls, inbound messages, cron fires, gateway start.
     soul = awaken();
-    out: list = [];
+    out: list[any] = [];
     for h in _hooks(soul) {
         if (not h.enabled) or (h.event != event) { continue; }
         h.fired += 1;

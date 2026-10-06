@@ -21,8 +21,8 @@ never an exception — a compiled run degrades to an honest sentinel.
 import json;
 import os;
 
-glob _CLIENTS: dict = {};   # server-name -> McpClient   (per-process, reused)
-glob _TOOLS: dict = {};     # server-name -> [McpTool]
+glob _CLIENTS: dict[str, any] = {};   # server-name -> McpClient   (per-process, reused)
+glob _TOOLS: dict[str, any] = {};     # server-name -> [McpTool]
 
 def _map_transport(t: str) -> str {
     return {"http": "streamable-http", "": "auto"}.get(t, t or "auto");
@@ -49,7 +49,7 @@ def _client_for(srv: any) -> any {
     return c;
 }
 
-def _safe_tools(srv: any) -> list {
+def _safe_tools(srv: any) -> list[any] {
     name = srv.get("name", "mcp");
     if name not in _TOOLS {
         try {
@@ -72,7 +72,7 @@ def _tool_permitted(name: str) -> bool {
     return True;
 }
 
-def tools_for(servers: list) -> list {
+def tools_for(servers: list[any]) -> list[any] {
     # Live McpTool objects across the given servers — pass straight to by llm(tools=).
     # Policy-denied tools are dropped here so the compiler never binds them.
     out = [];
@@ -85,7 +85,7 @@ def tools_for(servers: list) -> list {
     return out;
 }
 
-def digest(servers: list) -> str {
+def digest(servers: list[any]) -> str {
     # Human/LLM-readable catalogue of registered tools, for the compiler prompt.
     lines = [];
     for srv in servers or [] {
@@ -102,7 +102,7 @@ def digest(servers: list) -> str {
     return "\n".join(lines);
 }
 
-def _servers_from_env() -> list {
+def _servers_from_env() -> list[any] {
     raw = os.getenv("SIGIL_MCP", "");
     if not raw {
         return [];
@@ -114,7 +114,7 @@ def _servers_from_env() -> list {
     }
 }
 
-def dispatch(tool_name: str, args: list) -> dict | None {
+def dispatch(tool_name: str, args: list[any]) -> dict[str, any] | None {
     # Route a bare tool name to the registered server that exposes it (embodiment
     # rung-0). Returns {ok, text, error} on a match, or None when no registered
     # server has the tool (caller falls back to its own behavior). Positional args

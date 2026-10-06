@@ -63,7 +63,7 @@ def _one_line(text: str) -> str {
     return flat.replace(chr(92), "").replace('"', "'")[:200];
 }
 
-def _render(tmpl: str, subs: dict) -> str {
+def _render(tmpl: str, subs: dict[str, any]) -> str {
     out = tmpl;
     for (k, v) in dict(subs).items() {
         out = out.replace(str(k), str(v));
@@ -130,11 +130,11 @@ def _copy_docs(dest: Path) -> int {
     return n;
 }
 
-def _skill_rows(signatures: list[str]) -> list[dict] {
+def _skill_rows(signatures: list[str]) -> list[dict[str, any]] {
     # Resolve requested signatures (or all of them) to their latest versions.
     regs = [root -->[?:Registry]];
     if not regs { return []; }
-    rows: list[dict] = [];
+    rows: list[dict[str, any]] = [];
     for tg in latest_by_sig([regs[0] -->[?:TaskGraph]]) {
         if signatures and (str(tg.signature) not in signatures) { continue; }
         rows.append({"signature": str(tg.signature), "intent": str(tg.intent),
@@ -144,7 +144,7 @@ def _skill_rows(signatures: list[str]) -> list[dict] {
 }
 
 def eject_agent(name: str, out_dir: str, signatures: list[str] = [],
-                model: str = "") -> dict {
+                model: str = "") -> dict[str, any] {
     # Build the project. Returns {ok, path, skills, modules, error}.
     rows = _skill_rows(signatures);
     if not rows {
@@ -164,7 +164,7 @@ def eject_agent(name: str, out_dir: str, signatures: list[str] = [],
     crystal = dest / "agent" / "crystallized";
     crystal.mkdir(parents=True, exist_ok=True);
     (crystal / "__init__.jac").write_text("");
-    shipped: list[dict] = [];
+    shipped: list[dict[str, any]] = [];
     for row in rows {
         mod_path = Path(str(row["module"]));
         if not mod_path.exists() {

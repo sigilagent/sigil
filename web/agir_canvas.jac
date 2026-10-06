@@ -21,7 +21,7 @@ import from "./vis_interop.js" { makeNetwork, makeDataSet }
 # AG-IR primitive family -> colour. Mind = model-owned cognition (violet, the
 # registry colour), code = deterministic (cyan, the compiled-core colour),
 # boundary = SENSE/ACT touching the world (sky), flow = control (gold).
-def _acolor(group: str) -> dict {
+def _acolor(group: str) -> dict[str, any] {
     bg = "#6f6c86";
     if group == "mind" { bg = "#a78bfa"; }
     elif group == "code" { bg = "#22d3ee"; }
@@ -34,7 +34,7 @@ def _acolor(group: str) -> dict {
 
 def _tooltip(n: any) -> str {
     # vis renders the title as plain text; keep it to lines a person can scan.
-    bits: list = [str(n.id) + "  [" + str(n.type) + "]"];
+    bits: list[any] = [str(n.id) + "  [" + str(n.type) + "]"];
     if str(n.owner) { bits.append("owner: " + str(n.owner)); }
     if str(n.tool) { bits.append("tool: " + str(n.tool)); }
     if n.reads { bits.append("reads: " + ", ".join([str(x) for x in n.reads])); }
@@ -44,7 +44,7 @@ def _tooltip(n: any) -> str {
     return "\n".join(bits);
 }
 
-def:pub AgirCanvas(nodes: list, edges: list, dark: bool,
+def:pub AgirCanvas(nodes: list[any], edges: list[any], dark: bool,
                    onSelect: Callable[[str], None]) -> JsxElement {
     has containerRef: Ref[any] = Ref();
     has netRef: Ref[any] = Ref();
@@ -77,7 +77,7 @@ def:pub AgirCanvas(nodes: list, edges: list, dark: bool,
                "font": {"size": 9, "color": labelColor, "strokeWidth": 0, "align": "middle"}}
               for e in es];
 
-        options: dict = {
+        options: dict[str, any] = {
             "autoResize": True,
             "nodes": {"size": 14, "borderWidth": 2,
                       "shadow": {"enabled": True, "color": "rgba(0,0,0,0.25)", "size": 5}},

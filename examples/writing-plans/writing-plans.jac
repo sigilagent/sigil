@@ -691,7 +691,7 @@ walker WritingPlans {
     has plan_md: str = "";
     has plan_ok: bool = False;
     has plan_file: str = "";
-    has report: str = "";
+    has `report: str = "";
 
     can n_draft_header with DraftHeader entry {
         _progress("draft_header");

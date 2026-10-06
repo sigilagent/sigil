@@ -60,7 +60,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Last version this tree is known green on. Bump WITH the migration.
-          JAC_VERSION: "0.36.1"
+          JAC_VERSION: "0.37.25"
         run: |
           for i in 1 2 3; do
             curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
@@ -119,7 +119,9 @@ jobs:
         env:
           SIGIL_NO_DAEMON: "1"
           SIGIL_NO_SERVE: "1"
-        run: printf '/exit\n' | jac run src/main.jac -s "$RUNNER_TEMP/ci.session" -- chat
+        # --no-serve: under jac >=0.37 a file inside a web-app project SERVES by
+        # default; the CLI entry must execute. (`-s` is `--show` there, not a session.)
+        run: printf '/exit\n' | jac run --no-serve src/main.jac -- chat
 
       # The agent lives in the src/ package. `src/*.test.jac` picks up every annex
       # test (present and future) automatically; report_fix_tests.jac and
@@ -139,10 +141,10 @@ jobs:
       # with NameError on the slot's own types (same runtime bug as above).
       - name: Run AI-compiler convergence scenarios
         run: |
-          jac run src/compiler/ai/scenarios/spec_loop.jac
-          jac run src/compiler/ai/scenarios/adjudicate.jac
-          jac run src/compiler/ai/scenarios/workflow_loop.jac
-          jac run src/compiler/ai/scenarios/lift_e2e.jac
-          jac run src/compiler/ai/scenarios/lift_direct.jac
-          jac run src/compiler/ai/scenarios/runtime_budget.jac
-          jac run src/compiler/ai/scenarios/raise2_canonicalize.jac
+          jac run --no-serve src/compiler/ai/scenarios/spec_loop.jac
+          jac run --no-serve src/compiler/ai/scenarios/adjudicate.jac
+          jac run --no-serve src/compiler/ai/scenarios/workflow_loop.jac
+          jac run --no-serve src/compiler/ai/scenarios/lift_e2e.jac
+          jac run --no-serve src/compiler/ai/scenarios/lift_direct.jac
+          jac run --no-serve src/compiler/ai/scenarios/runtime_budget.jac
+          jac run --no-serve src/compiler/ai/scenarios/raise2_canonicalize.jac

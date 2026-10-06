@@ -9,8 +9,8 @@ state — this is OpenClaw's `tasks list/show` over the graph Sigil already keep
 import from .sigil_core { Registry, TaskGraph, Attempt, Soul }
 import from .cron { CronJob, CronRun }
 
-def _rows() -> list {
-    rows: list = [];
+def _rows() -> list[any] {
+    rows: list[any] = [];
     regs = [root -->[?:Registry]];
     if regs {
         for tg in [regs[0] -->[?:TaskGraph]] {
@@ -36,20 +36,20 @@ def _rows() -> list {
     return rows;
 }
 
-def _by_at(r: dict) -> int {
+def _by_at(r: dict[str, any]) -> int {
     return int(r["at_ms"]);
 }
 
-def tasks_list(limit: int = 20) -> list {
+def tasks_list(limit: int = 20) -> list[any] {
     # newest first; sort the run records by their epoch-ms timestamp
     rows = _rows();
     ranked = sorted(rows, key=_by_at, reverse=True);
-    out: list = [];
+    out: list[any] = [];
     for row in ranked[:limit] { out.append(row); }
     return out;
 }
 
-def tasks_show(n: int) -> dict {
+def tasks_show(n: int) -> dict[str, any] {
     items = tasks_list(100000);
     if (n < 1) or (n > len(items)) { return {}; }
     return dict(items[n - 1]);

@@ -29,7 +29,7 @@ def _sha(s: any) -> str {
 
 with entry:__main__ {
     base_dir = os.environ.get("REPLAY_DIR", "");
-    paths = sorted(glob.glob(os.path.join(base_dir, "*", "agent.agir")));
+    paths = sorted(`glob.glob(os.path.join(base_dir, "*", "agent.agir")));
     n_mal = 0; n_fixed = 0; n_same = 0; n_diff = 0; n_tot = 0;
     print("skill                strict  ->  strict   module-identical   lines");
     for p in paths {

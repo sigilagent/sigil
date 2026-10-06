@@ -84,7 +84,7 @@ obj SpecResult {
     has spec: RuleSet = RuleSet();
     has verdict: ExtractVerdict = ExtractVerdict();
     has clarify: list[ClarifyItem] = [];   # underspecified obligations (the skill-quality report)
-    has settled: dict = {};                # rule_id -> the heading/intro that stated its force
+    has settled: dict[str, any] = {};                # rule_id -> the heading/intro that stated its force
 }
 
 glob lift_llm: any = Model(model_name="gpt-4o-mini");
@@ -106,7 +106,7 @@ glob spec_progress: any = None;
 
 def set_spec_progress(cb: any) -> None { spec_progress = cb; }
 
-def _emit_spec(ev: dict) -> None {
+def _emit_spec(ev: dict[str, any]) -> None {
     if spec_progress is not None {
         try { spec_progress(ev); } except Exception as e {  }
     }
@@ -158,7 +158,7 @@ sem coverage_critic.skill = "The full skill text.";
 sem coverage_critic.ctx = "The lens to apply plus a digest of the spans already covered.";
 def coverage_critic(skill: str, ctx: str) -> list[str] by lift_llm();
 
-glob _LENSES: dict = {
+glob _LENSES: dict[str, any] = {
     "imperative": "unmapped IMPERATIVES: steps the skill tells the agent to perform (must / always / do X / follow ...)",
     "forbidden": "unmapped CONSTRAINTS: things the skill forbids or restricts (never / do not / avoid ...)",
     "subresource": "unmapped SUB-RESOURCE POINTERS: delegations to sibling files or live sources ('see FORMS.md', 'read REFERENCE.md and follow it', 'fetch ...')"
@@ -237,10 +237,10 @@ def _in_skill(skill_norm: str, span: any) -> bool {
 # no longer the only thing standing between a procedural step and a MAYBE.
 glob _SKILL_FOR_RESOLVE: str = "";
 # a step line that starts with one of these is a label/descriptor, not an imperative
-glob _NON_IMPERATIVE_STARTS: list = ["most", "least", "the", "a", "an", "this", "that", "these", "those", "four-column", "four", "three", "two", "one", "gdpr", "ccpa", "iso", "soc", "all", "any", "some", "no", "non", "key", "main", "common", "typical", "example", "examples", "note", "notes", "tip", "tips", "optional", "optionally", "consider", "maybe", "if", "when", "unless", "for", "in", "on", "at", "with", "without", "e.g.", "i.e.", "see", "also"];
-glob _PROC_HEADERS: list = ["process:", "steps:", "procedure:", "workflow:", "checklist:", "how to:", "actions:", "tasks:"];
+glob _NON_IMPERATIVE_STARTS: list[any] = ["most", "least", "the", "a", "an", "this", "that", "these", "those", "four-column", "four", "three", "two", "one", "gdpr", "ccpa", "iso", "soc", "all", "any", "some", "no", "non", "key", "main", "common", "typical", "example", "examples", "note", "notes", "tip", "tips", "optional", "optionally", "consider", "maybe", "if", "when", "unless", "for", "in", "on", "at", "with", "without", "e.g.", "i.e.", "see", "also"];
+glob _PROC_HEADERS: list[any] = ["process:", "steps:", "procedure:", "workflow:", "checklist:", "how to:", "actions:", "tasks:"];
 # bold stage headers like "**Step 1: Assess Breach (Immediately)**" / "Phase 2: ..." also open a procedure
-glob _PROC_HEADER_RX: list = [
+glob _PROC_HEADER_RX: list[any] = [
     r"^#{0,6}\s*\*{0,2}\s*(step|phase|stage)\s*\d+\s*[:.\-]",        # "### Step 1: Document Review" / "**Step 1: Assess**"
     r"^#{1,6}\s+.*\b(workflow|procedure|process|checklist|handling)\b",  # "## Workflow for AI Agents" / "### Handling Access Requests"
     r"^\*\*[a-z ]*(activities|actions|tasks|steps|process|procedure|checklist|in [a-z]+)\*\*\s*:",  # "**Activities**:" / "**In Vanta**:"
@@ -376,11 +376,11 @@ def ground_rules(skill: str, rs: RuleSet) -> list[str] {
     return bad;
 }
 
-glob _FORBID_MARKERS: list = ["never ", "do not ", "don't ", "must not "];
-glob _COND_MARKERS: list = ["if ", "when ", "unless ", "e.g.", "for example", "in case "];
-glob _MAND_MARKERS: list = ["must ", "always ", "required", "ensure ", "shall ",
+glob _FORBID_MARKERS: list[any] = ["never ", "do not ", "don't ", "must not "];
+glob _COND_MARKERS: list[any] = ["if ", "when ", "unless ", "e.g.", "for example", "in case "];
+glob _MAND_MARKERS: list[any] = ["must ", "always ", "required", "ensure ", "shall ",
                             "make sure", "you need to", "it is mandatory", "important:"];
-glob _DISCR_MARKERS: list = ["may ", "may:", "optional", "optionally", "if you ",
+glob _DISCR_MARKERS: list[any] = ["may ", "may:", "optional", "optionally", "if you ",
                              "if desired", "if needed", "consider ", "recommend",
                              "you can ", "could ", "for advanced", "as needed", "prefer "];
 
@@ -424,7 +424,7 @@ def audit_modality(skill: str, rs: RuleSet) -> list[str] {
 # mandating prose) and is left a Do.
 # ---------------------------------------------------------------------------
 
-def _fenced_lines(skill: str) -> list {
+def _fenced_lines(skill: str) -> list[any] {
     inside = False;
     out: list = [];
     for ln in str(skill).splitlines() {
@@ -566,7 +566,7 @@ def demote_examples(skill: str, rs: RuleSet) -> list[str] {
         if r.modality != Modality.MANDATORY { continue; }   # only 'Do' can be over-hardened
         if r.condition.strip() { continue; }                # a 'When' is not a bare Do
         if _has_mand_marker(r.quote) { continue; }          # an explicit Do stays a Do
-        qlines: list = [_norm(x) for x in str(r.quote).splitlines() if _norm(x)];
+        qlines: list[any] = [_norm(x) for x in str(r.quote).splitlines() if _norm(x)];
         if not qlines { continue; }
         all_fenced = True;
         for ql in qlines { if ql not in fenced { all_fenced = False; break; } }
@@ -667,9 +667,9 @@ def _illustrative_heading(line: any) -> bool {
     return False;
 }
 
-def _heading_chain(lines: list, upto: int) -> list[str] {
+def _heading_chain(lines: list[any], upto: int) -> list[str] {
     # The markdown heading stack governing line `upto`, outermost first.
-    stack: list = [];
+    stack: list[any] = [];
     for i in range(0, upto) {
         m = re.match(r"^(#{1,6})\s+(.*)$", str(lines[i]).rstrip());
         if not m { continue; }
@@ -680,7 +680,7 @@ def _heading_chain(lines: list, upto: int) -> list[str] {
     return [str(s[1]) for s in stack];
 }
 
-def _locate(lines: list, quote: str) -> int {
+def _locate(lines: list[any], quote: str) -> int {
     # Where a rule's span starts, matched under the SAME normalization grounding
     # uses — so a quote that survived ground_rules is still findable here despite
     # markdown decoration.
@@ -699,10 +699,10 @@ def _locate(lines: list, quote: str) -> int {
     return -1;
 }
 
-def _governing_lines(lines: list, at: int) -> list {
+def _governing_lines(lines: list[any], at: int) -> list[any] {
     # The lines that can govern line `at`, NEAREST SCOPE FIRST: the intro that
     # opens the list block it belongs to, then the nearest enclosing heading.
-    out: list = [];
+    out: list[any] = [];
     if re.match(_LIST_ITEM, str(lines[at])) {
         i = at - 1;
         blanks = 0;
@@ -729,11 +729,11 @@ def _governing_lines(lines: list, at: int) -> list {
     return out;
 }
 
-def infer_modality(skill: str, rs: RuleSet) -> dict {
+def infer_modality(skill: str, rs: RuleSet) -> dict[str, any] {
     # {rule_id: [force, governing span]} for each rule whose force the DOCUMENT
     # states even though the span itself does not. Reads only; the caller binds.
     lines = str(skill).splitlines();
-    out: dict = {};
+    out: dict[str, any] = {};
     for r in rs.rules {
         if r.condition.strip() { continue; }     # a 'When' already carries its gate
         if _force_of(r.quote) { continue; }      # the span states its own force
@@ -771,10 +771,10 @@ def infer_modality(skill: str, rs: RuleSet) -> dict {
     return out;
 }
 
-def apply_structural_modality(skill: str, rs: RuleSet) -> dict {
+def apply_structural_modality(skill: str, rs: RuleSet) -> dict[str, any] {
     # Bind what structure settles, and report {rule_id: governing span} so the
     # decision is never anonymous. Mirrors demote_examples: mutate, return ids.
-    settled: dict = {};
+    settled: dict[str, any] = {};
     inferred = infer_modality(skill, rs);
     for r in rs.rules {
         if r.id not in inferred { continue; }
@@ -804,7 +804,7 @@ def flag_ambiguous(skill: str, rs: RuleSet, settled: any = None) -> list[Clarify
     # (A When has a condition; a real Do/Don't has its marker; a fenced demonstration
     # was already demoted to a Maybe.)
     done = settled if settled else {};
-    out: list = [];
+    out: list[any] = [];
     for r in rs.rules {
         q = str(r.quote).strip();
         if r.id in done { continue; }   # the document stated this one structurally
@@ -864,7 +864,7 @@ def skill_quality_lines(sr: SpecResult) -> list[str] {
     if n == 0 {
         return ["skill quality: CLEAR — every obligation states its modal force."] + _settled_lines(sr);
     }
-    lines: list = ["skill quality: " + str(n) + " UNDERSPECIFIED obligation(s) — the skill gives"
+    lines: list[any] = ["skill quality: " + str(n) + " UNDERSPECIFIED obligation(s) — the skill gives"
                    + " no signal whether these are Do / Maybe / Don't:"];
     for c in sr.clarify {
         lines.append("  ? " + c.rule_id + ': "' + str(c.quote)[:80] + '"');
@@ -880,8 +880,8 @@ def resolve_ambiguous_default(rs: RuleSet, clarify: list[ClarifyItem]) -> list[s
     # so the author can re-run with --clarify to set the ones that should be a Do
     # or a Don't. This is the counterpart to apply_clarifications (the HIL path):
     # both resolve the ambiguity, one by assumption + warning, one by asking.
-    demote: list = [c for c in clarify if not str(c.reason).startswith("kind/modality conflict")];
-    keep: list = [c for c in clarify if str(c.reason).startswith("kind/modality conflict")];
+    demote: list[any] = [c for c in clarify if not str(c.reason).startswith("kind/modality conflict")];
+    keep: list[any] = [c for c in clarify if str(c.reason).startswith("kind/modality conflict")];
     ids: list[str] = [c.rule_id for c in demote];
     # STEP-GRANULARITY BACKSTOP (bench finding, data-privacy-expert): a
     # numbered/bulleted imperative under a procedure header ("Process: 2. Search
@@ -1105,7 +1105,7 @@ def ground_adjudications(skill: str, clarify: list[ClarifyItem],
     # the tier deterministic — see the header — but it does bound every answer to
     # text the author actually wrote.
     sn = _norm(skill);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for c in clarify { by_id[c.rule_id] = c; }
     out = AdjudicationSet();
     seen: list[str] = [];
@@ -1147,7 +1147,7 @@ def resolve_ambiguous_auto(rs: RuleSet, clarify: list[ClarifyItem],
     for a in adjs.kept { answers[str(a.rule_id)] = str(a.answer).strip().lower().replace("'", ""); }
     warns: list[str] = [];
     if answers {
-        before: dict = {};
+        before: dict[str, any] = {};
         for r in rs.rules { before[r.id] = r.modality.name; }
         notes = apply_clarifications(rs, answers, "adjudicator");
         warns.append(str(len(answers)) + " underspecified obligation(s) ANSWERED by the adjudicator ("
@@ -1189,7 +1189,7 @@ def adjudicate_spec(skill: str, sr: SpecResult) -> list[str] {
                      + "\nWHY FLAGGED: " + str(c.reason)
                      + (chr(10) + ctx if ctx else ""));
     }
-    adjs: list = [];
+    adjs: list[any] = [];
     try { adjs = list(adjudicate_ambiguous(skill, "\n".join(items))); }
     except Exception as e {
         # The adjudicator is an IMPROVEMENT on the standing default, never a
@@ -1265,7 +1265,7 @@ glob _BUNDLE_FILE_MAX: int = 49152;   # one file may not crowd out the rest
 # obligation to run the script comes from the prose, the code is the reference
 # implementation. Tests are excluded: they assert about the skill, they are not
 # the skill.
-glob _BUNDLE_CODE: dict = {".py": "python", ".sh": "bash", ".js": "javascript",
+glob _BUNDLE_CODE: dict[str, any] = {".py": "python", ".sh": "bash", ".js": "javascript",
                            ".ts": "typescript", ".mjs": "javascript"};
 
 def _is_test_file(rel: str) -> bool {
@@ -1297,9 +1297,9 @@ def _bundle_candidates(skill_dir: str) -> list[str] {
     return sorted(prose) + sorted(code);
 }
 
-def bundle_skill(skill: str, skill_dir: str) -> dict {
+def bundle_skill(skill: str, skill_dir: str) -> dict[str, any] {
     if not skill_dir { return {"text": skill, "files": [], "skipped": []}; }
-    names: list = [];
+    names: list[any] = [];
     try { names = sorted(os.listdir(skill_dir)); } except Exception {
         return {"text": skill, "files": [], "skipped": []};
     }
@@ -1337,7 +1337,7 @@ def extract_spec(skill: str, name: str, max_rounds: int = 0) -> SpecResult {
     verdict = ExtractVerdict();
     dry = 0;
     rounds = 0;
-    _settled: dict = {};   # survives the loop: the last round's structural bindings
+    _settled: dict[str, any] = {};   # survives the loop: the last round's structural bindings
     # auto budget (max_rounds=0): caps tuned on 5-rule toys starve gpt-5-scale
     # specs (40-140 rules) — scale with observed size, bounded.
     cap = max_rounds if (max_rounds > 0) else 5;

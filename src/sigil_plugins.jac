@@ -17,7 +17,7 @@ import os;
 import json;
 import from .sigil { awaken, Soul, add_mcp, register_skill }
 
-edge Installed {}   # Soul -> Plugin
+edge Installed: any --> any {}   # Soul -> Plugin
 
 node Plugin {
     has name: str;
@@ -28,7 +28,7 @@ node Plugin {
 
 def _plugins(soul: Soul) -> list[Plugin] { return [soul -->[?:Plugin]]; }
 
-def plugin_install(path: str) -> dict {
+def plugin_install(path: str) -> dict[str, any] {
     with open(path) as f { manifest = json.loads(f.read()); }
     soul = awaken();
     name = str(manifest.get("name", "plugin"));
@@ -64,7 +64,7 @@ def plugin_install(path: str) -> dict {
     return {"name": name, "updated": False, "servers": servers, "skills": skills};
 }
 
-def plugin_list() -> list {
+def plugin_list() -> list[any] {
     soul = awaken();
     return [{"name": p.name, "version": p.version, "skills": list(p.skills), "servers": list(p.servers)} for p in _plugins(soul)];
 }

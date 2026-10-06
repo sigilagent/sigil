@@ -28,7 +28,7 @@ import yaml;
 import from src.compiler.mechanical.compiler { _load_ir, transpile_ir }
 import from src.sigil_agir_yaml { dump_agir, strict_parses }
 
-glob _POINTER_PREFIXES: list = ["see ", "refer to ", "read ", "as described in ",
+glob _POINTER_PREFIXES: list[any] = ["see ", "refer to ", "read ", "as described in ",
                                 "per the skill", "from the skill", "consult "];
 glob _INLINE_CAP: int = 120000;
 
@@ -85,22 +85,22 @@ def _skill_file(skill_dir: str, ref: str) -> str {
     return data if len(data) <= _INLINE_CAP else (data[:_INLINE_CAP] + "\n... [truncated]");
 }
 
-def _carries(ir: any) -> dict {
+def _carries(ir: any) -> dict[str, any] {
     wlk = ir.get("walker") if isinstance(ir.get("walker"), dict) else {};
     c = wlk.get("carries");
     return c if isinstance(c, dict) else {};
 }
 
-def _knowledge(ir: any) -> dict {
+def _knowledge(ir: any) -> dict[str, any] {
     k = ir.get("knowledge");
     return k if isinstance(k, dict) else {};
 }
 
-def _fix_lanes(ir: any, skill_dir: str) -> list {
+def _fix_lanes(ir: any, skill_dir: str) -> list[any] {
     fixes: list = [];
     carries = _carries(ir);
     kn = _knowledge(ir);
-    lanes: list = list(carries) + list(kn) + ["task"];
+    lanes: list[any] = list(carries) + list(kn) + ["task"];
     for nd in list(ir.get("nodes") or []) {
         if not isinstance(nd, dict) { continue; }
         nid = str(nd.get("id"));
@@ -112,12 +112,12 @@ def _fix_lanes(ir: any, skill_dir: str) -> list {
                 if not isinstance(ir.get("knowledge"), dict) { ir["knowledge"] = {}; }
                 kn = ir["knowledge"];
                 prev: any = kn.get(r);
-                entry: dict = dict(prev) if isinstance(prev, dict) else {};
-                entry["body"] = content;
-                ro: list = list(entry.get("resident_on") or []);
+                `entry: dict[str, any] = dict(prev) if isinstance(prev, dict) else {};
+                `entry["body"] = content;
+                ro: list[any] = list(`entry.get("resident_on") or []);
                 if nid not in ro { ro.append(nid); }
-                entry["resident_on"] = ro;
-                kn[r] = entry;
+                `entry["resident_on"] = ro;
+                kn[r] = `entry;
                 lanes.append(r);
                 fixes.append("lane: read '" + r + "' resolved from the skill directory — inlined "
                              + str(len(content)) + " chars as knowledge resident on '" + nid + "'");
@@ -176,22 +176,22 @@ def _pointer_ref(text: str) -> str {
     return str(m.group(0)) if m else "";
 }
 
-def _fix_pointers(ir: any, skill_dir: str) -> list {
+def _fix_pointers(ir: any, skill_dir: str) -> list[any] {
     fixes: list = [];
     kn = _knowledge(ir);
     for key in list(kn) {
-        entry = kn[key];
+        `entry = kn[key];
         body = "";
-        if isinstance(entry, dict) { body = str(entry.get("body") or ""); }
-        elif isinstance(entry, str) { body = str(entry); }
+        if isinstance(`entry, dict) { body = str(`entry.get("body") or ""); }
+        elif isinstance(`entry, str) { body = str(`entry); }
         else { continue; }
         ref = _pointer_ref(body);
         if not ref { continue; }
         content = _skill_file(skill_dir, ref);
         if not content { continue; }
-        if isinstance(entry, dict) {
-            entry["doc"] = "inlined from " + ref + " (was: " + body[:80] + ")";
-            entry["body"] = content;
+        if isinstance(`entry, dict) {
+            `entry["doc"] = "inlined from " + ref + " (was: " + body[:80] + ")";
+            `entry["body"] = content;
         } else {
             kn[key] = {"doc": "inlined from " + ref + " (was: " + body[:80] + ")", "body": content};
         }
@@ -201,7 +201,7 @@ def _fix_pointers(ir: any, skill_dir: str) -> list {
     return fixes;
 }
 
-def _served_ids(ir: any) -> list {
+def _served_ids(ir: any) -> list[any] {
     served: list = [];
     tools = ir.get("tools");
     if isinstance(tools, dict) {
@@ -216,7 +216,7 @@ def _served_ids(ir: any) -> list {
     return served;
 }
 
-def _fix_hollow(ir: any) -> list {
+def _fix_hollow(ir: any) -> list[any] {
     fixes: list = [];
     served = _served_ids(ir);
     tools = ir.get("tools") if isinstance(ir.get("tools"), dict) else {};
@@ -237,13 +237,13 @@ def _fix_hollow(ir: any) -> list {
     return fixes;
 }
 
-def autofix_ir(ir_text: str, skill_dir: str = "") -> dict {
+def autofix_ir(ir_text: str, skill_dir: str = "") -> dict[str, any] {
     # The driver: load once, run every pass, dump once. Returns the (possibly
     # unchanged) IR text + fix notes; the CALLER re-gates through G4.
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return {"ir_text": ir_text, "fixes": []}; }
     if not isinstance(ir, dict) or (not ir.get("nodes")) { return {"ir_text": ir_text, "fixes": []}; }
-    fixes: list = [];
+    fixes: list[any] = [];
     for f in _fix_lanes(ir, skill_dir) { fixes.append(f); }
     for f in _fix_pointers(ir, skill_dir) { fixes.append(f); }
     for f in _fix_hollow(ir) { fixes.append(f); }

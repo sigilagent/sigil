@@ -16,16 +16,16 @@ def cookbook_dir() -> str {
     return os.path.join(base, "docs", "reference", "agir-cookbook");
 }
 
-def cookbook_files() -> list {
+def cookbook_files() -> list[any] {
     d = cookbook_dir();
-    files = sorted(glob.glob(os.path.join(d, "*.agir")));
+    files = sorted(`glob.glob(os.path.join(d, "*.agir")));
     # a *.FAILED.agir is an inspection artifact, never a golden
     return [f for f in files if not f.endswith(".FAILED.agir")];
 }
 
 # [{name, ok, errors, g9}] for every golden AG-IR — a clean one has ok=True, g9=[].
-def validate_cookbook() -> list {
-    out: list = [];
+def validate_cookbook() -> list[any] {
+    out: list[any] = [];
     for f in cookbook_files() {
         name = os.path.splitext(os.path.basename(f))[0];
         ir = "";

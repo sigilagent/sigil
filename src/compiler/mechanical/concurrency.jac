@@ -30,25 +30,25 @@ generated modules' SPAWN lowering already uses that mechanism).
 
 # control-flow node types that end a linear chain (a ROUTE fans out to
 # EXCLUSIVE alternatives — never a parallel stage; SPAWN is already parallel)
-glob _BARRIERS: list = ["ROUTE", "SPAWN", "LOOP", "TERMINAL"];
+glob _BARRIERS: list[any] = ["ROUTE", "SPAWN", "LOOP", "TERMINAL"];
 
-def _lst(v: any) -> list {
+def _lst(v: any) -> list[any] {
     return list(v) if isinstance(v, list) else [];
 }
 
-def _dct(v: any) -> dict {
+def _dct(v: any) -> dict[str, any] {
     return v if isinstance(v, dict) else {};
 }
 
-def _slist(v: any) -> list {
+def _slist(v: any) -> list[any] {
     return [str(x) for x in v] if isinstance(v, list) else [];
 }
 
-def _nodes(ir: any) -> list {
+def _nodes(ir: any) -> list[any] {
     return _lst(_dct(ir).get("nodes"));
 }
 
-def _edges(ir: any) -> list {
+def _edges(ir: any) -> list[any] {
     return _lst(_dct(ir).get("edges"));
 }
 
@@ -60,10 +60,10 @@ def _is_hil(n: any) -> bool {
     return "REQUIRE HUMAN GATE" in str(_dct(n).get("doc", ""));
 }
 
-def _producers(ir: any) -> dict {
+def _producers(ir: any) -> dict[str, any] {
     # carry name -> producing node id. Node `writes` is authoritative; the
     # walker.carries `produced_by` fills any carry no node declares.
-    prod: dict = {};
+    prod: dict[str, any] = {};
     for n in _nodes(ir) {
         for w in _slist(_dct(n).get("writes")) { prod[w] = str(_dct(n).get("id", "")); }
     }
@@ -78,10 +78,10 @@ def _producers(ir: any) -> dict {
     return prod;
 }
 
-def _data_deps(ir: any) -> dict {
+def _data_deps(ir: any) -> dict[str, any] {
     # node id -> direct data-dependency node ids (producers of what it reads)
     prod = _producers(ir);
-    deps: dict = {};
+    deps: dict[str, any] = {};
     for n in _nodes(ir) {
         nid = str(_dct(n).get("id", ""));
         dd: list = [];
@@ -94,12 +94,12 @@ def _data_deps(ir: any) -> dict {
     return deps;
 }
 
-def _trans_deps(nid: str, deps: dict, memo: dict) -> list {
+def _trans_deps(nid: str, deps: dict[str, any], memo: dict[str, any]) -> list[any] {
     # transitive data dependencies, memoized DFS (cycle-safe: a repair LOOP's
     # back-edge can make the carry graph cyclic — mark-before-recurse)
     if nid in memo { return _lst(memo.get(nid)); }
     memo[nid] = [];
-    acc: list = [];
+    acc: list[any] = [];
     for d in _lst(deps.get(nid)) {
         ds = str(d);
         if ds not in acc { acc.append(ds); }
@@ -111,9 +111,9 @@ def _trans_deps(nid: str, deps: dict, memo: dict) -> list {
     return list(acc);
 }
 
-def _reach(start: str, succ: dict) -> list {
-    seen: list = [start];
-    frontier: list = [start];
+def _reach(start: str, succ: dict[str, any]) -> list[any] {
+    seen: list[any] = [start];
+    frontier: list[any] = [start];
     while frontier {
         cur = str(frontier.pop());
         for nxt in _lst(succ.get(cur)) {
@@ -123,7 +123,7 @@ def _reach(start: str, succ: dict) -> list {
     return seen;
 }
 
-def _plain(nid: str, by_id: dict) -> bool {
+def _plain(nid: str, by_id: dict[str, any]) -> bool {
     # "plain" = eligible to sit inside a linear chain: not a control barrier,
     # not a human gate
     n = by_id.get(nid);
@@ -131,23 +131,23 @@ def _plain(nid: str, by_id: dict) -> bool {
     return (_ntype(n) not in _BARRIERS) and (not _is_hil(n));
 }
 
-def _chain_segments(ir: any) -> list {
+def _chain_segments(ir: any) -> list[any] {
     # maximal linear runs of "plain" nodes: each link u->v where u has exactly
     # one out-edge, v exactly one in-edge, and neither is a control barrier or
     # a human gate. These are the spans where prose ORDER may exceed data NEED.
     nodes = _nodes(ir);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for n in nodes { by_id[str(_dct(n).get("id", ""))] = n; }
-    outs: dict = {};
-    ins: dict = {};
+    outs: dict[str, any] = {};
+    ins: dict[str, any] = {};
     for e in _edges(ir) {
         f = str(_dct(e).get("from", ""));
         t = str(_dct(e).get("to", ""));
         outs[f] = _lst(outs.get(f)) + [t];
         ins[t] = _lst(ins.get(t)) + [f];
     }
-    segments: list = [];
-    assigned: list = [];
+    segments: list[any] = [];
+    assigned: list[any] = [];
     for n in nodes {
         nid = str(_dct(n).get("id", ""));
         if (nid in assigned) or (not _plain(nid, by_id)) { continue; }
@@ -155,7 +155,7 @@ def _chain_segments(ir: any) -> list {
         # continuable link), so each run is emitted once, maximal
         preds = _slist(ins.get(nid));
         if (len(preds) == 1) and _plain(preds[0], by_id) and (len(_lst(outs.get(preds[0]))) == 1) { continue; }
-        seg: list = [nid];
+        seg: list[any] = [nid];
         cur = nid;
         while True {
             nxt = _slist(outs.get(cur));
@@ -171,10 +171,10 @@ def _chain_segments(ir: any) -> list {
     return segments;
 }
 
-def _pack_stages(seg: list, deps: dict, memo: dict) -> list {
+def _pack_stages(seg: list[any], deps: dict[str, any], memo: dict[str, any]) -> list[any] {
     # greedy ILP packing: walk the chain in control order; a node joins the
     # open stage iff it has no transitive data dependency on a stage member.
-    stages: list = [];
+    stages: list[any] = [];
     cur: list = [];
     for nid in seg {
         td = _trans_deps(str(nid), deps, memo);
@@ -187,17 +187,17 @@ def _pack_stages(seg: list, deps: dict, memo: dict) -> list {
     return stages;
 }
 
-def extract_concurrency(ir: any) -> dict {
+def extract_concurrency(ir: any) -> dict[str, any] {
     nodes = _nodes(ir);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for n in nodes { by_id[str(_dct(n).get("id", ""))] = n; }
     deps = _data_deps(ir);
-    memo: dict = {};
+    memo: dict[str, any] = {};
     spawn_decl = _dct(_dct(ir).get("concurrency"));
     spawn_state = str(spawn_decl.get("spawn", "none"));
     spawn_reason = str(spawn_decl.get("reason", ""));
 
-    stages: list = [];
+    stages: list[any] = [];
     opportunities: list = [];
     issues: list = [];
     dlp: list = [];
@@ -220,7 +220,7 @@ def extract_concurrency(ir: any) -> dict {
     }
 
     # ---- TLP check: a declared SPAWN must be genuinely independent ----------
-    succ: dict = {};
+    succ: dict[str, any] = {};
     for e in _edges(ir) {
         f = str(_dct(e).get("from", ""));
         succ[f] = _lst(succ.get(f)) + [str(_dct(e).get("to", ""))];
@@ -230,11 +230,11 @@ def extract_concurrency(ir: any) -> dict {
         sid = str(_dct(n).get("id", ""));
         branches = _slist(succ.get(sid));
         if len(branches) < 2 { continue; }
-        reach: dict = {};
+        reach: dict[str, any] = {};
         for b in branches { reach[b] = _reach(b, succ); }
         # nodes visible from more than one branch are the JOIN suffix — shared
         # by construction, excluded from the cross-branch test
-        shared: list = [];
+        shared: list[any] = [];
         for b in branches {
             for x in _lst(reach.get(b)) {
                 cnt = 0;
@@ -265,7 +265,7 @@ def extract_concurrency(ir: any) -> dict {
     }
 
     # ---- DLP: list-typed carry into a single tool-backed code node ----------
-    served: list = [];
+    served: list[any] = [];
     for kv in _dct(_dct(ir).get("tools")).items() {
         t = _dct(kv[1]);
         for sv in _slist(t.get("serves")) { served.append(sv); }

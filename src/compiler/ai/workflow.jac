@@ -131,12 +131,12 @@ def workflow_view(spec: RuleSet, skill: str, issues: str) -> WorkflowView by wf_
 # code disposes — the spine validator
 # ---------------------------------------------------------------------------
 
-glob MIND_TYPES: list = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
+glob MIND_TYPES: list[any] = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
 
 def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
     issues: list = [];
     rule_ids = [r.id for r in spec.rules];
-    rule_by_id: dict = {};
+    rule_by_id: dict[str, any] = {};
     for r in spec.rules { rule_by_id[r.id] = r; }
     node_ids = [n.id for n in wf.nodes];
 
@@ -170,8 +170,8 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
         }
     }
     if wf.nodes {
-        reached: list = [wf.nodes[0].id];
-        frontier: list = [wf.nodes[0].id];
+        reached: list[any] = [wf.nodes[0].id];
+        frontier: list[any] = [wf.nodes[0].id];
         while frontier {
             cur = frontier.pop();
             for e in wf.edges {
@@ -256,7 +256,7 @@ def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0) -> SpineResul
     # Bounded model-propose / code-dispose loop. On exhaustion, returns the last
     # view WITH its outstanding issues — an honest failure, never a silent one.
     wf = WorkflowView();
-    issues: list = [];
+    issues: list[any] = [];
     rounds = 0;
     digest = "";
     # auto budget: spine rounds scale with spec size (3 for toys, up to 6)

@@ -24,7 +24,7 @@ import from prompt_toolkit.completion { Completer, Completion }
 # so a new command shows up in both by adding a row here.
 # row: [usage, description, first-argument vocabulary ([word, meta]) or "DOCS"]
 # ---------------------------------------------------------------------------
-glob COMMANDS: list = [
+glob COMMANDS: list[any] = [
     ["/help", "show this help", []],
     ["/soul", "identity, models, skills & memory", []],
     ["/config", "edit settings interactively", []],
@@ -54,9 +54,9 @@ glob COMMANDS: list = [
 
 # /docs topics are read from disk lazily — the palette only pays the directory
 # scan when "/docs " is actually typed, not on every chat startup.
-glob _DOCS: dict = {"loaded": False, "topics": []};
+glob _DOCS: dict[str, any] = {"loaded": False, "topics": []};
 
-def _doc_args -> list {
+def _doc_args -> list[any] {
     if not _DOCS["loaded"] {
         _DOCS["loaded"] = True;
         try {

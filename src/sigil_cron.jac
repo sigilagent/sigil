@@ -23,14 +23,14 @@ import os;
 import time;
 import from datetime { datetime, timedelta, timezone }
 
-glob _MONTHS: dict = {
+glob _MONTHS: dict[str, any] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
 };
-glob _DOWS: dict = {
+glob _DOWS: dict[str, any] = {
     "sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6
 };
-glob _NONE: dict = {};
+glob _NONE: dict[str, any] = {};
 
 def now_ms() -> int {
     return int(time.time() * 1000);
@@ -61,7 +61,7 @@ def human_secs(secs: int) -> str {
     return str(s // 86400) + "d" + str((s % 86400) // 3600) + "h";
 }
 
-glob _DOW_NAMES: list = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+glob _DOW_NAMES: list[any] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 def _hhmm(hour: str, minute: str) -> str {
     # "9", "5" -> "09:05". Only for concrete single values; "" otherwise.
@@ -82,7 +82,7 @@ def _dow_label(field: str) -> str {
     for raw in str(field).split(",") {
         part: str = str(raw).strip().lower();
         if "-" in part {
-            bits: list = part.split("-", 1);
+            bits: list[any] = part.split("-", 1);
             a: str = _dow_num(str(bits[0]));
             b: str = _dow_num(str(bits[1]));
             if (not a) or (not b) { return ""; }
@@ -111,7 +111,7 @@ def describe_schedule(kind: str, spec: str, tz: str = "") -> str {
         except Exception as e { return "every " + s + "s"; }
     }
     if k != "cron" { return s; }
-    f: list = cron_fields(s);
+    f: list[any] = cron_fields(s);
     if not f { return s + " (unparseable)"; }
     f_min: str = str(f[1]);
     f_hour: str = str(f[2]);
@@ -195,7 +195,7 @@ def tzinfo_for(tz: str) -> any {
     }
 }
 
-def _token(tok: str, names: dict) -> int {
+def _token(tok: str, names: dict[str, any]) -> int {
     s = str(tok).strip().lower();
     if s in names {
         return int(names[s]);
@@ -203,7 +203,7 @@ def _token(tok: str, names: dict) -> int {
     return int(s);
 }
 
-def _matches(field: str, value: int, lo: int, hi: int, names: dict) -> bool {
+def _matches(field: str, value: int, lo: int, hi: int, names: dict[str, any]) -> bool {
     # One cron field against one concrete value. Unparseable list members are
     # skipped, not fatal — a partly-broken field still matches what it can.
     for raw in str(field).split(",") {
@@ -273,7 +273,7 @@ def _open(field: str) -> bool {
     return (f == "*") or (f == "?") or (f == "");
 }
 
-def cron_fields(expr: str) -> list {
+def cron_fields(expr: str) -> list[any] {
     # Normalize to the 6-field [sec min hour dom mon dow] form. [] = unparseable.
     parts = str(expr or "").split();
     if len(parts) == 6 {

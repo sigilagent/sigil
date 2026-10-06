@@ -5,7 +5,7 @@ import tempfile;
 import yaml;
 import from src.compiler.mechanical.compiler { _load_ir }
 
-def _yaml(ir: dict) -> str {
+def _yaml(ir: dict[str, any]) -> str {
     return str(yaml.safe_dump(ir, sort_keys=False));
 }
 
@@ -225,7 +225,7 @@ test "the unclosed-sequence shape canonicalizes too" {
 
 test "canonicalizing preserves the carry the malformed line encoded" {
     out = canonicalize_ir(MALFORMED_MAP_IR, "canon_carry");
-    c: dict = _load_ir(out).get("walker").get("carries");
+    c: dict[str, any] = _load_ir(out).get("walker").get("carries");
     assert "drafted_note" in c;
     assert c["drafted_note"]["produced_by"] == "draft";
 }

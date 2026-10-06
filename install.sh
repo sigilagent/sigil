@@ -50,7 +50,7 @@ printf '\n%s  ◆ Sigil installer%s\n\n' "$P" "$D"
 # `[scale.microservices]` table in jac.toml a hard config error, so every fresh
 # Sigil install after that release provisioned a runtime its own jac.toml could
 # not parse. Bump this WITH the migration, never ahead of it.
-JAC_VERSION="${JAC_VERSION:-0.36.1}"
+JAC_VERSION="${JAC_VERSION:-0.37.25}"
 
 if have jac; then
   info "Found jac: $(jac --version 2>/dev/null | head -1)"

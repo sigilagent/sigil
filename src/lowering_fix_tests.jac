@@ -381,7 +381,7 @@ test "each shelf entry becomes one named, described tool" {
     ]);
     tools = ns["_skill_tools"]();
     ns["os"].environ.pop("SIGIL_SKILL_TOOLS", None);
-    assert len(tools) == 1, str(tools);
+    assert len(list(tools)) == 1, str(tools);
     assert tools[0].get_name() == "skill_clean_csv";
     fn = tools[0].get_json_schema()["function"];
     assert "Clean a messy CSV" in str(fn["description"]);
@@ -545,7 +545,7 @@ test "list/dict carries are capped at MODEL slots, shape preserved; the runtime 
     big = {"time": list(range(5000)), "flux": [0.5] * 5000, "meta": "x"};
     c = cs(big);
     assert isinstance(c, dict) and len(c["time"]) <= 401 and c["meta"] == "x", str(c)[:200];
-    assert isinstance(cs(list(range(1000))), list) and len(cs(list(range(1000)))) <= 401;
+    assert isinstance(cs(list(range(1000))), list) and len(list(cs(list(range(1000))))) <= 401;
     assert cs("plain") == "plain";
     src = transpile_ir(SEED_IR.replace("station_ids: { type: list, produced_by: plan }", "station_ids: { type: list, produced_by: plan }\n    curve: { type: dict, produced_by: plan }")
                        .replace("    writes: [station_ids]", "    writes: [station_ids, curve]")

@@ -203,10 +203,10 @@ def parse_ir(ir_text: str) -> ParsedIR {
     }
 
     carries: list[str] = [];
-    wlk: dict = {};
+    wlk: dict[str, any] = {};
     w0 = ir.get("walker");
     if isinstance(w0, dict) { wlk = w0; }
-    cs: dict = {};
+    cs: dict[str, any] = {};
     c0 = wlk.get("carries");
     if isinstance(c0, dict) { cs = c0; }
     for ck in cs { carries.append(str(ck)); }
@@ -290,7 +290,7 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return ""; }
     if (not isinstance(ir, dict)) or (not ir.get("nodes")) { return ""; }
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in spec.rules { by_id[r.id] = r; }
     # Partition the slots ONCE. A prohibition rides the model-owned working
     # nodes it governs — but a fully DETERMINISTIC pipeline owns every node as
@@ -301,8 +301,8 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
     # ignores owner — so fall back to the code nodes instead of folding nothing.
     # TERMINAL is never a target either way: an end marker is not a slot a
     # prohibition can govern.
-    model_nodes: list = [];
-    code_nodes: list = [];
+    model_nodes: list[any] = [];
+    code_nodes: list[any] = [];
     for nd in list(ir.get("nodes") or []) {
         if not isinstance(nd, dict) { continue; }
         ntype = _ntype(nd.get("type"));
@@ -311,7 +311,7 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
         if (owner == "code") or (ntype == "CODE") { code_nodes.append(nd); }
         else { model_nodes.append(nd); }
     }
-    targets: list = model_nodes if model_nodes else code_nodes;
+    targets: list[any] = model_nodes if model_nodes else code_nodes;
     touched = False;
     for rid in drop_ids {
         r = by_id.get(str(rid));

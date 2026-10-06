@@ -82,23 +82,23 @@ def classify(task: str, known: list[str]) -> str by router();
 # new class; the graph loads unchanged.
 # ---------------------------------------------------------------------------
 @archetype_alias("src.sigil.Embodies")
-edge Embodies {}       # root -> Soul       (the agent's identity/config, on the graph)
+edge Embodies: any --> any {}       # root -> Soul       (the agent's identity/config, on the graph)
 @archetype_alias("src.sigil.Knows")
-edge Knows {}          # Soul -> Spec       (the compiler's contract, on the graph)
+edge Knows: any --> any {}          # Soul -> Spec       (the compiler's contract, on the graph)
 @archetype_alias("src.sigil.Provides")
-edge Provides {}       # Soul -> McpServer  (registered external tool servers)
+edge Provides: any --> any {}       # Soul -> McpServer  (registered external tool servers)
 @archetype_alias("src.sigil.Remembers")
-edge Remembers {}      # Soul -> Memory     (semantic memory)
+edge Remembers: any --> any {}      # Soul -> Memory     (semantic memory)
 @archetype_alias("src.sigil.Owns")
-edge Owns {}           # Soul -> Registry
+edge Owns: any --> any {}           # Soul -> Registry
 @archetype_alias("src.sigil.Anchored")
-edge Anchored {}       # root -> Registry   (the skill library, hung off the persistent root)
+edge Anchored: any --> any {}       # root -> Registry   (the skill library, hung off the persistent root)
 @archetype_alias("src.sigil.Crystallized")
-edge Crystallized {}   # Registry -> TaskGraph (legacy edge name — persisted on existing graphs)
+edge Crystallized: any --> any {}   # Registry -> TaskGraph (legacy edge name — persisted on existing graphs)
 @archetype_alias("src.sigil.Ran")
-edge Ran {}            # TaskGraph -> Attempt
+edge Ran: any --> any {}            # TaskGraph -> Attempt
 @archetype_alias("src.sigil.MutatedFrom")
-edge MutatedFrom {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
+edge MutatedFrom: any --> any {}    # TaskGraph(new) -> TaskGraph(old)  (evolution lineage)
 
 # --- Identity / config (OpenClaw's SOUL, but a node — not a SOUL.md) --------
 @archetype_alias("src.sigil.Soul")
@@ -112,12 +112,12 @@ node Soul {
     has channels: list[str] = []; # where the agent is reachable (pure config, on the graph)
     has auto_eval: bool = True;   # grounded-eval valve: judge each HIT run, relearn if it fails
     has eval_threshold: int = 60; # a run scoring below this auto-triggers a relearn + retry
-    has model_aliases: dict = {};    # friendly name -> model string (e.g. "fast" -> "gpt-4o-mini")
-    has model_fallbacks: dict = {};  # tier ("frontier"|"small"|"router") -> comma-sep fallback models
+    has model_aliases: dict[str, any] = {};    # friendly name -> model string (e.g. "fast" -> "gpt-4o-mini")
+    has model_fallbacks: dict[str, any] = {};  # tier ("frontier"|"small"|"router") -> comma-sep fallback models
     has prompt_mode: str = "full"; # system-prompt assembly: full (ethos+memory) | minimal (contract only) | none (bare task)
     has tool_allow: list[str] = [];   # tool policy: if non-empty, only these tools (+groups/profile) are permitted
     has tool_deny: list[str] = [];    # denied tools (deny wins over allow); "*" denies all
-    has tool_groups: dict = {};       # group name -> comma-separated tool names
+    has tool_groups: dict[str, any] = {};       # group name -> comma-separated tool names
     has tool_profile: str = "";       # active profile = a group whose tools join the allow-list
     has recall_mode: str = "lexical";  # lexical | vector | hybrid — how semantic memory is retrieved
     has embed_model: str = "";         # embedding model (litellm name) for vector/hybrid recall
@@ -151,7 +151,7 @@ node Memory {
     has kind: str = "fact";       # fact | preference | observation
     has salience: float = 1.0;
     has uses: int = 0;
-    has embedding: list = [];      # cached embedding vector (populated lazily in vector recall mode)
+    has embedding: list[any] = [];      # cached embedding vector (populated lazily in vector recall mode)
 }
 
 @archetype_alias("src.sigil.Registry")
@@ -188,7 +188,7 @@ node Attempt {
 # ---------------------------------------------------------------------------
 def latest_by_sig(compiled_lib: list[TaskGraph]) -> list[TaskGraph] {
     # Keep only the highest-version TaskGraph per signature.
-    best: dict = {};
+    best: dict[str, any] = {};
     for c in compiled_lib {
         cur = best.get(c.signature);
         if (cur is None) or (c.version > cur.version) { best[c.signature] = c; }
@@ -281,7 +281,7 @@ def _bind_tier(soul: Soul, tier: str, tier_model: str) -> any {
     primary = _effective_tier(tier, _resolve_alias(soul, tier_model));
     fb = str(soul.model_fallbacks.get(tier, "")).strip();
     if not fb { return model_for(primary); }
-    models: list = [model_for(primary)];
+    models: list[any] = [model_for(primary)];
     for m in fb.split(",") {
         mm = _resolve_alias(soul, m.strip());
         if mm { models.append(model_for(mm)); }
@@ -316,7 +316,7 @@ def model_set_fallback(tier: str, csv: str) -> str {
     return tier + " fallbacks -> " + (csv if csv else "(none)");
 }
 
-def models_info() -> dict {
+def models_info() -> dict[str, any] {
     soul = awaken();
     # In claude mode the graph's tier names are overridden at bind time, so report
     # what will actually run — not the config it shadows.
@@ -418,7 +418,7 @@ def remember(soul: Soul, content: str, kind: str) -> Memory {
     return m;
 }
 
-def _embed(text: str, model: str) -> list {
+def _embed(text: str, model: str) -> list[any] {
     # Embed via litellm (byLLM's backend) — works for any provider it supports
     # (openai text-embedding-3-*, ollama/nomic-embed-text, …). Non-raising.
     try {
@@ -428,7 +428,7 @@ def _embed(text: str, model: str) -> list {
     } except Exception as e { return []; }
 }
 
-def _cosine(a: list, b: list) -> float {
+def _cosine(a: list[any], b: list[any]) -> float {
     if (not a) or (not b) or (len(a) != len(b)) { return 0.0; }
     import math;
     dot = 0.0; na = 0.0; nb = 0.0;
@@ -444,7 +444,7 @@ def recall(soul: Soul, query: str, k: int) -> list[Memory] {
     mode = soul.recall_mode if soul.recall_mode else "lexical";
     emodel = str(soul.embed_model);
     # tuple = (-score, seq, memory); seq is a strict tie-breaker so nodes never compare
-    scored: list = [];
+    scored: list[any] = [];
     seq = 0;
 
     if (mode in ["vector", "hybrid"]) and emodel {
@@ -510,11 +510,11 @@ intent.""";
 def judge_result(task: str, result: str) -> EvalVerdict by router();
 
 
-def mcp_servers() -> list {
+def mcp_servers() -> list[any] {
     soul = awaken();
-    out: list = [];
+    out: list[any] = [];
     for s in [soul -->[?:McpServer]] {
-        d: dict = {"name": s.name, "transport": s.transport, "enabled": s.enabled};
+        d: dict[str, any] = {"name": s.name, "transport": s.transport, "enabled": s.enabled};
         if s.transport == "stdio" { d["command"] = s.command; d["args"] = s.args; }
         else { d["url"] = s.url; }
         out.append(d);
@@ -545,9 +545,9 @@ def remove_mcp(name: str) -> str {
     return "no such mcp server: " + name;
 }
 
-def mcp_status() -> list {
+def mcp_status() -> list[any] {
     servers = mcp_servers();
-    out: list = [];
+    out: list[any] = [];
     for srv in servers {
         tools = [];
         try { tools = [t.name for t in tools_for([srv])]; } except Exception as e { tools = ["<unreachable: " + str(e)[:60] + ">"]; }
@@ -562,7 +562,7 @@ def mcp_status() -> list {
 # Each becomes a TaskGraph on the graph, routable on the next task.
 # ---------------------------------------------------------------------------
 
-def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
+def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str, any] {
     # Small model executes the compiled OSP. The compiled PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run
     # time, as a context preamble on the task — never baked into the procedure.
@@ -586,7 +586,7 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict {
 }
 
 
-def library() -> list {
+def library() -> list[any] {
     # The agent's compiled capability, latest version per signature.
     reg = [root -->][?:Registry];
     if not reg { return []; }
@@ -601,7 +601,7 @@ def library() -> list {
     return out;
 }
 
-def describe_soul() -> dict {
+def describe_soul() -> dict[str, any] {
     soul = awaken();
     mems = [soul -->[?:Memory]];
     regs = [soul -->[?:Registry]];
@@ -691,7 +691,7 @@ def tool_group_set(name: str, csv: str) -> str {
     return "tool group '" + name + "' = " + csv;
 }
 
-def _expand_policy(soul: Soul) -> dict {
+def _expand_policy(soul: Soul) -> dict[str, any] {
     # profile = a group whose tools join the allow-list
     allow = [str(x) for x in soul.tool_allow];
     deny = [str(x) for x in soul.tool_deny];
@@ -709,7 +709,7 @@ def tool_allowed(name: str) -> bool {
     return True;
 }
 
-def tools_policy_info() -> dict {
+def tools_policy_info() -> dict[str, any] {
     soul = awaken();
     eff = _expand_policy(soul);
     return {"allow": soul.tool_allow, "deny": soul.tool_deny, "profile": soul.tool_profile,
@@ -736,7 +736,7 @@ def _find_skill(reg: Registry, signature: str) -> TaskGraph | None {
 }
 
 
-def forget(signature: str) -> dict {
+def forget(signature: str) -> dict[str, any] {
     # Remove a compiled skill entirely — every version, its attempts, and the
     # lowered module files on disk. Clears a stale/degenerate procedure.
     reg = [root -->][?:Registry][0];
@@ -773,7 +773,7 @@ def teach(fact: str, kind: str = "fact") -> str {
     return str(r["data"]);
 }
 
-def recollect(query: str, k: int = 8) -> list {
+def recollect(query: str, k: int = 8) -> list[any] {
     soul = awaken();
     return [{"content": m.content, "kind": m.kind, "uses": m.uses} for m in recall(soul, query, k)];
 }
@@ -803,7 +803,7 @@ def graph_snapshot() -> VGraph {
         g.edges.append(VEdge(src="soul", kind="provides", dst=sid));
     }
     mi = 0;
-    seen_mem: dict = {};
+    seen_mem: dict[str, any] = {};
     for m in [soul -->[?:Memory]] {
         if m.content in seen_mem { continue; }
         seen_mem[m.content] = True;
@@ -812,7 +812,7 @@ def graph_snapshot() -> VGraph {
                              detail=m.kind + " · used " + str(m.uses) + "x"));
         g.edges.append(VEdge(src="soul", kind="remembers", dst=mid));
     }
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     ti = 0;
     if reg is not None {
         # latest version per signature (collapses duplicate registrations, like library())
@@ -848,7 +848,7 @@ def observability_tail(n: int = 120) -> VObs {
     recs = read_tail(os.path.join(WORKDIR, "observability", "live.jsonl"), n);
     o = VObs();
     for raw in recs {
-        r: dict = dict(raw);
+        r: dict[str, any] = dict(raw);
         c = VCall(
             model=str(r.get("model", "?")),
             signature=str(r.get("signature", "")),
@@ -965,7 +965,7 @@ walker solve_known {
     }
 }
 
-def solve_known_task(task: str, skill: str = "") -> dict {
+def solve_known_task(task: str, skill: str = "") -> dict[str, any] {
     w = root spawn solve_known(task=task, skill=skill);
     return {"signature": w.signature, "result": w.result, "trace": w.trace};
 }
@@ -975,7 +975,7 @@ def solve_known_task(task: str, skill: str = "") -> dict {
 # Compile progress rendering. Pure string formatting with no compiler import,
 # so an ejected runtime can still render a build view it did not produce.
 # ---------------------------------------------------------------------------
-glob _STAGE_LABELS: dict = {"spec": "spec loop", "spine": "workflow spine",
+glob _STAGE_LABELS: dict[str, any] = {"spec": "spec loop", "spine": "workflow spine",
                             "flows": "annotator flows", "assemble": "assemble",
                             "gates": "gates", "repair": "repair",
                             "author": "authoring", "autofix": "mechanical fixes",
@@ -985,7 +985,7 @@ def compile_stage_label(stage: str) -> str {
     return str(_STAGE_LABELS.get(stage, stage));
 }
 
-def compile_stage_line(ev: dict) -> str {
+def compile_stage_line(ev: dict[str, any]) -> str {
     # One-line summary of a finished stage: what it produced, not that it ran.
     s = str(ev["stage"]);
     if s == "spec" {
@@ -1018,7 +1018,7 @@ def compile_stage_line(ev: dict) -> str {
         g7 = int(ev.get("g7_issues", 0));
         g8 = int(ev.get("g8_issues", 0));
         po = int(ev.get("par_opps", 0));
-        parts: list = ["env ✓" if not g7 else ("env: " + str(g7) + " unbound")];
+        parts: list[any] = ["env ✓" if not g7 else ("env: " + str(g7) + " unbound")];
         if g8 { parts.append("par: " + str(g8) + " false-parallel"); }
         if po { parts.append(str(po) + " par opportunities"); }
         return " · ".join(parts);
@@ -1026,7 +1026,7 @@ def compile_stage_line(ev: dict) -> str {
     return "";
 }
 
-def compile_stage_secs(ev: dict) -> str {
+def compile_stage_secs(ev: dict[str, any]) -> str {
     secs = float(ev.get("secs", 0.0));
     return (str(int(secs // 60)) + "m " + str(int(secs % 60)) + "s") if secs >= 60.0 else (("%.1f" % secs) + "s");
 }
@@ -1057,7 +1057,7 @@ def compiler_available() -> bool {
     return _COMPILER is not None;
 }
 
-def compile_via_seam(source: str, eject: bool, eject_path: str, on_event: any) -> dict {
+def compile_via_seam(source: str, eject: bool, eject_path: str, on_event: any) -> dict[str, any] {
     # The tool-belt's compile, routed through the seam. Callers check
     # `compiler_available()` first; this is the guard for anyone who did not.
     if _COMPILER is None {
@@ -1067,7 +1067,7 @@ def compile_via_seam(source: str, eject: bool, eject_path: str, on_event: any) -
     return dict(_COMPILER(source, eject, eject_path, on_event, False));
 }
 
-def solve_task(task: str, skill: str = "") -> dict {
+def solve_task(task: str, skill: str = "") -> dict[str, any] {
     # With a compiler: route, and compile / mutate / relearn on a miss or a bad
     # grade. Without one: route to a shipped skill, and say so on a miss.
     if _SOLVER is not None {

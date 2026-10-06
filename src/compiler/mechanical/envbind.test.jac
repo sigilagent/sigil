@@ -1,7 +1,7 @@
 """envbind — the SkillRT Pass-2 analog: manifest extraction, install-time
 probe, preflight emission. Pure code, no model."""
 
-def _ir_with_tools(tools: dict) -> dict {
+def _ir_with_tools(tools: dict[str, any]) -> dict[str, any] {
     return {"tools": tools, "nodes": [], "edges": []};
 }
 

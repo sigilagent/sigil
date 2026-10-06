@@ -31,7 +31,7 @@ Python, so `run_command` grants nothing `import subprocess` did not.
 
 # Each entry: sig (canonical — used INSTEAD of the author's, so the body's
 # parameter names always match), surface, doc, and a self-contained body.
-glob BUILTINS: dict = {
+glob BUILTINS: dict[str, any] = {
     "read_file": {
         "sig": "(path: str) -> str",
         "surface": "SENSE",
@@ -344,7 +344,7 @@ return _body if len(_body) <= 20000000 else (_body[:20000000] + "\\n... [truncat
 };
 
 
-def builtin_names() -> list {
+def builtin_names() -> list[any] {
     return sorted(list(BUILTINS));
 }
 
@@ -360,7 +360,7 @@ def builtin_catalogue() -> str {
     # The author-facing listing. Without this the frontier has no idea these
     # exist and hand-writes a body for every mundane step — or leaves the node
     # unserved, which is a failed compile.
-    rows: list = [
+    rows: list[any] = [
         "STANDARD TOOLS (always available — bind one by using its EXACT name as a",
         "tool name, with `serves:` naming the nodes it lowers; omit `body`/`command`",
         "and the compiler supplies the implementation):"

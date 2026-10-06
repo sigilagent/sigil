@@ -243,7 +243,7 @@ test "_inname prefers the read-verb filename and skips save-claimed ones" {
     }
     m = re.search(r"def _inname\(.*?(?=\ndef )", asset, re.S);
     assert m, "_inname must ship in the runtime asset";
-    ns: dict = {};
+    ns: dict[str, any] = {};
     exec(str(m.group(0)), ns);
     fn = ns["_inname"];
     # the two live task shapes
@@ -275,7 +275,7 @@ test "every unproduced input carry is bound at spawn, not just `task`" {
     # direct args (#argparse): the carry binds from caller params, falling back
     # to the task text, and the manifest is exported for the calling surface
     assert "spawn SaveAgent(task=task, note=str(params.get('note', task)))" in src;
-    assert "_EJ_PARAM_KEYS: list = ['note']" in src;
+    assert "_EJ_PARAM_KEYS: list[any] = ['note']" in src;
     assert "spawn SaveAgent(task=task);" not in src;
 }
 

@@ -68,7 +68,7 @@ with entry:__main__ {
     sys.path.insert(0, _d);
     os.environ["AGIR_STEP_BUDGET"] = "25";
     import spin_probe;
-    outs: list = ["q?", "unclear"] * 200;   # cognition never converges
+    outs: list[any] = ["q?", "unclear"] * 200;   # cognition never converges
     m = MockLLM(model_name="mockllm", config={"outputs": outs});
     hit = False;
     try {

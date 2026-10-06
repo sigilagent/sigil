@@ -46,7 +46,7 @@ def _jac_bin() -> str {
 # G1 — the standalone gate (delete-SKILL.md), mechanical
 # ---------------------------------------------------------------------------
 
-glob _POINTER_SMELLS: list = ["see ", "refer to ", "as described in ", "per the skill"];
+glob _POINTER_SMELLS: list[any] = ["see ", "refer to ", "as described in ", "per the skill"];
 
 def gate_standalone(vb: ViewBundle) -> list[str] {
     # Delete SKILL.md: could the IR still lower to a working agent? Every tool
@@ -210,7 +210,7 @@ def gate_slot_prompt_bloat(module_src: str) -> list[str] {
     if not gate_enabled("G13") { return out; }
     # Block-literal sems (`sem x =\n"""..."""`) carry the resident knowledge; the
     # quoted one-liners are short by construction but measured the same way.
-    pairs: list = list(re.findall(r'(?s)sem ([A-Za-z_0-9]+) =\s*"""(.*?)"""', str(module_src)));
+    pairs: list[any] = list(re.findall(r'(?s)sem ([A-Za-z_0-9]+) =\s*"""(.*?)"""', str(module_src)));
     for pr in pairs {
         nm = str(pr[0]); body = str(pr[1]);
         if len(body) > SLOT_PROMPT_CAP {
@@ -380,7 +380,7 @@ def gate_env_binding(ir_text: str) -> list[str] {
 # an opportunity the caller records (advisory — never blocks a compile).
 # ---------------------------------------------------------------------------
 
-def gate_concurrency(ir_text: str) -> dict {
+def gate_concurrency(ir_text: str) -> dict[str, any] {
     try {
         ir = _load_ir(ir_text);
         return extract_concurrency(ir);
@@ -412,7 +412,7 @@ def gate_concurrency(ir_text: str) -> dict {
 # re-gate through G4 — the oracle stays the authority on the patched IR.
 # ---------------------------------------------------------------------------
 
-glob _TY_SCALARS: list = ["str", "int", "float", "bool"];
+glob _TY_SCALARS: list[any] = ["str", "int", "float", "bool"];
 
 def _ty_base(t: any) -> str {
     # IR type string -> comparable base kind ("" when unknown/custom).
@@ -477,12 +477,12 @@ def _g9_refine_list(guard_test: any, param: str) -> str {
     return "list";
 }
 
-def _g9_guard_demands(fn: any) -> list {
+def _g9_guard_demands(fn: any) -> list[any] {
     # [[param, type], ...] from guard clauses that RAISE (or assert) on an
     # isinstance failure — the only isinstance shape that is a demand rather
     # than a coercion branch (`if isinstance(x, str): x = json.loads(x)`
     # ACCEPTS str and must not be read as demanding it).
-    out: list = [];
+    out: list[any] = [];
     for st in ast.walk(fn) {
         guard_test: any = None;
         if isinstance(st, ast.If) {
@@ -510,7 +510,7 @@ def _g9_guard_demands(fn: any) -> list {
     return out;
 }
 
-def _g9_tool_params(td: any) -> list {
+def _g9_tool_params(td: any) -> list[any] {
     # The tool's entry-function params as [[name, demanded_type], ...] —
     # annotation first, guard/assert demand as fallback. "" when untyped.
     body = td.get("body") if isinstance(td, dict) else None;
@@ -519,11 +519,11 @@ def _g9_tool_params(td: any) -> list {
     try { tree = ast.parse(textwrap.dedent(str(body))); } except Exception { return []; }
     for st in tree.body {
         if not (isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef)) { continue; }
-        demands: dict = {};
+        demands: dict[str, any] = {};
         for d in _g9_guard_demands(st) {
             if str(d[0]) not in demands { demands[str(d[0])] = str(d[1]); }
         }
-        out: list = [];
+        out: list[any] = [];
         for a in st.args.args {
             t = _ann_type(a.annotation) if (a.annotation is not None) else "";
             if not t { t = str(demands.get(str(a.arg), "")); }
@@ -534,7 +534,7 @@ def _g9_tool_params(td: any) -> list {
     return [];
 }
 
-def _g9_tool_for(ir: any, nd: any) -> list {
+def _g9_tool_for(ir: any, nd: any) -> list[any] {
     # [tool_name, tool_def] bound to this node (serves / explicit / 1:1 name),
     # mirroring the mechanical half's _node_tool join; [] when none.
     tools = ir.get("tools");
@@ -551,16 +551,16 @@ def _g9_tool_for(ir: any, nd: any) -> list {
     return [];
 }
 
-def _g9_evidence(ir: any) -> list {
+def _g9_evidence(ir: any) -> list[any] {
     # [carries, producers, demands] where demands: carry -> [[tool, param, type], ...]
     wlk = ir.get("walker") if isinstance(ir.get("walker"), dict) else {};
     carries = wlk.get("carries") if isinstance(wlk.get("carries"), dict) else {};
-    producers: dict = {};
-    demands: dict = {};
+    producers: dict[str, any] = {};
+    demands: dict[str, any] = {};
     for nd in list(ir.get("nodes") or []) {
         if not isinstance(nd, dict) { continue; }
         for w in list(nd.get("writes") or []) {
-            cur: list = list(producers.get(str(w), []));
+            cur: list[any] = list(producers.get(str(w), []));
             cur.append(nd);
             producers[str(w)] = cur;
         }
@@ -580,7 +580,7 @@ def _g9_evidence(ir: any) -> list {
             elif (i < len(rl)) and (str(rl[i]) in carries) { carry = str(rl[i]); }
             i += 1;
             if (not carry) or (not ptype) { continue; }
-            cur2: list = list(demands.get(carry, []));
+            cur2: list[any] = list(demands.get(carry, []));
             cur2.append([str(bound[0]), pname, ptype]);
             demands[carry] = cur2;
         }
@@ -597,17 +597,17 @@ def gate_type_unification(ir_text: str) -> list[str] {
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return []; }
     ev = _g9_evidence(ir);
-    carries: dict = ev[0] if isinstance(ev[0], dict) else {};
-    producers: dict = ev[1] if isinstance(ev[1], dict) else {};
-    demands: dict = ev[2] if isinstance(ev[2], dict) else {};
+    carries: dict[str, any] = ev[0] if isinstance(ev[0], dict) else {};
+    producers: dict[str, any] = ev[1] if isinstance(ev[1], dict) else {};
+    demands: dict[str, any] = ev[2] if isinstance(ev[2], dict) else {};
 
     for cname in carries {
         c = carries[cname];
         if not isinstance(c, dict) { continue; }
         declared = str(c.get("type") or "");
         dcls = _ty_class(declared);
-        dm: list = list(demands.get(str(cname), []));
-        prods: list = list(producers.get(str(cname), []));
+        dm: list[any] = list(demands.get(str(cname), []));
+        prods: list[any] = list(producers.get(str(cname), []));
         model_prod = [p for p in prods if _g9_is_model(p)];
 
         # demands must agree among themselves before they can bind the carry
@@ -688,17 +688,17 @@ def gate_type_unification(ir_text: str) -> list[str] {
     # MISSED — sat unreachable while a 7-node fragment ran to TERMINAL and
     # reported success. Graphs carrying unreachable nodes averaged AMC2 52
     # against 62 for fully reachable ones.
-    nlist: list = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict) and n.get("id")];
+    nlist: list[any] = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict) and n.get("id")];
     if nlist and gate_enabled("G9_REACH") {
         ids: list[str] = [str(n.get("id")) for n in nlist];
-        adj: dict = {};
+        adj: dict[str, any] = {};
         for e in list(ir.get("edges") or []) {
             if not isinstance(e, dict) { continue; }
             a = str(e.get("from") or ""); b = str(e.get("to") or "");
             if a and b { adj.setdefault(a, []).append(b); }
         }
         entry_id: str = str(ids[0]);
-        seen: dict = {};
+        seen: dict[str, any] = {};
         stack: list[str] = [entry_id];
         while stack {
             cur: str = str(stack.pop());
@@ -721,7 +721,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
     return issues;
 }
 
-def autofix_carry_types(ir_text: str) -> dict {
+def autofix_carry_types(ir_text: str) -> dict[str, any] {
     # The mechanical half of G9: adopt an agreeing consumer demand into
     # walker.carries.<c>.type. Pure code, no model. Returns the (possibly
     # unchanged) IR text + human-readable fix notes; the CALLER re-gates
@@ -730,12 +730,12 @@ def autofix_carry_types(ir_text: str) -> dict {
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return {"ir_text": ir_text, "fixes": []}; }
     ev = _g9_evidence(ir);
-    carries: dict = ev[0] if isinstance(ev[0], dict) else {};
-    demands: dict = ev[2] if isinstance(ev[2], dict) else {};
+    carries: dict[str, any] = ev[0] if isinstance(ev[0], dict) else {};
+    demands: dict[str, any] = ev[2] if isinstance(ev[2], dict) else {};
     for cname in carries {
         c = carries[cname];
         if not isinstance(c, dict) { continue; }
-        dm: list = list(demands.get(str(cname), []));
+        dm: list[any] = list(demands.get(str(cname), []));
         if not dm { continue; }
         classes: list = [];
         for d in dm {

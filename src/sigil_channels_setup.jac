@@ -18,7 +18,7 @@ import from .channels { channel_add, channel_list }
 import from .sigil_secrets { secret_add }
 
 # kind -> {token_env, get_token[], wire[], scope, note}
-glob CHANNEL_GUIDES: dict = {
+glob CHANNEL_GUIDES: dict[str, any] = {
     "telegram": {
         "token_env": "TELEGRAM_BOT_TOKEN",
         "delivery": "webhook",
@@ -84,7 +84,7 @@ glob CHANNEL_GUIDES: dict = {
     }
 };
 
-def channel_kinds() -> list {
+def channel_kinds() -> list[any] {
     return sorted(list(CHANNEL_GUIDES.keys()));
 }
 
@@ -112,7 +112,7 @@ def channel_setup_guide(kind: str) -> str {
     return "\n".join(lines);
 }
 
-def channel_bootstrap(name: str, kind: str, token_env: str = "") -> dict {
+def channel_bootstrap(name: str, kind: str, token_env: str = "") -> dict[str, any] {
     # Do the graph side of connecting a channel in one call: register the Channel
     # node and a SecretRef for its token, then return the provider guide + endpoint.
     k = (kind or "").lower().strip();
@@ -129,7 +129,7 @@ def channel_bootstrap(name: str, kind: str, token_env: str = "") -> dict {
     };
 }
 
-def channels_overview() -> dict {
+def channels_overview() -> dict[str, any] {
     # What's supported vs what's already configured — for the REPL /channels view.
     configured = channel_list();
     return {"supported": channel_kinds(), "configured": configured};

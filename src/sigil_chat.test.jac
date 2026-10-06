@@ -9,7 +9,7 @@ def _console(w: int) -> any {
     return Console(force_terminal=True, width=w, color_system="truecolor");
 }
 
-def _rows(txt: any) -> list {
+def _rows(txt: any) -> list[any] {
     return [ln for ln in str(txt.plain).split(chr(10))];
 }
 

@@ -14,6 +14,7 @@ wall-clock. `parallel=False` runs them sequentially (tests script a MockLLM
 whose outputs pop in call order, so tests need a deterministic order).
 """
 
+import copy;
 import from jaclang.byllm.lib { Model }
 import from .spec_loop { RuleSet }
 import from .workflow { WorkflowView }
@@ -118,7 +119,7 @@ def spine_digest(wf: WorkflowView, skill: str) -> str {
     # drops ~40% of the suite from collection (1182 items -> 694). Same trap the
     # ai-package imports in sigil.jac are annotated for.
     import from ..mechanical.toolib { builtin_catalogue }
-    lines: list = ["SPINE NODES:"];
+    lines: list[any] = ["SPINE NODES:"];
     for n in wf.nodes {
         rd = ",".join(n.reads);
         wr = ",".join(n.writes);
@@ -202,10 +203,13 @@ def gather_views(spec: RuleSet, ctx: str, parallel: bool = True) -> ViewBundle {
     if parallel {
         # read-shared, write-isolated: each flow writes only its own view, so
         # they run concurrently (flow launches on the pool, wait joins).
-        f_io = flow io_view(spec, ctx);
-        f_cx = flow context_view(spec, ctx);
-        f_kn = flow knowledge_view(spec, ctx);
-        f_hl = flow hil_view(spec, ctx);
+        # jac >=0.37: only imm / moved own / scalars cross `flow`. The four views
+        # only READ the spec, so all four share one deep-frozen copy.
+        fs = imm copy.deepcopy(spec);
+        f_io = flow io_view(fs, ctx);
+        f_cx = flow context_view(fs, ctx);
+        f_kn = flow knowledge_view(fs, ctx);
+        f_hl = flow hil_view(fs, ctx);
         # `wait` futures are Unknown to the checker — cast back to the view types
         return ViewBundle(
             io=(wait f_io) as IOView, ctxv=(wait f_cx) as ContextView,

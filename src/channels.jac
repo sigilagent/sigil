@@ -16,8 +16,8 @@ import from .sigil_secrets { resolve_credential }
 import from .sigil_transports { deliver }
 import from .sigil_api { report_for }
 
-edge Connects {}    # Soul -> Channel
-edge Carried {}     # Channel -> Message
+edge Connects: any --> any {}    # Soul -> Channel
+edge Carried: any --> any {}     # Channel -> Message
 
 node Channel {
     has name: str;
@@ -50,7 +50,7 @@ def _mid() -> str {
 
 def _channels(soul: Soul) -> list[Channel] { return [soul -->[?:Channel]]; }
 
-def channel_add(name: str, kind: str, config: str = "", dm_scope: str = "per-peer") -> dict {
+def channel_add(name: str, kind: str, config: str = "", dm_scope: str = "per-peer") -> dict[str, any] {
     soul = awaken();
     for c in _channels(soul) { if c.name == name { c.kind = kind; c.config = config; c.enabled = True; return {"name": name, "kind": kind, "updated": True}; } }
     ch = Channel(name=name, kind=kind, config=config, dm_scope=dm_scope);
@@ -64,9 +64,9 @@ def channel_remove(name: str) -> str {
     return "no such channel: " + name;
 }
 
-def channel_list() -> list {
+def channel_list() -> list[any] {
     soul = awaken();
-    out: list = [];
+    out: list[any] = [];
     for c in _channels(soul) {
         msgs = [c -->[?:Message]];
         out.append({"name": c.name, "kind": c.kind, "enabled": c.enabled,
@@ -88,7 +88,7 @@ def _record(ch: Channel, direction: str, peer: str, text: str, thread_id: str = 
     return m;
 }
 
-def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
+def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str, any] {
     # The core loop: a message arrives on a channel -> the agent solves it ->
     # the reply is recorded as outbound (an adapter delivers it). The peer becomes
     # part of the routing key (per OpenClaw's dm_scope) — here, memory context.
@@ -123,7 +123,7 @@ def channel_credentials(ch: Channel) -> list[str] {
     return [resolved, ""];
 }
 
-def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dict {
+def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str, any] {
     # Outbound send. This used to write a Message node and stop — the graph said
     # "sent" and nothing left the machine. Now it goes over the channel's actual
     # transport, and the record says which of those two things happened.
@@ -165,7 +165,7 @@ def edit(channel: str, mid: str, text: str) -> str {
     return "no message " + mid + " on channel " + channel;
 }
 
-def channel_history(channel: str, n: int = 20) -> list {
+def channel_history(channel: str, n: int = 20) -> list[any] {
     soul = awaken();
     for c in _channels(soul) {
         if c.name == channel {

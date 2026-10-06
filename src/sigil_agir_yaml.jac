@@ -38,7 +38,7 @@ def _relax_line(line: str) -> str {
     try { yaml.safe_load("{" + inner + "}"); return ln; }
     except Exception {  }
     parts: any = re.split(r",(?=\s*[\w\"]+\s*:)", inner);
-    fixed: list = [];
+    fixed: list[any] = [];
     for p in parts {
         if ":" not in p { fixed.append(p.strip()); continue; }
         kv: any = p.partition(":");
@@ -90,7 +90,7 @@ def quote_colon_scalars(text: str) -> str {
     return _j("\n", out);
 }
 
-def split_document(text: str) -> list {
+def split_document(text: str) -> list[any] {
     # -> [frontmatter_text, body_text]. Strips a markdown fence, then splits the
     # `--- … ---` frontmatter the authored form carries above the contract.
     s = str(text or "").strip();
@@ -108,7 +108,7 @@ def split_document(text: str) -> list {
     return ["", s];
 }
 
-def load_agir(text: str) -> dict {
+def load_agir(text: str) -> dict[str, any] {
     # An AG-IR document -> its mapping, with `_frontmatter` attached. Never
     # raises: an undecodable document is an empty mapping, and the caller
     # decides what to say about it.
@@ -173,7 +173,7 @@ def dump_agir(ir: any, block_scalars: bool = True) -> str {
     if not isinstance(ir, dict) { return ""; }
     dumper = _BlockDumper if block_scalars else yaml.SafeDumper;
     fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
-    body: dict = {};
+    body: dict[str, any] = {};
     for k in ir {
         if str(k) != "_frontmatter" { body[k] = ir[k]; }
     }

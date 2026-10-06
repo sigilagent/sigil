@@ -48,7 +48,7 @@ import from .hooks { fire_hooks }
 
 glob DAEMON_PID: str = "daemon";        # pidfile name under $SIGIL_HOME/run
 glob SERVICE_LABEL: str = "com.sigilagent.sigil";
-glob _STOP: dict = {"now": False};
+glob _STOP: dict[str, any] = {"now": False};
 glob _WARNED: dict[str, bool] = {};   # channels already reported as unconfigured
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def _write_state(interval_s: int) -> None {
     return None;
 }
 
-def _read_state() -> dict {
+def _read_state() -> dict[str, any] {
     p = Path(state_path());
     if not p.exists() { return {}; }
     try {
@@ -139,11 +139,11 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
-def wanted_bridges() -> list[dict] {
+def wanted_bridges() -> list[dict[str, any]] {
     # Every enabled channel that has a transport worth holding open. A `cli`
     # channel has no wire; a channel whose token env is unset would spin on
     # startup failures, so it is reported rather than launched.
-    out: list[dict] = [];
+    out: list[dict[str, any]] = [];
     for c in cron_channel_list() {
         name = str(c["name"]);
         kind = str(c["kind"]);
@@ -161,7 +161,7 @@ def wanted_bridges() -> list[dict] {
 }
 
 def _spawn_bridge(name: str) -> bool {
-    argv = [_jac_bin(), "run", entry_script(), "--", "channel", "run", name];
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "channel", "run", name];
     try {
         handle = open(log_path(), "a");
         subprocess.Popen(argv, cwd=project_root(), stdout=handle, stderr=handle,
@@ -193,7 +193,7 @@ def _supervise_children() -> None {
     return None;
 }
 
-def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict {
+def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
     # The supervisor. Blocks. `sigil daemon start` runs this detached.
     #
     # Every unit of work runs in a fresh `jac run main.jac -- <cmd>` child, and
@@ -320,7 +320,7 @@ def _note_attempt() -> None {
     return None;
 }
 
-def ensure_daemon(interval_s: int = 30, wait_s: float = 3.0) -> dict {
+def ensure_daemon(interval_s: int = 30, wait_s: float = 3.0) -> dict[str, any] {
     # Returns {"started": bool, "reason": str} — the reason is why NOT, so a
     # `--verbose` surface (and the tests) can tell "already up" from "declined".
     if str(os.environ.get("SIGIL_NO_DAEMON") or "") == "1" {
@@ -348,7 +348,7 @@ def ensure_daemon(interval_s: int = 30, wait_s: float = 3.0) -> dict {
     try {
         handle = open(log_path(), "a");
         proc = subprocess.Popen(
-            [_jac_bin(), "run", entry_script(), "--", "daemon", "run", str(interval_s)],
+            [_jac_bin(), "run", "--no-serve", entry_script(), "--", "daemon", "run", str(interval_s)],
             cwd=project_root(), stdout=handle, stderr=handle,
             stdin=subprocess.DEVNULL, start_new_session=True);
     } except Exception as ex {
@@ -375,7 +375,7 @@ def ensure_daemon(interval_s: int = 30, wait_s: float = 3.0) -> dict {
     return {"started": True, "reason": "still coming up"};
 }
 
-def daemon_start(interval_s: int = 30) -> dict {
+def daemon_start(interval_s: int = 30) -> dict[str, any] {
     if daemon_running() {
         return {"ok": False, "error": "already running (pid " + str(read_pid(DAEMON_PID)) + ")"};
     }
@@ -383,7 +383,7 @@ def daemon_start(interval_s: int = 30) -> dict {
     # clears the autostart backoff so a fixed daemon comes back immediately.
     clear_stopped();
     try { os.remove(_attempt_path()); } except Exception as _e { }
-    argv = [_jac_bin(), "run", entry_script(), "--", "daemon", "run", str(interval_s)];
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "daemon", "run", str(interval_s)];
     try {
         handle = open(log_path(), "a");
     } except Exception as e {
@@ -416,7 +416,7 @@ def daemon_start(interval_s: int = 30) -> dict {
     return {"ok": False, "error": "daemon did not report ready in 30s — see " + log_path()};
 }
 
-def daemon_stop(timeout_s: int = 30) -> dict {
+def daemon_stop(timeout_s: int = 30) -> dict[str, any] {
     # Marked FIRST, and marked even when nothing was running: `sigil daemon stop`
     # means "stay stopped", and without the marker the very next CLI command
     # would start it straight back up.
@@ -448,7 +448,7 @@ def daemon_stop(timeout_s: int = 30) -> dict {
             + str(timeout_s) + "s (a job may be mid-run) — `kill -9 " + str(pid) + "` to force"};
 }
 
-def daemon_status() -> dict {
+def daemon_status() -> dict[str, any] {
     running = daemon_running();
     st = _read_state();
     jobs = cron_list();
@@ -554,7 +554,7 @@ def _unit_body(interval_s: int) -> str {
         + "WantedBy=default.target" + chr(10));
 }
 
-def _run(argv: list) -> str {
+def _run(argv: list[any]) -> str {
     try {
         p = subprocess.run(argv, capture_output=True, text=True, timeout=60);
     } except Exception as e {
@@ -563,7 +563,7 @@ def _run(argv: list) -> str {
     return "" if p.returncode == 0 else (str(p.stderr or p.stdout or "")[:300]);
 }
 
-def service_install(interval_s: int = 30) -> dict {
+def service_install(interval_s: int = 30) -> dict[str, any] {
     path = service_path();
     body = _plist_body(interval_s) if _is_mac() else _unit_body(interval_s);
     try {
@@ -583,7 +583,7 @@ def service_install(interval_s: int = 30) -> dict {
             "manager": "launchd" if _is_mac() else "systemd"};
 }
 
-def service_uninstall() -> dict {
+def service_uninstall() -> dict[str, any] {
     path = service_path();
     if not os.path.exists(path) {
         return {"ok": False, "error": "no service installed at " + path};

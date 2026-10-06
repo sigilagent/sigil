@@ -23,7 +23,7 @@ import from .sigil_core { Registry, TaskGraph, latest_by_sig }
 
 # AG-IR node type -> the group the canvas colours by. Mirrors the primitive
 # families in src/contracts/: model-owned cognition, code-owned mechanism, flow.
-glob _GROUPS: dict = {
+glob _GROUPS: dict[str, any] = {
     "GEN-RAW": "mind", "GEN-FILL": "mind", "GEN-ENUM": "mind", "GEN-EDIT": "mind",
     "SENSE": "boundary", "ACT": "boundary", "CODE": "code",
     "ROUTE": "flow", "LOOP": "flow", "CALL": "flow", "SPAWN": "flow",
@@ -39,27 +39,27 @@ def _group_for(ntype: str) -> str {
     return "other";
 }
 
-def _as_list(v: any) -> list {
+def _as_list(v: any) -> list[any] {
     if v is None { return []; }
     if isinstance(v, list) { return list(v); }
     return [v];
 }
 
-def parse_agir(text: str) -> dict {
+def parse_agir(text: str) -> dict[str, any] {
     # AG-IR YAML -> {nodes, edges, tools, carries, warning}. Total: never raises.
-    out: dict = {"nodes": [], "edges": [], "tools": [], "carries": [], "warning": ""};
+    out: dict[str, any] = {"nodes": [], "edges": [], "tools": [], "carries": [], "warning": ""};
     if not str(text or "").strip() {
         out["warning"] = "this skill has no stored AG-IR";
         return out;
     }
     # Same reader the mechanical back-end uses, so what draws is what compiles.
-    ir: dict = load_agir(text);
+    ir: dict[str, any] = load_agir(text);
     if not [k for k in ir.keys() if str(k) != "_frontmatter"] {
         out["warning"] = "the stored AG-IR could not be decoded";
         return out;
     }
     # which tool serves which node — so a node can show what it actually runs
-    serves: dict = {};
+    serves: dict[str, any] = {};
     tools_raw: any = ir.get("tools") or {};
     tool_names: list = [];
     if isinstance(tools_raw, dict) {
@@ -84,7 +84,7 @@ def parse_agir(text: str) -> dict {
         }
     }
 
-    seen: dict = {};
+    seen: dict[str, any] = {};
     for n in _as_list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
         nid: str = str(n.get("id") or "").strip();
@@ -119,7 +119,7 @@ def parse_agir(text: str) -> dict {
     }
     # An edge naming a node that does not exist would silently vanish from the
     # canvas; say so instead, because it means the IR itself is inconsistent.
-    dangling: list = [str(e["src"]) + "->" + str(e["dst"]) for e in out["edges"]
+    dangling: list[any] = [str(e["src"]) + "->" + str(e["dst"]) for e in out["edges"]
                       if (str(e["src"]) not in seen) or (str(e["dst"]) not in seen)];
     if dangling {
         out["warning"] = "edges reference unknown nodes: " + ", ".join(dangling[:4]);
@@ -129,14 +129,14 @@ def parse_agir(text: str) -> dict {
     return out;
 }
 
-def skill_agir(signature: str) -> dict {
+def skill_agir(signature: str) -> dict[str, any] {
     # The drawable AG-IR for one compiled skill, latest version.
     sig: str = str(signature or "").strip();
     reg = [root -->][?:Registry];
     if not reg { return {"ok": False, "error": "no registry on this graph"}; }
     for tg in latest_by_sig([reg[0] -->][?:TaskGraph]) {
         if tg.signature == sig {
-            g: dict = parse_agir(tg.agir);
+            g: dict[str, any] = parse_agir(tg.agir);
             g["ok"] = True;
             g["signature"] = tg.signature;
             g["version"] = tg.version;

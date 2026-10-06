@@ -894,7 +894,7 @@ walker CleanCsvAgent {
     has check_rowcount_ok: bool = False;
     has check_order_ok: bool = False;
     has all_checks_passed: bool = False;
-    has report: str = "";
+    has `report: str = "";
 
     can n_read_input_csv with ReadInputCsv entry {
         _progress("read_input_csv");
@@ -910,7 +910,7 @@ walker CleanCsvAgent {
     can n_decide_column_meanings with DecideColumnMeanings entry {
         _progress("decide_column_meanings");
         _tui_llm_in("decide_column_meanings", [("input_headers", self.input_headers)]);
-        self.proposed_headers = _clean_strlist(decide_column_meanings(self.input_headers));
+        self.proposed_headers = list(_clean_strlist(decide_column_meanings(self.input_headers)));
         _tui_llm_out(self.proposed_headers);
         visit [-->][?:ApplyHeaderRename];
     }
@@ -1010,7 +1010,7 @@ walker CleanCsvAgent {
     can n_fix_output with FixOutput entry {
         _progress("fix_output");
         _tui_llm_in("fix_output", [("input_headers", self.input_headers), ("proposed_headers", self.proposed_headers), ("check_parse_ok", self.check_parse_ok), ("check_regex_ok", self.check_regex_ok), ("check_unique_ok", self.check_unique_ok), ("check_colcount_ok", self.check_colcount_ok), ("check_rowcount_ok", self.check_rowcount_ok), ("check_order_ok", self.check_order_ok)]);
-        self.proposed_headers = _clean_strlist(fix_output(self.input_headers, self.proposed_headers, self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok, self.check_order_ok));
+        self.proposed_headers = list(_clean_strlist(fix_output(self.input_headers, self.proposed_headers, self.check_parse_ok, self.check_regex_ok, self.check_unique_ok, self.check_colcount_ok, self.check_rowcount_ok, self.check_order_ok)));
         _tui_llm_out(self.proposed_headers);
         visit [-->][?:ApplyHeaderRename];
     }

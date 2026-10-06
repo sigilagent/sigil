@@ -48,7 +48,7 @@ obj LiftResult {
     #   fixed     runnable and clean, but only because fixes/repairs landed
     #   clean     runnable, nothing found, nothing needed
     has status: str = "failed";
-    has findings: list[dict] = [];     # {gate, severity, message} — residual, post-fix
+    has findings: list[dict[str, any]] = [];     # {gate, severity, message} — residual, post-fix
     has fixes: list[str] = [];         # mechanical autofix notes (model repairs ride `repairs`)
 }
 
