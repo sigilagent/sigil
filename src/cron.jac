@@ -29,8 +29,8 @@ import from .sigil_runtime {
     write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
 }
 
-edge Schedules {}   # Soul -> CronJob
-edge Fired {}       # CronJob -> CronRun
+edge Schedules: any --> any {}   # Soul -> CronJob
+edge Fired: any --> any {}       # CronJob -> CronRun
 
 glob RUN_HISTORY: int = 50;   # CronRuns kept per job; older fires are pruned
 
@@ -58,7 +58,7 @@ node CronRun {
 
 # ---------------------------------------------------------------------------
 # Due-time arithmetic. The SAME routine is compiled to a native LLVM binary in
-# cron_native.na.jac (built with `jac nacompile`) — pure int math over
+# cron_native.jac (built with `jac nacompile`) — pure int math over
 # timestamps, the native pathway per the design ask. (Inline `na def` hits an
 # ICE in this jaclang build, so the native artifact is the standalone binary
 # and this in-process copy stays on the Python codespace.)
@@ -89,7 +89,7 @@ def _jobs(soul: Soul) -> list[CronJob] {
 }
 
 def cron_add(name: str, kind: str, spec: str, task: str,
-             tz: str = "", channel: str = "", delete_after_run: bool = False) -> dict {
+             tz: str = "", channel: str = "", delete_after_run: bool = False) -> dict[str, any] {
     soul = awaken();
     resolved = spec;
     if kind == "at" { resolved = str(parse_at(spec)); }   # normalize to epoch-ms
@@ -117,9 +117,9 @@ def cron_add(name: str, kind: str, spec: str, task: str,
             "delete_after_run": job.delete_after_run};
 }
 
-def cron_list() -> list {
+def cron_list() -> list[any] {
     soul = awaken();
-    out: list = [];
+    out: list[any] = [];
     for j in _jobs(soul) {
         out.append({"name": j.name, "kind": j.kind, "spec": j.spec, "enabled": j.enabled,
                     "tz": j.tz, "zone": (j.tz or local_tz() or "local"),
@@ -130,7 +130,7 @@ def cron_list() -> list {
     return out;
 }
 
-def cron_show(name: str) -> dict {
+def cron_show(name: str) -> dict[str, any] {
     soul = awaken();
     for j in _jobs(soul) {
         if j.name == name {
@@ -143,7 +143,7 @@ def cron_show(name: str) -> dict {
     return {};
 }
 
-def cron_runs(name: str) -> list {
+def cron_runs(name: str) -> list[any] {
     soul = awaken();
     for j in _jobs(soul) {
         if j.name == name {
@@ -214,7 +214,7 @@ def _prune_runs(job: CronJob) -> None {
     for r in hist[:len(hist) - RUN_HISTORY] { del r; }
 }
 
-def _fire(job: CronJob, t: int) -> dict {
+def _fire(job: CronJob, t: int) -> dict[str, any] {
     # Run one job. A job that raises must not take the tick down with it — the
     # next job in the loop is somebody else's schedule.
     fire_hooks("cron_fired", job.name);
@@ -260,12 +260,12 @@ def _rearm(job: CronJob, t: int) -> bool {
     return False;
 }
 
-def cron_tick() -> dict {
+def cron_tick() -> dict[str, any] {
     # Fire every due job. Driven by `cron_daemon` (the CLI loop), `sigil cron
     # tick`, or an external driver through `api_cron_tick`.
     soul = awaken();
     t = now_ms();
-    fired: list = [];
+    fired: list[any] = [];
     armed = 0;
     for j in _jobs(soul) {
         if (not j.enabled) or (j.next_run_ms <= 0) { continue; }
@@ -278,7 +278,7 @@ def cron_tick() -> dict {
     return {"now_ms": t, "fired": fired, "count": len(fired), "armed": armed};
 }
 
-def cron_run_now(name: str) -> dict {
+def cron_run_now(name: str) -> dict[str, any] {
     # Fire one job immediately, on demand, without disturbing its schedule — the
     # "don't make me wait five minutes to find out if it works" button.
     soul = awaken();
@@ -304,7 +304,7 @@ def next_due_ms() -> int {
 }
 
 glob CRON_PID: str = "cron";           # pidfile name under $SIGIL_HOME/run
-glob _STOP: dict = {"now": False};     # set by SIGTERM/SIGINT, read by the loop
+glob _STOP: dict[str, any] = {"now": False};     # set by SIGTERM/SIGINT, read by the loop
 
 def cron_daemon_running() -> bool {
     return process_running(CRON_PID);
@@ -341,7 +341,7 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
-def tick_isolated(timeout_s: int = 1800) -> dict {
+def tick_isolated(timeout_s: int = 1800) -> dict[str, any] {
     # Run one tick in a FRESH process, and not as an optimization.
     #
     # A long-lived jac process serves the graph it loaded at startup: a daemon
@@ -352,7 +352,7 @@ def tick_isolated(timeout_s: int = 1800) -> dict {
     #
     # The tick blocks until the fired job finishes: one job runs at a time, and a
     # long solve delays the next tick rather than stacking runs on top of it.
-    argv = [_jac_bin(), "run", entry_script(), "--", "cron", "tick"];
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "cron", "tick"];
     try {
         p = subprocess.run(argv, cwd=project_root(), capture_output=True,
                            text=True, timeout=timeout_s);
@@ -365,7 +365,7 @@ def tick_isolated(timeout_s: int = 1800) -> dict {
             "err": str(p.stderr or "")[-600:]};
 }
 
-def _report_tick(res: dict, quiet: bool) -> None {
+def _report_tick(res: dict[str, any], quiet: bool) -> None {
     if quiet { return None; }
     if not res["ok"] {
         print("cron daemon: tick failed: " + str(res["err"])[:300], flush=True);
@@ -382,7 +382,7 @@ def _report_tick(res: dict, quiet: bool) -> None {
 }
 
 def cron_daemon(interval_s: int = 30, max_ticks: int = 0, quiet: bool = False,
-                job_timeout_s: int = 1800) -> dict {
+                job_timeout_s: int = 1800) -> dict[str, any] {
     # The blocking scheduler loop. `max_ticks` bounds it for tests; 0 runs until
     # stopped. Every tick is wrapped: a scheduler that dies on one bad job is the
     # failure this whole change exists to end.

@@ -15,7 +15,7 @@ def _read(path: str) -> str {
     with open(path) as f { return str(f.read()); }
 }
 
-def _parse_soul_md(text: str) -> dict {
+def _parse_soul_md(text: str) -> dict[str, any] {
     persona_parts: list = [];
     ethos: list = [];
     section = "";
@@ -35,7 +35,7 @@ def _parse_soul_md(text: str) -> dict {
     return {"persona": " ".join(persona_parts), "ethos": ethos};
 }
 
-def migrate_openclaw(path: str) -> dict {
+def migrate_openclaw(path: str) -> dict[str, any] {
     soul = awaken();
     out = {"persona": False, "ethos": 0, "channels": 0, "models": 0, "skills": 0};
 

@@ -23,9 +23,9 @@ Never use Unicode subscripts in output.
 CSV rules: the output must include a header row naming every column.
 """;
 
-glob _events: list = [];
+glob _events: list[any] = [];
 
-def _collect(ev: dict) -> None { _events.append(ev); }
+def _collect(ev: dict[str, any]) -> None { _events.append(ev); }
 
 with entry:__main__ {
     os.environ["SIGIL_STAGED"] = "1";   # this scenario tests the staged front-end

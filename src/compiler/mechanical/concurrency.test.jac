@@ -1,11 +1,11 @@
 """concurrency — the SkillRT Pass-3 analog: ILP stage packing, SPAWN
 cross-branch validation, DLP candidates. Pure code, no model."""
 
-def _n(nid: str, ntype: str = "CODE", owner: str = "code", reads: list = [], writes: list = []) -> dict {
+def _n(nid: str, ntype: str = "CODE", owner: str = "code", reads: list[any] = [], writes: list[any] = []) -> dict[str, any] {
     return {"id": nid, "type": ntype, "owner": owner, "reads": list(reads), "writes": list(writes)};
 }
 
-def _e(src: str, dst: str) -> dict {
+def _e(src: str, dst: str) -> dict[str, any] {
     return {"from": src, "to": dst};
 }
 

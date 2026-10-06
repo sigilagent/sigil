@@ -91,7 +91,7 @@ def _mangled(s: str) -> bool {
     return False;
 }
 
-def validate_edits(skill: str, findings: list[LintFinding], edits: list) -> None {
+def validate_edits(skill: str, findings: list[LintFinding], edits: list[any]) -> None {
     # code disposes: attach each surviving edit as a modality VARIANT on its
     # finding. An edit survives only when its old is verbatim in the skill,
     # actually changes something, and its new states a modal force. Content-
@@ -99,7 +99,7 @@ def validate_edits(skill: str, findings: list[LintFinding], edits: list) -> None
     # old is a narrow span shared by all of a finding's variants, new keeps
     # every backtick code token, may not materially shorten what it replaces,
     # and may not leave sentence-splitting punctuation wreckage.
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for f in findings { by_id[f.rule_id] = f; }
     for e in edits {
         f = by_id.get(str(e.rule_id));
@@ -148,7 +148,7 @@ def lint_findings(skill: str, sr: SpecResult) -> list[LintFinding] {
     forces: list[str] = ["maybe", "do"];
     if [f for f in out if f.kind == "conflict"] { forces.append("dont"); }
     for force in forces {
-        edits: list = [];
+        edits: list[any] = [];
         try { edits = list(suggest_fixes(skill, digest, force)); } except Exception { edits = []; }
         for e in edits { e.modality = force; }
         validate_edits(skill, out, edits);

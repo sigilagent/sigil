@@ -5,7 +5,7 @@
 
 import json;
 
-glob SKILLS: list = [
+glob SKILLS: list[any] = [
     {"signature": "clean-csv", "version": 2, "origin": "compiled-skill",
      "runs": 5, "successes": 4,
      "intent": "Use when a messy CSV needs snake_case headers and blank rows removed."},
@@ -13,26 +13,26 @@ glob SKILLS: list = [
      "runs": 0, "successes": 0, "intent": ""}
 ];
 
-def _skills() -> list { return SKILLS; }
+def _skills() -> list[any] { return SKILLS; }
 
-def _run(task: str, sig: str) -> dict {
+def _run(task: str, sig: str) -> dict[str, any] {
     return {"result": "ran " + sig + " on " + task, "trace": "DONE ok"};
 }
 
-def _solve(task: str, skill: str) -> dict {
+def _solve(task: str, skill: str) -> dict[str, any] {
     return {"result": "solved " + task, "trace": "route -> x\nDONE ok"};
 }
 
-def _tc(name: str, args: dict) -> dict {
+def _tc(name: str, args: dict[str, any]) -> dict[str, any] {
     return _dispatch({"method": "tools/call",
                       "params": {"name": name, "arguments": args}},
-                     _skills, _run, _solve);
+                     _skills, _run, _solve) as dict[str, any];
 }
 
 test "tool names are legal MCP identifiers" {
     assert _tool_name("clean-csv") == "skill_clean-csv";
     assert _tool_name("pdf extract/v2") == "skill_pdf_extract_v2";
-    assert len(_tool_name("x" * 200)) <= 64;
+    assert len(str(_tool_name("x" * 200))) <= 64;
 }
 
 test "initialize echoes the client's protocol version and names the server" {
@@ -109,7 +109,7 @@ test "sigil_library needs no arguments and lists the skills" {
 }
 
 test "a failed run comes back as isError, with its trace" {
-    def failing(task: str, sig: str) -> dict {
+    def failing(task: str, sig: str) -> dict[str, any] {
         return {"result": "", "trace": "route -> x\nDONE fail"};
     }
     r = _dispatch({"method": "tools/call",

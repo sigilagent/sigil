@@ -158,7 +158,7 @@ def _transpile_error(e: any) -> str {
     return (type(e).__name__ + ": " + str(e))[:400] + where;
 }
 
-def _lower(agir: str, sig: str) -> dict {
+def _lower(agir: str, sig: str) -> dict[str, any] {
     # Compile the AG-IR; on a compile/parse failure, let the frontier REPAIR it and
     # retry (self-healing compilation). Returns {ok, osp, agir}.
     cur = agir;
@@ -221,7 +221,7 @@ def mutate(reg: Registry, tg: TaskGraph, task: str, failure: str) -> TaskGraph {
 # agents via byLLM's native McpClient. Adding one takes effect on the next run.
 # ---------------------------------------------------------------------------
 
-def register_skill(source: str, kind: str) -> dict {
+def register_skill(source: str, kind: str) -> dict[str, any] {
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
     if kind == "agir" {
@@ -259,7 +259,7 @@ def register_skill(source: str, kind: str) -> dict {
 # front-ends (the CLI's live build view and chat's tool trace) want the same two
 # strings out of an event, so they live here rather than being written twice and
 # drifting apart.
-def lint_skill(source: str, name: str = "") -> dict {
+def lint_skill(source: str, name: str = "") -> dict[str, any] {
     # The SKILL LINTER pre-pass: extract the spec (the same loop compile runs)
     # and draft guarded fix suggestions for its findings. Returns
     # {"spec": SpecResult, "findings": list[LintFinding]} — the CLI reviews
@@ -279,7 +279,7 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False,
                   skill_dir: str = "", strict: bool = False,
                   ask: any = None, frontend: str = "", pre_spec: any = None,
-                  adjudicate: bool = True) -> dict {
+                  adjudicate: bool = True) -> dict[str, any] {
     # `sigil compile SKILL.md [-e [out.jac]]` — the fix-forward AI lift:
     # spec loop -> spine -> flows -> assemble -> autofix chain + gates +
     # bounded repair. Only `failed` (no runnable module) refuses to persist —
@@ -378,7 +378,7 @@ def _emit_agir(ir_text: str, sig: str, eject_path: str) -> str {
 def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_path: str,
                     progress: any, skill_dir: str, strict: bool, ask: any,
                     pre_spec: any = None, version: int = 1, origin: str = "compiled-skill-raise2",
-                    adjudicate: bool = True) -> dict {
+                    adjudicate: bool = True) -> dict[str, any] {
     # The DEFAULT front-end: the faithfulness-first raise. Faithfulness FAILS the
     # compile (an agent that violates the skill is not a success); underspecified
     # modality is assumed MAYBE + warned, or asked inline via the TUI asker (`ask`,
@@ -391,7 +391,7 @@ def _compile_raise2(source: str, sig: str, reg: Registry, eject: bool, eject_pat
     pin_raise2_llms(cur_frontier());
     rr = raise2(source, sig, skill_dir=skill_dir, ask=ask, pre=pre_spec, adjudicate=adjudicate);
 
-    findings: list = [];
+    findings: list[any] = [];
     for d in rr.proof.dropped { findings.append({"gate": "faith", "severity": "error", "message": str(d.message)}); }
     for a in rr.proof.added { findings.append({"gate": "faith", "severity": "error", "message": str(a.message)}); }
     # Cognition preservation: reported, warn-level — it does not fail the compile
@@ -578,7 +578,7 @@ walker solve {
 # ---------------------------------------------------------------------------
 # Programmatic entrypoints.
 # ---------------------------------------------------------------------------
-def solve_full_task(task: str, skill: str = "") -> dict {
+def solve_full_task(task: str, skill: str = "") -> dict[str, any] {
     w = root spawn solve(task=task, skill=skill);
     return {"signature": w.signature, "result": w.result, "trace": w.trace};
 }
@@ -591,7 +591,7 @@ with entry {
 }
 
 
-def eval_skill(signature: str, probe: str = "") -> dict {
+def eval_skill(signature: str, probe: str = "") -> dict[str, any] {
     # Grounded verification: run the current skill on a probe task (defaults to the
     # skill's own intent) and score whether the output truly accomplishes it.
     awaken();
@@ -637,7 +637,7 @@ def _recompile(reg: Registry, tg: TaskGraph, hint: str = "", origin: str = "rele
     return _compile_fresh(reg, tg.signature, intent, tg.intent, tg.version + 1, origin);
 }
 
-def relearn(signature: str, hint: str = "") -> dict {
+def relearn(signature: str, hint: str = "") -> dict[str, any] {
     # Discard the current (degraded) procedure and recompile it FROM SCRATCH —
     # same signature, bumped version, lineage kept. Manual counterpart to the
     # solve loop's automatic eval-triggered relearn; both ride _recompile.

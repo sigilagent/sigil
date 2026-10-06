@@ -17,7 +17,7 @@ If the file is a form, read FORMS.md and follow its instructions.
 
 glob _seen: list = [];
 
-def _capture(ev: dict) -> None { _seen.append(str(ev.get("phase"))); }
+def _capture(ev: dict[str, any]) -> None { _seen.append(str(ev.get("phase"))); }
 
 with entry:__main__ {
     r1 = Rule(id="r1", quote="Always write the output as CSV with a header row.",

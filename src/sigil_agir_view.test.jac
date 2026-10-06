@@ -30,7 +30,7 @@ test "parse_agir: a pipeline IR projects to its nodes, edges and dataflow" {
 
 test "parse_agir: node types map to their primitive family" {
     g = parse_agir(_cookbook("word_frequency"));
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for n in g["nodes"] { by_id[str(n["id"])] = str(n["group"]); }
     assert by_id["read_input"] == "boundary";      # SENSE
     assert by_id["compute"] == "code";             # CODE

@@ -114,7 +114,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     }
 
     # ---- residency: ContextFlow scoping overrides/extends KnowledgeFlow -----
-    residency: dict = {};
+    residency: dict[str, any] = {};
     for ki in vb.kn.knowledge { residency[ki.key] = list(ki.resident_on); }
     for res in vb.ctxv.residency {
         cur = list(residency.get(res.key, []));
@@ -130,7 +130,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     # (runtime _ask_user: file channel when HIL_QA_FILE is attached, an honest
     # sentinel in batch — the human gate exists either way, never fabricated.)
     hil_tool_by_node: dict[str, str] = {};
-    hil_extra_tools: list[dict] = [];
+    hil_extra_tools: list[dict[str, any]] = [];
     for hp0 in vb.hil.points {
         if hp0.node not in node_ids { continue; }
         tname = "ask_user_" + hp0.node;
@@ -141,12 +141,12 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         # Baking only the static text and ignoring the argument asked the human
         # "INPUT:" and nothing else, which is a gate the human cannot answer.
         # Runtime question wins; the lifted text is the fallback when there is none.
-        static = (hp0.kind + ": " + hp0.prompt).replace('"', "'").rstrip();
+        `static = (hp0.kind + ": " + hp0.prompt).replace('"', "'").rstrip();
         kind = hp0.kind.replace('"', "'");
         hil_extra_tools.append({"name": tname,
             "sig": "(prompt) -> str", "surface": "SENSE", "serves": [hp0.node],
             "body": 'q = str(prompt or "").strip()\n'
-                    + 'return _ask_user(("' + kind + ': " + q) if q else "' + static + '")'});
+                    + 'return _ask_user(("' + kind + ': " + q) if q else "' + `static + '")'});
     }
 
     # ---- constraint residency: a prohibition rides only the slots it governs ---
@@ -220,7 +220,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     }
 
     # ---- emit ----------------------------------------------------------------
-    nodes_out: list = [];
+    nodes_out: list[any] = [];
     for n in wf.nodes {
         doc = n.doc;
         mine = list(con_by_node.get(n.id, [])) + con_global;
@@ -232,7 +232,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
             sep2 = " " if doc else "";
             doc = doc + sep2 + "REQUIRE HUMAN GATE — " + "; ".join(hil_by_node[n.id]);
         }
-        nd: dict = {"id": n.id, "type": _ntype_str(n.ntype), "owner": n.owner.name.lower()};
+        nd: dict[str, any] = {"id": n.id, "type": _ntype_str(n.ntype), "owner": n.owner.name.lower()};
         if doc { nd["doc"] = doc; }
         if n.reads { nd["reads"] = list(n.reads); }
         if n.writes { nd["writes"] = list(n.writes); }
@@ -250,23 +250,23 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         nodes_out.append(nd);
     }
 
-    carries_out: dict = {};
+    carries_out: dict[str, any] = {};
     if "task" not in carry_names { carries_out["task"] = {"type": "str", "role": "input"}; }
     for cr in vb.io.carries {
         if cr.name == "report" { continue; }   # the mechanical half adds `report` itself
-        ce: dict = {"type": cr.ctype if cr.ctype else "str"};
+        ce: dict[str, any] = {"type": cr.ctype if cr.ctype else "str"};
         if cr.role { ce["role"] = cr.role; }
         if cr.produced_by { ce["produced_by"] = cr.produced_by; }
         carries_out[cr.name] = ce;
     }
 
-    tools_out: dict = {};
+    tools_out: dict[str, any] = {};
     for ht in hil_extra_tools {
         tools_out[str(ht["name"])] = {"sig": ht["sig"], "surface": ht["surface"],
                                       "serves": list(ht["serves"]), "body": ht["body"]};
     }
     for td in vb.kn.tools {
-        te: dict = {};
+        te: dict[str, any] = {};
         if td.sig { te["sig"] = td.sig; }
         if td.surface { te["surface"] = td.surface; }
         if td.serves { te["serves"] = list(td.serves); }
@@ -275,19 +275,19 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         tools_out[td.name] = te;
     }
 
-    knowledge_out: dict = {};
+    knowledge_out: dict[str, any] = {};
     for ki in vb.kn.knowledge {
         knowledge_out[ki.key] = {"body": ki.content, "resident_on": list(residency.get(ki.key, []))};
     }
 
-    edges_out: list = [];
+    edges_out: list[any] = [];
     for e in wf.edges {
-        ee: dict = {"from": e.src, "to": e.dst, "modality": e.modality.name.lower()};
+        ee: dict[str, any] = {"from": e.src, "to": e.dst, "modality": e.modality.name.lower()};
         if e.guard { ee["guard"] = e.guard; }
         edges_out.append(ee);
     }
 
-    body: dict = {
+    body: dict[str, any] = {
         "agir_version": 0.1,
         "standalone": True,
         "shape": "pipeline",

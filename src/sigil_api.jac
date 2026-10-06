@@ -47,12 +47,12 @@ def in_child() -> bool {
     return str(os.environ.get(CHILD_ENV) or "") == "1";
 }
 
-def child_env() -> dict {
+def child_env() -> dict[str, any] {
     # The server exports its own jac runtime settings into the environment, and a
     # child that inherited them resolved the SERVER's store instead of the
     # project's — the proxy ran, and still answered from an empty graph. Hand the
     # child a clean environment: everything except the runtime's own wiring.
-    out: dict = {};
+    out: dict[str, any] = {};
     for (k, v) in os.environ.items() {
         key = str(k);
         if key.startswith("JAC") or key.startswith("JACLANG") { continue; }
@@ -62,7 +62,7 @@ def child_env() -> dict {
     return out;
 }
 
-def api_call(name: str, args: dict, timeout_s: int = 900) -> dict {
+def api_call(name: str, args: dict[str, any], timeout_s: int = 900) -> dict[str, any] {
     # Run one API request against the real graph. Returns
     # {"ok": bool, "data": <whatever the call returned>, "error": str}.
     if in_child() {
@@ -76,7 +76,7 @@ def api_call(name: str, args: dict, timeout_s: int = 900) -> dict {
         return {"ok": False, "data": None, "error": "arguments are not JSON: " + str(e)[:200]};
     }
     env = child_env();
-    argv = [_jac_bin(), "run", entry_script(), "--", "api", name, payload];
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "api", name, payload];
     try {
         p = subprocess.run(argv, cwd=project_root(), env=env, capture_output=True,
                            text=True, timeout=timeout_s);
@@ -101,7 +101,7 @@ def api_call(name: str, args: dict, timeout_s: int = 900) -> dict {
             "error": str(body.get("error") or "")};
 }
 
-def report_for(name: str, args: dict) -> any {
+def report_for(name: str, args: dict[str, any]) -> any {
     # What a `walker:pub` reports. On success the caller sees exactly what the
     # local function would have returned; on failure it sees why, rather than a
     # plausible-looking empty answer — which is how "the Observatory works" went

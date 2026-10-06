@@ -20,7 +20,7 @@ def _rt_text():
 ::py::
 
 
-def _call_builtin(name: str, args: dict) -> str {
+def _call_builtin(name: str, args: dict[str, any]) -> str {
     # Build the tool the way the lowering does — the canonical sig's parameters
     # as the function's parameters, the registered body as its body — and call
     # it. No compiler involvement, so a failure here is the BODY's.
@@ -32,7 +32,7 @@ def _call_builtin(name: str, args: dict) -> str {
     src = "def _tool(" + ", ".join(pnames) + "):\n";
     for ln in body.splitlines() { src += ("    " + ln + "\n") if ln.strip() else "\n"; }
     ast.parse(src);                       # the body is valid Python on its own
-    ns: dict = {};
+    ns: dict[str, any] = {};
     exec(compile(src, "<toolib:" + name + ">", "exec"), ns);
     return str(ns["_tool"](**args));
 }
@@ -62,7 +62,7 @@ test "every builtin body parses, and declares the names it uses" {
     # the check that would have caught `_shutil`: a name that is loaded, never
     # bound in the body, and not a parameter or a builtin.
     import builtins;
-    bad: list = [];
+    bad: list[any] = [];
     for n in builtin_names() {
         b = builtin(n);
         params = str(b["sig"]).split("->")[0].strip().strip("()");

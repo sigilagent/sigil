@@ -34,7 +34,7 @@ import from .sigil_transports {
 }
 
 glob REPLY_MARKER: str = "<<<SIGIL_REPLY>>>";
-glob _STOP: dict = {"now": False};
+glob _STOP: dict[str, any] = {"now": False};
 
 def bridge_pid_name(channel: str) -> str {
     return "bridge-" + str(channel);
@@ -114,7 +114,7 @@ def write_offset(channel: str, value: int) -> None {
 # ---------------------------------------------------------------------------
 # Channel config, resolved once at bridge start
 # ---------------------------------------------------------------------------
-def channel_config(name: str) -> dict {
+def channel_config(name: str) -> dict[str, any] {
     # {kind, token, target, enabled, dm_scope}. `Channel.config` holds a
     # `secret:<name>` reference, never a value — resolve_refs pulls it from the
     # environment at run time so the token stays off the graph and out of logs.
@@ -145,9 +145,9 @@ def channel_config(name: str) -> dict {
 # Handing one message to the agent
 # ---------------------------------------------------------------------------
 def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
-              timeout_s: int = 900) -> dict {
+              timeout_s: int = 900) -> dict[str, any] {
     # A fresh process, the current graph, one reply. Returns {ok, reply, error}.
-    argv = [_jac_bin(), "run", entry_script(), "--", "channel", "inbound",
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "channel", "inbound",
             channel, peer, text, thread_id];
     try {
         p = subprocess.run(argv, cwd=project_root(), capture_output=True,
@@ -189,7 +189,7 @@ def _log(msg: str) -> None {
     return None;
 }
 
-def _handle(channel: str, cfg: dict, m: dict) -> None {
+def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
     peer = str(m.get("peer") or "anon");
     text = str(m.get("text") or "");
     thread = str(m.get("thread_id") or "");
@@ -212,7 +212,7 @@ def _handle(channel: str, cfg: dict, m: dict) -> None {
     return None;
 }
 
-def bridge_poll(channel: str, cfg: dict, max_rounds: int = 0) -> dict {
+def bridge_poll(channel: str, cfg: dict[str, any], max_rounds: int = 0) -> dict[str, any] {
     rounds = 0;
     offset = read_offset(channel);
     backoff = 1;
@@ -250,7 +250,7 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
-def bridge_webhook(channel: str, cfg: dict, port: int) -> dict {
+def bridge_webhook(channel: str, cfg: dict[str, any], port: int) -> dict[str, any] {
     # For providers that push. Binds loopback by default: put a tunnel or a
     # reverse proxy in front rather than exposing the agent to the internet.
     import from http.server { BaseHTTPRequestHandler, ThreadingHTTPServer }
@@ -261,7 +261,7 @@ def bridge_webhook(channel: str, cfg: dict, port: int) -> dict {
         def do_POST(self: Handler) -> None {
             length = int(self.headers.get("Content-Length") or "0");
             raw = self.rfile.read(length).decode("utf-8", errors="replace") if length else "{}";
-            body: dict = {};
+            body: dict[str, any] = {};
             try { body = dict(json.loads(raw or "{}")); } except Exception as e { body = {}; }
             m = normalize_inbound(kind, body);
             if m.get("challenge") {
@@ -275,7 +275,7 @@ def bridge_webhook(channel: str, cfg: dict, port: int) -> dict {
             if m.get("text") { _handle(channel, cfg, m); }
             return None;
         }
-        def _reply(self: Handler, code: int, payload: dict) -> None {
+        def _reply(self: Handler, code: int, payload: dict[str, any]) -> None {
             data = json.dumps(payload).encode("utf-8");
             self.send_response(code);
             self.send_header("Content-Type", "application/json");
@@ -299,7 +299,7 @@ def bridge_webhook(channel: str, cfg: dict, port: int) -> dict {
     return {"served": True};
 }
 
-def bridge_run(name: str, port: int = 0, max_rounds: int = 0) -> dict {
+def bridge_run(name: str, port: int = 0, max_rounds: int = 0) -> dict[str, any] {
     # One channel's transport, in the foreground. `sigil channel run <name>`.
     cfg = channel_config(name);
     if not cfg["found"] {

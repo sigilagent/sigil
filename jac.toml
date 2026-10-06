@@ -2,7 +2,7 @@
 name = "sigil"
 version = "0.5.3"
 description = "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction."
-entry-point = "observatory.jac"
+entry-point = "observatory"
 
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
 # plugin, so there is NO `pip install byllm`. Import it as
@@ -12,7 +12,9 @@ entry-point = "observatory.jac"
 # The AG-IR compiler parses the crystallizer's YAML output via PyYAML. `jac install`
 # provisions everything below; the LLM backend itself is NOT here — it rides the
 # `llm` capability the [byllm] section switches on. See the note there.
-[dependencies]
+# jac 0.37 made [dependencies] the table for Jac packages (org/name); Python
+# packages live in [dependencies.pypi].
+[dependencies.pypi]
 pyyaml = "latest"
 # The interactive `chat` REPL (src/sigil_chat.jac) renders with rich; its line editor
 # (src/sigil_input.jac) is prompt_toolkit — multiline input, "/" command palette,
@@ -106,12 +108,10 @@ tailwindcss = "^4.0.0"
 plugins = ["tailwindcss()"]
 lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 
-# The Observatory's dedicated port — same 8199 the `sigil` launcher's
-# SIGIL_PORT defaults to. `sigil serve` claims it strictly (_claim_port);
-# a bare `jac start observatory.jac` also lands here, but only `sigil serve`
-# guards against jac's silent port-in-use fallback.
-[serve]
-port = 8199
+# No [serve] port: under jac >=0.37 a configured port is an implicit --port on
+# EVERY `jac run`, and on a run that executes (--no-serve, the whole CLI) that
+# is a hard error. The Observatory's 8199 is passed explicitly instead —
+# OBSERVATORY_PORT in src/main.jac, SIGIL_PORT in the `sigil` launcher.
 
 # Served page identity — same brand as the website (docs/index.html).
 [client.app_meta_data]

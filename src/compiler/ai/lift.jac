@@ -57,7 +57,7 @@ def set_lift_progress(cb: any) -> None {
     lift_progress = cb;
 }
 
-def _emit(ev: dict) -> None {
+def _emit(ev: dict[str, any]) -> None {
     if lift_progress {
         try { lift_progress(ev); } except Exception {  }
     }
@@ -68,8 +68,8 @@ def _emit(ev: dict) -> None {
 # ir_text + a WorkflowView + a G1 issue list, then run this identical ladder:
 # compile-repair -> mechanical autofix (re-gated) -> residual gates -> findings.
 # ---------------------------------------------------------------------------
-def _finalize(sr: any, ir_in: str, wf: any, g1: list, name: str, skill_dir: str,
-              repairs: list, spec_issues: list, spine_issues: list, asm_issues: list) -> LiftResult {
+def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir: str,
+              repairs: list[any], spec_issues: list[any], spine_issues: list[any], asm_issues: list[any]) -> LiftResult {
     # COMPILE repair — the G4 oracle drives the scoped repair_ir loop, bounded.
     _t4 = time.time();
     _emit({"stage": "gates", "state": "start"});
@@ -114,7 +114,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list, name: str, skill_dir: str,
     }
 
     # RESIDUAL GATES on the final IR/module — findings, not vetoes.
-    findings: list = [];
+    findings: list[any] = [];
     if g4.ok {
         for i9 in gate_type_unification(ir_text) { findings.append(finding("G9", str(i9))); }
         for i13 in gate_slot_prompt_bloat(g4.module_src) { findings.append(finding("G13", str(i13))); }
@@ -176,14 +176,14 @@ def _coverage_miss(lr: LiftResult) -> bool {
     return False;
 }
 
-def _lift_direct(skill: str, name: str, sr: any, spec_issues: list, skill_dir: str) -> LiftResult {
+def _lift_direct(skill: str, name: str, sr: any, spec_issues: list[any], skill_dir: str) -> LiftResult {
     # ONE grounded authoring pass (guide + golden few-shot + frozen spec) replaces
     # spine/flows/assemble; the gates read views reconstructed from the authored IR.
     _t1 = time.time();
     _emit({"stage": "author", "state": "start"});
     au = author_direct(skill, sr.spec, name);
     ir: str = str(au["ir_text"]).strip();
-    notes: list = list(au["notes"]);
+    notes: list[any] = list(au["notes"]);
     _emit({"stage": "author", "state": "done", "secs": time.time() - _t1, "lines": len(ir.splitlines())});
     if not ir {
         return LiftResult(ok=False, status="failed", spec_issues=spec_issues,
@@ -195,7 +195,7 @@ def _lift_direct(skill: str, name: str, sr: any, spec_issues: list, skill_dir: s
     return _finalize(sr, ir, wf, g1, name, skill_dir, notes, spec_issues, [], []);
 }
 
-def _lift_staged(skill: str, name: str, sr: any, spec_issues: list, parallel: bool, skill_dir: str) -> LiftResult {
+def _lift_staged(skill: str, name: str, sr: any, spec_issues: list[any], parallel: bool, skill_dir: str) -> LiftResult {
     repairs: list = [];
     _t1 = time.time();
     _emit({"stage": "spine", "state": "start"});

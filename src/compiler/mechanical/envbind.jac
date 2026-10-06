@@ -45,7 +45,7 @@ import textwrap;
 
 # import name -> pip distribution, where they differ (SkillRT's "system-aware
 # probing" table, seeded with the imports the skill corpus actually uses)
-glob PIP_MAP: dict = {
+glob PIP_MAP: dict[str, any] = {
     "fitz": "pymupdf", "PIL": "pillow", "docx": "python-docx",
     "pptx": "python-pptx", "cv2": "opencv-python", "yaml": "pyyaml",
     "bs4": "beautifulsoup4", "sklearn": "scikit-learn",
@@ -56,10 +56,10 @@ glob PIP_MAP: dict = {
 };
 
 # modules the generated module's own runtime always provides — never manifest
-glob _PROVIDED: list = ["byllm", "jaclang", "mtllm", "jac"];
+glob _PROVIDED: list[any] = ["byllm", "jaclang", "mtllm", "jac"];
 
 # shell tokens that are flow/coreutils noise, not bindable dependencies
-glob _SHELL_NOISE: list = [
+glob _SHELL_NOISE: list[any] = [
     "cd", "ls", "cat", "echo", "mkdir", "cp", "mv", "rm", "tar", "touch",
     "test", "true", "false", "set", "export", "source", "if", "then", "else",
     "elif", "fi", "for", "while", "do", "done", "case", "esac", "exit",
@@ -79,7 +79,7 @@ glob _SHELL_NOISE: list = [
     "print", "in", "is", "not", "and", "or", "None", "True", "False"
 ];
 
-def _dct(v: any) -> dict {
+def _dct(v: any) -> dict[str, any] {
     return v if isinstance(v, dict) else {};
 }
 
@@ -92,7 +92,7 @@ def _top_module(name: any) -> str {
     return str(name).split(".")[0];
 }
 
-def _body_imports(body: str) -> list {
+def _body_imports(body: str) -> list[any] {
     # AST over the verbatim tool body. Bodies arrive as bare statements (often
     # with a top-level `return`) or as a complete def — parse the wrapped form
     # first (accepts both), fall back to a plain parse.
@@ -121,7 +121,7 @@ def _body_imports(body: str) -> list {
     return out;
 }
 
-def _command_bins(text: str) -> list {
+def _command_bins(text: str) -> list[any] {
     # First token of each command line; skip comments, env-assignments,
     # heredoc bodies, continuation/flag lines and shell noise. Deliberately
     # conservative — a probe list full of coreutils (or of heredoc CONTENT
@@ -168,12 +168,12 @@ def pip_name(mod: str) -> str {
     return str(PIP_MAP.get(mod, mod));
 }
 
-def extract_manifest(ir: any) -> dict {
+def extract_manifest(ir: any) -> dict[str, any] {
     # The dependency manifest of a loaded AG-IR: every non-stdlib python
     # import in a tool body, every non-noise binary in a tool command,
     # each mapped to the tools that need it.
-    py: dict = {};
-    bins: dict = {};
+    py: dict[str, any] = {};
+    bins: dict[str, any] = {};
     stdlib = _stdlib_names();
     tools = ir.get("tools") if isinstance(ir, dict) else None;
     if not isinstance(tools, dict) {
@@ -188,20 +188,20 @@ def extract_manifest(ir: any) -> dict {
         if body.strip() and (not _looks_shell_body(body)) {
             for m in _body_imports(body) {
                 if (m in stdlib) or (m in _PROVIDED) { continue; }
-                ent: dict = py.get(m, {"pip": pip_name(m), "tools": []});
+                ent: dict[str, any] = py.get(m, {"pip": pip_name(m), "tools": []});
                 if tname not in ent["tools"] { ent["tools"].append(tname); }
                 py[m] = ent;
             }
         } elif body.strip() {
             for b in _command_bins(body) {
-                cur: list = list(bins.get(b, []));
+                cur: list[any] = list(bins.get(b, []));
                 if tname not in cur { cur.append(tname); }
                 bins[b] = cur;
             }
         }
         if cmd.strip() {
             for b2 in _command_bins(cmd) {
-                cur2: list = list(bins.get(b2, []));
+                cur2: list[any] = list(bins.get(b2, []));
                 if tname not in cur2 { cur2.append(tname); }
                 bins[b2] = cur2;
             }
@@ -218,9 +218,9 @@ def extract_manifest(ir: any) -> dict {
 # harness's flags as files or hangs on EOF (caught live: using-superpowers
 # crashed all cells with FileNotFoundError('--arm'); xlsx died at node 1 on
 # json.load of an EOF stdin). A compiled tool receives inputs via params only.
-def _proc_io_tools(tools: dict) -> dict {
+def _proc_io_tools(tools: dict[str, any]) -> dict[str, any] {
     import re;
-    hits: dict = {};
+    hits: dict[str, any] = {};
     for kv in tools.items() {
         t = kv[1];
         if not isinstance(t, dict) { continue; }
@@ -240,7 +240,7 @@ def _proc_io_tools(tools: dict) -> dict {
 # opened it unguarded, so PackageNotFoundError killed every run before its
 # first slot, and the skill scored a legitimate-looking 0). A compiled tool
 # reports "absent" so the graph can route; it does not guess a filename.
-def _unguarded_read_tools(tools: dict) -> dict {
+def _unguarded_read_tools(tools: dict[str, any]) -> dict[str, any] {
     import re;
     # opener(...) calls whose argument is a NAME (a param/carry), not a literal
     opener = re.compile(
@@ -250,7 +250,7 @@ def _unguarded_read_tools(tools: dict) -> dict {
     guard = re.compile(
         r"os\.path\.(?:exists|isfile)|(?<![\w.])Path\([^)]*\)\.exists\(\)"
         r"|\.exists\(\)|(?<![\w.])try\s*:|os\.access\(");
-    hits: dict = {};
+    hits: dict[str, any] = {};
     for kv in tools.items() {
         t = kv[1];
         if not isinstance(t, dict) { continue; }
@@ -266,14 +266,14 @@ def _unguarded_read_tools(tools: dict) -> dict {
 # A SENSE tool that RESOLVES a path must not manufacture one. Returning a
 # plausible literal when the lookup fails converts "no input" into "wrong
 # input", which the graph cannot distinguish from success.
-def _fabricated_path_tools(tools: dict) -> dict {
+def _fabricated_path_tools(tools: dict[str, any]) -> dict[str, any] {
     import re;
     # a filename literal used as a fallback: `... else "x.ext"`, `or "x.ext"`,
     # or a default arg `= "x.ext"` — extension list kept to real artifacts
     fab = re.compile(
         r"(?:else|or|=)\s*[\"\']([\w./-]+\.(?:pptx|potx|docx|xlsx|pdf|csv|json|ya?ml"
         r"|html?|md|txt|png|jpe?g|zip))[\"\']");
-    hits: dict = {};
+    hits: dict[str, any] = {};
     for kv in tools.items() {
         t = kv[1];
         if not isinstance(t, dict) { continue; }
@@ -288,13 +288,13 @@ def _fabricated_path_tools(tools: dict) -> dict {
     return hits;
 }
 
-def probe_manifest(manifest: dict) -> dict {
+def probe_manifest(manifest: dict[str, any]) -> dict[str, any] {
     # Install-time presence check, in THIS runtime — the same embedded python
     # that will execute the lowered tool bodies, so find_spec is ground truth
     # (probing a separate interpreter would be exactly the sys.executable trap).
     import importlib.util;
-    missing_py: list = [];
-    missing_bin: list = [];
+    missing_py: list[any] = [];
+    missing_bin: list[any] = [];
     for kv in _dct(manifest.get("py")).items() {
         mod = str(kv[0]);
         ent = _dct(kv[1]);
@@ -314,11 +314,11 @@ def probe_manifest(manifest: dict) -> dict {
     return {"missing_py": missing_py, "missing_bin": missing_bin};
 }
 
-def manifest_empty(manifest: dict) -> bool {
+def manifest_empty(manifest: dict[str, any]) -> bool {
     return (not manifest.get("py")) and (not manifest.get("bin"));
 }
 
-def preflight_src(manifest: dict) -> str {
+def preflight_src(manifest: dict[str, any]) -> str {
     # The runtime half: `_ENV_MANIFEST` + `_env_preflight()` as a ::py:: block
     # for the lowered module. Re-probes on the EXECUTION host at run() entry
     # and BINDS what is missing into the artifact-local `.jac/pydeps` via the
@@ -328,14 +328,14 @@ def preflight_src(manifest: dict) -> str {
     # Reports loud (stderr + AGIR_PROGRESS), never raises. "" when there is
     # nothing to bind.
     if manifest_empty(manifest) { return ""; }
-    lite: dict = {"py": {}, "bin": []};
+    lite: dict[str, any] = {"py": {}, "bin": []};
     for kv in manifest.get("py", {}).items() {
         lite["py"][str(kv[0])] = str(kv[1].get("pip", kv[0]));
     }
     for kv2 in manifest.get("bin", {}).items() {
         lite["bin"].append(str(kv2[0]));
     }
-    lines: list = [
+    lines: list[any] = [
         "::py::",
         "_ENV_MANIFEST = " + json.dumps(lite),
         "def _env_preflight():",

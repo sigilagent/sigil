@@ -42,7 +42,7 @@ test "eject wraps a compiled module into a shebang'd runnable with a CLI shim" {
     assert v.ok;
     prog = eject_program(v.module_src, "note-writer");
     lines = prog.splitlines();
-    assert lines[0] == "#!/usr/bin/env -S jac run";
+    assert lines[0] == "#!/usr/bin/env -S jac run --no-serve";   # jac >=0.37 serves by default near a project
     assert "with entry:__main__ {" in prog;
     assert "def run(" in prog;                       # the module rode along intact
     assert "SIGIL_MODEL" in prog;

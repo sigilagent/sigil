@@ -16,7 +16,7 @@ test "read_tail: parses jsonl records and skips blank lines" {
     }
     recs = read_tail(p, 10);
     os.remove(p);
-    assert len(recs) == 2;
+    assert len(list(recs)) == 2;
     assert recs[0]["model"] == "a";
     assert recs[1]["prompt_tokens"] == 2;
 }

@@ -76,7 +76,7 @@ test "demote_examples turns fenced example code (a Maybe) from MANDATORY to DISC
     ]);
     demoted = demote_examples(SKILL_FENCED, rs);
     assert sorted(demoted) == ["ex1", "ex2"];
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in rs.rules { by_id[r.id] = r.modality; }
     assert by_id["ex1"] == Modality.DISCRETIONARY;   # Maybe
     assert by_id["ex2"] == Modality.DISCRETIONARY;   # Maybe
@@ -137,7 +137,7 @@ test "resolve_ambiguous_default assumes Maybe and warns to re-run with --clarify
     ]);
     clar = flag_ambiguous("no fences", rs);   # flags only 'amb'
     warns = resolve_ambiguous_default(rs, clar);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in rs.rules { by_id[r.id] = r.modality; }
     assert by_id["amb"] == Modality.DISCRETIONARY;   # assumed Maybe (the safe default)
     assert by_id["do"] == Modality.MANDATORY;        # a real Do is untouched
@@ -152,7 +152,7 @@ test "apply_clarifications binds a human's Do/Maybe/Don't answer to the rule's m
         Rule(id="c", quote="delete the source", modality=Modality.MANDATORY)
     ]);
     notes = apply_clarifications(rs, {"a": "maybe", "b": "do", "c": "dont"});
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in rs.rules { by_id[r.id] = r.modality; }
     assert by_id["a"] == Modality.DISCRETIONARY;   # human said Maybe
     assert by_id["b"] == Modality.MANDATORY;       # human said Do (unchanged)
@@ -262,7 +262,7 @@ test "structurally settled obligations are no longer flagged as underspecified" 
 test "the same skill produces the same bindings on every run" {
     # The property the pass exists for: no model, no sampling, no tier — the
     # frozen spec cannot vary with what is compiling it.
-    first: dict = {};
+    first: dict[str, any] = {};
     for _i in range(0, 5) {
         rs = RuleSet(rules=[
             Rule(id="r1", quote="Run the validator before shipping.", modality=Modality.DISCRETIONARY),
@@ -361,7 +361,7 @@ test "resolve_ambiguous_auto binds answered obligations and defaults the rest" {
         Adjudication(rule_id="r6", answer="dont", evidence="## Notes")
     ]);
     warns = resolve_ambiguous_auto(rs, clar, gs);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in rs.rules { by_id[r.id] = r.modality; }
     assert by_id["r6"] == Modality.FORBIDDEN;        # answered
     assert by_id["r7"] == Modality.DISCRETIONARY;    # unanswered -> standing default
@@ -483,7 +483,7 @@ test "default policy carries a conflict as knowledge instead of demoting it" {
         ClarifyItem(rule_id="r_vague", quote="merge the PDFs", reason="tagged MANDATORY ...")
     ];
     warns = resolve_ambiguous_default(rs, items);
-    by_id: dict = {};
+    by_id: dict[str, any] = {};
     for r in rs.rules { by_id[r.id] = r.modality; }
     assert by_id["r_fact"] == Modality.FORBIDDEN;        # kept — carried as knowledge
     assert by_id["r_vague"] == Modality.DISCRETIONARY;   # demoted as before

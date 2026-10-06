@@ -40,7 +40,7 @@ def supports_polling(kind: str) -> bool {
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
-def http_json(url: str, payload: any, headers: dict, timeout: int = 30) -> dict {
+def http_json(url: str, payload: any, headers: dict[str, any], timeout: int = 30) -> dict[str, any] {
     # One request, one dict back. Never raises: a provider being down is a
     # delivery failure to report, not a reason to take a bridge process with it.
     body = None;
@@ -64,7 +64,7 @@ def http_json(url: str, payload: any, headers: dict, timeout: int = 30) -> dict 
     } except Exception as ex {
         return {"ok": True, "error": "", "body": {"raw": raw[:2000]}};
     }
-    shaped: dict = dict(parsed) if isinstance(parsed, dict) else {"items": parsed};
+    shaped: dict[str, any] = dict(parsed) if isinstance(parsed, dict) else {"items": parsed};
     return {"ok": True, "error": "", "body": shaped};
 }
 
@@ -72,7 +72,7 @@ def http_json(url: str, payload: any, headers: dict, timeout: int = 30) -> dict 
 # Outbound
 # ---------------------------------------------------------------------------
 def deliver(kind: str, token: str, peer: str, text: str,
-            thread_id: str = "", target: str = "") -> dict {
+            thread_id: str = "", target: str = "") -> dict[str, any] {
     # `target` is the provider's second coordinate where one is needed — a
     # WhatsApp phone-number id, or the full URL for a plain webhook.
     k = str(kind or "").lower().strip();
@@ -118,7 +118,7 @@ def deliver(kind: str, token: str, peer: str, text: str,
     return {"ok": True, "note": "no transport for kind '" + k + "' — recorded only"};
 }
 
-def _provider_ok(r: dict, ok_key: str) -> dict {
+def _provider_ok(r: dict[str, any], ok_key: str) -> dict[str, any] {
     # Providers answer 200 and then tell you it failed in the body. Slack and
     # Telegram both do it; treating HTTP 200 as success is how a silent
     # non-delivery looks like a delivery.
@@ -133,7 +133,7 @@ def _provider_ok(r: dict, ok_key: str) -> dict {
 # ---------------------------------------------------------------------------
 # Inbound normalization — every provider's payload, one shape
 # ---------------------------------------------------------------------------
-def normalize_inbound(kind: str, body: dict) -> dict {
+def normalize_inbound(kind: str, body: dict[str, any]) -> dict[str, any] {
     # Returns {"peer","text","thread_id"} for a real message, {} for anything
     # else (an edit, a bot echo, a delivery receipt), or {"challenge": "..."} for
     # a handshake the caller must echo back verbatim.
@@ -180,7 +180,7 @@ def normalize_inbound(kind: str, body: dict) -> dict {
 # ---------------------------------------------------------------------------
 # Telegram long polling — inbound with no public URL and no tunnel
 # ---------------------------------------------------------------------------
-def poll_telegram(token: str, offset: int, timeout: int = 25) -> dict {
+def poll_telegram(token: str, offset: int, timeout: int = 25) -> dict[str, any] {
     # Returns {"ok", "messages": [{peer,text,thread_id}], "offset": next, "error"}.
     # The long poll holds the connection open until something arrives, so this is
     # near-instant delivery without a webhook — hence the generous read timeout.
@@ -193,7 +193,7 @@ def poll_telegram(token: str, offset: int, timeout: int = 25) -> dict {
         return {"ok": False, "messages": [], "offset": offset,
                 "error": str(body.get("description") or body)[:200]};
     }
-    msgs: list = [];
+    msgs: list[any] = [];
     nxt = offset;
     for upd in list(body.get("result") or []) {
         u = dict(upd);

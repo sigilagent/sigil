@@ -269,7 +269,7 @@ def _guttered_markdown(console: any, md_text: str) -> any {
     w = _body_width(console);
     md = Markdown(str(md_text), code_theme="ansi_dark", inline_code_theme="ansi_dark");
     opts = console.options.update(width=w);
-    rows: list = [];
+    rows: list[any] = [];
     for segs in console.render_lines(md, opts, pad=False) {
         row = Text.from_markup(_GUTTER_MU);
         for s in segs {
@@ -313,7 +313,7 @@ def _flush_reply(console: any) {
 # wrapping back to the screen edge and reading like the agent's own prose.
 glob _TRACE_GUTTER: int = 16;
 
-def _trace_rows(detail: str, width: int) -> list {
+def _trace_rows(detail: str, width: int) -> list[any] {
     import textwrap;
     w = width if width > 24 else 60;
     out: list = [];
@@ -416,7 +416,7 @@ def _run_and_render(console: any, message: str) {
     _REPLYBUF["s"] = "";
     _LIVE = None;
     _LIVE_T["last"] = 0.0;
-    r: dict = {};
+    r: dict[str, any] = {};
     if sys.stdin.isatty() {
         st = console.status("[magenta]✦[/magenta] [dim]thinking…[/dim]", spinner="dots", spinner_style="magenta");
         st.start();

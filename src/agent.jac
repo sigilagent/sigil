@@ -11,7 +11,7 @@ import from .sigil_core { solve_task, library, describe_soul }
 import from .hooks { fire_hooks }
 import from .sigil_api { report_for }
 
-def run_task(task: str, skill: str = "") -> dict {
+def run_task(task: str, skill: str = "") -> dict[str, any] {
     fire_hooks("before_solve", task);
     r = solve_task(task, skill);
     ok = "DONE ok" in str(r["trace"]);
@@ -26,7 +26,7 @@ def run_task(task: str, skill: str = "") -> dict {
 # OpenAI chat-completion shape.
 # ---------------------------------------------------------------------------
 walker:pub api_chat_completions {
-    has messages: list = [];
+    has messages: list[any] = [];
     has model: str = "sigil";
     can run with Root entry {
         text = "";
@@ -47,7 +47,7 @@ walker:pub api_models {
 # `/tools/invoke` analog. Returns the tool result or an error if no server has it.
 walker:pub api_tools_invoke {
     has name: str = "";
-    has arguments: dict = {};
+    has arguments: dict[str, any] = {};
     can run with Root entry {
         report report_for("tools_invoke", {"name": self.name, "arguments": self.arguments});
     }

@@ -10,10 +10,10 @@ exec-capable tool consults `check_exec(cmd)` before running.
 import from .sigil_core { awaken, Soul }
 import from .sigil_cron { now_ms }
 
-edge Governs {}    # Soul -> ExecPolicy
-edge Allows {}     # ExecPolicy -> AllowRule
-edge Pending {}    # ExecPolicy -> Approval
-edge Audited {}    # ExecPolicy -> Approval (elevated break-glass allows, for audit)
+edge Governs: any --> any {}    # Soul -> ExecPolicy
+edge Allows: any --> any {}     # ExecPolicy -> AllowRule
+edge Pending: any --> any {}    # ExecPolicy -> Approval
+edge Audited: any --> any {}    # ExecPolicy -> Approval (elevated break-glass allows, for audit)
 
 node ExecPolicy {
     has security: str = "allowlist";   # deny | allowlist | full
@@ -40,7 +40,7 @@ def _policy() -> ExecPolicy {
     return p;
 }
 
-def approvals_get() -> dict {
+def approvals_get() -> dict[str, any] {
     p = _policy();
     rules = [r.pattern for r in [p -->[?:AllowRule]]];
     pend = [{"cmd": a.cmd, "status": a.status} for a in [p -->[?:Approval]] if a.status == "pending"];
@@ -69,7 +69,7 @@ def _audit_elevated(p: ExecPolicy, cmd: str) {
     p +>:Audited:+> Approval(cmd=cmd, status="elevated-allow", ts=_ts());
 }
 
-def elevated_audit() -> list {
+def elevated_audit() -> list[any] {
     p = _policy();
     return [{"cmd": a.cmd, "ts": a.ts} for a in [p -->[?:Approval]] if a.status == "elevated-allow"];
 }
@@ -94,7 +94,7 @@ def allowlist_remove(pattern: str) -> str {
     return "not in allowlist: " + pattern;
 }
 
-def _matches(cmd: str, patterns: list) -> bool {
+def _matches(cmd: str, patterns: list[any]) -> bool {
     # bare-name match (first token) or prefix/glob-prefix
     import fnmatch;
     tok = cmd.strip().split(" ")[0] if cmd.strip() else "";
@@ -107,7 +107,7 @@ def _matches(cmd: str, patterns: list) -> bool {
 
 glob PENDING_CAP: int = 100;   # most pending approvals kept before the oldest are dropped
 
-def _pend(p: ExecPolicy, cmd: str) -> dict {
+def _pend(p: ExecPolicy, cmd: str) -> dict[str, any] {
     # Deduplicate. Headless — a daemon-fired job, an agent retrying — nobody is
     # at a prompt to answer, so the same blocked command comes back around every
     # run and used to mint a fresh Approval node each time. The queue grew until
@@ -133,7 +133,7 @@ def _by_ts(a: Approval) -> float {
     return float(a.ts);
 }
 
-def approvals_pending() -> list {
+def approvals_pending() -> list[any] {
     # The queue an operator actually has to work through. Headless runs answer
     # nothing themselves, so this is where a blocked daemon job shows up.
     p = _policy();
@@ -167,7 +167,7 @@ def peek_exec(cmd: str) -> str {
     return "deny";
 }
 
-def check_exec(cmd: str) -> dict {
+def check_exec(cmd: str) -> dict[str, any] {
     # The gate an exec tool consults. Returns decision: allow | deny | approval-pending.
     p = _policy();
     # break-glass overrides the policy while the elevated window is open (every allow audited)

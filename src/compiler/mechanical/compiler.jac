@@ -28,10 +28,10 @@ import textwrap;
 import traceback;
 import yaml;
 
-glob GEN_TYPES: list = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
+glob GEN_TYPES: list[any] = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
 
 # guard values that mean "unconditional" — never lower as a literal condition
-glob GUARD_SENTINELS: list = ["", "otherwise", "default", "else", "always", "true", "_"];
+glob GUARD_SENTINELS: list[any] = ["", "otherwise", "default", "else", "always", "true", "_"];
 
 # Max carries handed to a by-llm slot. ONE constant on purpose: the slot's
 # declared arity and every call site that invokes it must agree, and when this
@@ -62,7 +62,7 @@ glob PROSE_BUDGET: int = 2500;
 # output failures across the glm arm (8 float, 3 bool, 3 dict, 2 int, 1 list).
 # Measured: bool/int/float/list all answer at 64; 96 leaves headroom and costs
 # nothing on a non-reasoning model (it stops at the value anyway).
-glob BUDGET_BY_KIND: dict = {
+glob BUDGET_BY_KIND: dict[str, any] = {
     "bool": 96, "int": 96, "float": 96,
     "enum": 96,          # one member name (+ a reasoning model's preamble)
     "obj": 1500,         # a filled schema
@@ -92,7 +92,7 @@ def _slot_budget(ret: str, types: any) -> int {
 
 # Tool params that name a DESTINATION rather than a value — an ACT tool's write
 # path. Kept in sync with the `ppar` sniff in the embodiment ladder.
-glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
+glob PATH_PARAMS: list[any] = ["path", "out", "dest", "outfile", "filename", "file",
     "out_path", "output_path", "outpath", "target", "target_path", "dest_path"];
 
 # Tool params that carry the CONTENT being written. A write tool's content param
@@ -100,7 +100,7 @@ glob PATH_PARAMS: list = ["path", "out", "dest", "outfile", "filename", "file",
 # bound reads[0] (the content) to `path` and left `content` None, so every
 # compiled deliverable was a 0-byte file named after its own content (caught
 # live: algorithmic-art wrote an empty file literally called "Organic Fusion").
-glob CONTENT_PARAMS: list = ["content", "text", "data", "body", "code",
+glob CONTENT_PARAMS: list[any] = ["content", "text", "data", "body", "code",
     "source", "markdown", "html", "payload"];
 
 def _pathish_carry(name: any) -> bool {
@@ -118,7 +118,7 @@ def _pathish_carry(name: any) -> bool {
 glob _FALLBACKS: list = [];
 
 # Jac/Python reserved words that must not be emitted as bare identifiers.
-glob RESERVED: list = [
+glob RESERVED: list[any] = [
     "True", "False", "None", "and", "or", "not", "in", "is", "if", "else",
     "elif", "for", "while", "def", "class", "return", "import", "from", "as",
     "walker", "node", "edge", "obj", "has", "can", "with", "visit", "spawn",
@@ -127,7 +127,7 @@ glob RESERVED: list = [
 ];
 
 # binding convention: agent.ir tool-body bare-names -> OpArgs accessors (pdf §tools)
-glob BIND: dict = {
+glob BIND: dict[str, any] = {
     "input": "args.inputs[0] if args.inputs else None",
     "inputs": "args.inputs",
     "out": "_clean_path(args.output_spec.path)",
@@ -148,7 +148,7 @@ def _dict(x: any) -> any {
 }
 
 # normalize a value (None | str | list) to a list[str]
-def _aslist(x: any) -> list {
+def _aslist(x: any) -> list[any] {
     if x is None { return []; }
     if isinstance(x, list) { return [str(i) for i in x]; }
     return [str(x)];
@@ -166,7 +166,7 @@ def _aslist(x: any) -> list {
 #     tools: {upcase: {sig: ...}}          # the contract
 #     tools: [{name: upcase, sig: ...}]    # sequence, name inline
 #     tools: [{upcase: {sig: ...}}]        # sequence of single-entry mappings
-glob _NAME_KEYS: list = ["name", "id", "key"];
+glob _NAME_KEYS: list[any] = ["name", "id", "key"];
 
 def _items(d: any) -> any {
     r = [];
@@ -276,7 +276,7 @@ def _param(nm: any) -> str {
     return r;
 }
 
-def _parse_sig(sig: any) -> list {
+def _parse_sig(sig: any) -> list[any] {
     if not sig { return [[], "any"]; }
     m: any = re.match(r"\s*\((.*?)\)\s*(->\s*(.*))?$", str(sig).strip());
     if not m { return [[], "any"]; }
@@ -294,7 +294,7 @@ def _parse_sig(sig: any) -> list {
 }
 
 # IR type string -> [jac_type, default_expr]. Honors B.2 (no `T|None`; sentinels).
-def _jac_type(tstr: any, types: any) -> list {
+def _jac_type(tstr: any, types: any) -> list[any] {
     if tstr is None { return ["any", "None"]; }
     t = str(tstr).strip().rstrip("?").strip();
     base = t.split("[")[0].split("|")[0].strip();
@@ -330,11 +330,13 @@ def _jac_type(tstr: any, types: any) -> list {
         return ["list[any]", "[]"];
     }
     if "|" in t { return ["any", "None"]; }
-    mapping: dict = {
+    mapping: dict[str, any] = {
         "str": ["str", "\"\""], "path": ["str", "\"\""],
         "int": ["int", "0"], "float": ["float", "0.0"],
         "bool": ["bool", "False"], "any": ["any", "None"],
-        "dict": ["dict", "{}"], "list": ["list", "[]"]
+        # jac >=0.37 rejects a bare generic (E1036): the emitted artifact names
+        # its element types, `any` where the IR left them open
+        "dict": ["dict[str, any]", "{}"], "list": ["list[any]", "[]"]
     };
     if t in mapping { return list(mapping[t]); }
     return ["any", "None"];
@@ -425,7 +427,7 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
         if (nm in ck) and (nm not in deliv) { deliv.append(nm); }
     }
     head = str(name) + (("[{self." + _safe(enumc) + "}]") if enumc else "");
-    parts: list = [head];
+    parts: list[any] = [head];
     # Surface each delivered carry's CONTENT (via _artifact_text), not its file path —
     # delivery ops return the path of what the script wrote; the caller wants the answer.
     for d in deliv[:4] { parts.append(str(d) + "={_artifact_text(self." + _safe(str(d)) + ")}"); }
@@ -444,8 +446,8 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
         # read by no node — sinks. Report sinks, latest producer first; only if
         # every produced carry is re-read, fall back to ALL produced, still
         # latest first — the terminal answer leads either way.
-        reads_all: dict = {};
-        prod_at: dict = {};   # node id -> position, to order carries by producer
+        reads_all: dict[str, any] = {};
+        prod_at: dict[str, any] = {};   # node id -> position, to order carries by producer
         pos = 0;
         for nn2 in _list(ir.get("nodes")) {
             if not isinstance(nn2, dict) { continue; }
@@ -453,7 +455,7 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
             prod_at[str(nn2.get("id", ""))] = pos;
             pos += 1;
         }
-        prod: list = [];   # [order-key, tie-break, carry] — sortable without a lambda
+        prod: list[any] = [];   # [order-key, tie-break, carry] — sortable without a lambda
         tie = 0;
         for kv2 in _items(carries) {
             c2 = kv2[1];
@@ -466,9 +468,9 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
             tie += 1;
         }
         if not prod { return "f\"" + str(name) + " done\""; }
-        sinks: list = [p for p in prod if str(p[2]) not in reads_all];
-        pick: list = sorted(sinks if sinks else prod);
-        parts2: list = [str(name)];
+        sinks: list[any] = [p for p in prod if str(p[2]) not in reads_all];
+        pick: list[any] = sorted(sinks if sinks else prod);
+        parts2: list[any] = [str(name)];
         for d2 in [str(p[2]) for p in pick][:5] { parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:300]}"); }
         return "f\"" + _j(" | ", parts2) + "\"";
     }
@@ -518,7 +520,7 @@ def _node_tool(ir: any, nid: any, nd: any) -> any {
 # but the carry keeps the code-produced value (caught live: xlsx's
 # enforce_template_matching slot overwrote the openpyxl Workbook with prose —
 # `'str' object has no attribute 'save'` at the save node, 9/9 cells).
-def _code_written_carries(ir: any) -> list {
+def _code_written_carries(ir: any) -> list[any] {
     out: list = [];
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
@@ -592,13 +594,13 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
 # behavior — left every carry after the first at its default forever, so a
 # verdict carry never fired its guard and the walker stalled mid-graph. The
 # runtime `_unwrap` resolves each carry from whichever shape came back.
-def _assign_writes(writes: any, expr: str, carries: any, types: any) -> list {
-    wl: list = [w for w in _list(writes) if w in list(carries)];
+def _assign_writes(writes: any, expr: str, carries: any, types: any) -> list[any] {
+    wl: list[any] = [w for w in _list(writes) if w in list(carries)];
     if not wl { return ["        " + expr + ";"]; }
     if len(wl) == 1 {
         return [_assign_carry(str(wl[0]), f"_unwrap({expr}, {_q(str(wl[0]))}, 0, True)", carries, types)];
     }
-    out: list = ["        _rw = " + expr + ";"];
+    out: list[any] = ["        _rw = " + expr + ";"];
     i = 0;
     for w in wl {
         out.append(_assign_carry(str(w), f"_unwrap(_rw, {_q(str(w))}, {i}, False)", carries, types));
@@ -613,13 +615,13 @@ def _assign_writes(writes: any, expr: str, carries: any, types: any) -> list {
 # handles both the "fields of a spec" and "renamed positional" tool conventions.
 # Announce a `by llm` slot before it runs: the slot's name and the carries it was
 # handed. Paired with a `_tui_llm_out(...)` on the value it produced.
-def _llm_trace_in(slot: str, creads: list) -> str {
+def _llm_trace_in(slot: str, creads: list[any]) -> str {
     rl = _j(", ", [("(" + _q(str(r)) + ", self." + _safe(str(r)) + ")") for r in _list(creads)]);
     return "        _tui_llm_in(" + _q(str(slot)) + ", [" + rl + "]);";
 }
 
 def _bind_args(params: any, reads: any, carries: any, types: any, write_target: str = "") -> str {
-    rl: list = list(_list(reads));
+    rl: list[any] = list(_list(reads));
     ck = list(carries);
     out: list = [];
     i = 0;
@@ -692,14 +694,14 @@ def _load_ir(text: str) -> any {
 # ---------------------------------------------------------------------------
 # section emitters
 # ---------------------------------------------------------------------------
-def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any, sense: bool = False) -> list {
-    lines: list = ["", f"def {fnname}(op_name, args):"];
+def _dispatcher_lines(fnname: str, toollist: any, arg_fields: any, sense: bool = False) -> list[any] {
+    lines: list[any] = ["", f"def {fnname}(op_name, args):"];
     # CHANGE 2 — operation = ordered pipeline. Group tools by served op (preserving IR
     # order = pipeline order). A single-tool op is a direct return; a multi-tool op runs
     # its steps in sequence over the shared workspace and returns the last. (Was: one
     # `if op==X: return tool()` per (tool,op) pair -> duplicate keys, only the first ran.)
     ops: list = [];
-    by_op: dict = {};
+    by_op: dict[str, any] = {};
     for te in toollist {
         tn = te[0]; params = te[1]; serves = te[2];
         bound = _j(", ", [_bind_arg(p, arg_fields, sense) for p in params]);
@@ -741,7 +743,7 @@ def _py_ok(code: str) -> bool {
     } except Exception { return False; }
 }
 
-glob _SHELL_CLIS: list = ["pandoc", "soffice", "libreoffice", "qpdf", "pdftoppm", "pdfimages",
+glob _SHELL_CLIS: list[any] = ["pandoc", "soffice", "libreoffice", "qpdf", "pdftoppm", "pdfimages",
     "pdftotext", "tesseract", "pnpm", "npm ", "npx", "create-vite", "bash ", "sh ", "cp ",
     "mv ", "tar ", "mkdir ", "rm ", "convert ", "gs ", "./"];
 
@@ -792,10 +794,10 @@ def _looks_shell(body: str) -> bool {
 # the second shape by appending an explicit delegating call: the wrapper's params
 # are forwarded to the inner def by NAME, anything unmatched passes None (same
 # contract as the wrapper's own `=None` defaults).
-def _delegating_call(body: str, params: list) -> str {
+def _delegating_call(body: str, params: list[any]) -> str {
     import ast;
     try { tree = ast.parse(textwrap.dedent(body)); } except Exception { return ""; }
-    cands: list = [];
+    cands: list[any] = [];
     for st in tree.body {
         if isinstance(st, ast.FunctionDef) or isinstance(st, ast.AsyncFunctionDef) {
             cands.append([str(st.name), [str(a.arg) for a in st.args.args]]);
@@ -818,8 +820,8 @@ def _delegating_call(body: str, params: list) -> str {
         if str(c[0]) == "run" { pick = c; }
     }
     fname = str(pick[0]);
-    inner: list = pick[1];
-    avail: list = [_safe(str(p)) for p in params];
+    inner: list[any] = pick[1];
+    avail: list[any] = [_safe(str(p)) for p in params];
     args_out: list = [];
     for nm in inner {
         s = _safe(str(nm));
@@ -869,9 +871,9 @@ def _strip_main_guard(body: str) -> str {
 # which is why it read as a model failure). Only strings span lines in Python — every
 # other construct is tokenised per line — so any token whose end line is past its
 # start line marks interior lines that must be emitted verbatim.
-def _indent_py(body: str, pad: str) -> list {
+def _indent_py(body: str, pad: str) -> list[any] {
     import io, tokenize;
-    inside: dict = {};
+    inside: dict[int, bool] = {};
     try {
         for tk in tokenize.generate_tokens(io.StringIO(str(body)).readline) {
             if tk.end[0] > tk.start[0] {
@@ -891,8 +893,8 @@ def _indent_py(body: str, pad: str) -> list {
     return out;
 }
 
-def _body_lines(body: str, params: list) -> list {
-    out: list = [];
+def _body_lines(body: str, params: list[any]) -> list[any] {
+    out: list[any] = [];
     if _py_ok(body) {
         body = _strip_main_guard(body);
         for ln in _indent_py(body, "    ") { out.append(ln); }
@@ -932,10 +934,10 @@ def _body_lines(body: str, params: list) -> list {
 # Rung-2: extract the FIXED prefix of a bundle command (executable + script/module),
 # stopping at the first `.py` script or `-m <module>`; the tool's params become the
 # trailing args. First line only, inline `#` comment stripped.
-def _cmd_prefix(cmd: any) -> list {
+def _cmd_prefix(cmd: any) -> list[any] {
     first = str(cmd or "").splitlines()[0] if str(cmd or "").strip() else "";
     first = str(first).split("#")[0].strip();
-    toks: list = [tk for tk in first.split(" ") if tk];
+    toks: list[any] = [tk for tk in first.split(" ") if tk];
     pfx: list = [];
     i = 0;
     while i < len(toks) {
@@ -987,9 +989,9 @@ def _normalize_builtins(ir: any) -> None {
 }
 
 def _emit_tools(ir: any) -> str {
-    out: list = ["::py::", "import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile"];
-    sense_tools: list = [];
-    act_tools: list = [];
+    out: list[any] = ["::py::", "import os, sys, json as _json, subprocess as _subprocess, glob as _glob, tempfile"];
+    sense_tools: list[any] = [];
+    act_tools: list[any] = [];
     for kv in _items(ir.get("tools")) {
         name = kv[0];
         t = kv[1];
@@ -1025,7 +1027,7 @@ def _emit_tools(ir: any) -> str {
             pfx = _cmd_prefix(cmd) if cmd else [];
             # author-run detection from the RAW command: `<runner> <bare-file.(js|py)>` (2 toks,
             # second is a bare script filename) -> the tool receives program CONTENT, not a path.
-            traw: list = [tk for tk in str(cmd).splitlines()[0].split("#")[0].split(" ") if tk] if cmd else [];
+            traw: list[any] = [tk for tk in str(cmd).splitlines()[0].split("#")[0].split(" ") if tk] if cmd else [];
             tgt = str(traw[1]) if len(list(traw)) == 2 else "";
             is_author_run = (tgt != "") and (tgt.endswith(".js") or tgt.endswith(".py")) and ("/" not in tgt) and (tgt != "op.py");
             if cmd and is_author_run {
@@ -1091,7 +1093,7 @@ def _emit_tools(ir: any) -> str {
         if surf == "SENSE" { sense_tools.append([name, params, serves]); }
         elif surf.startswith("ACT") { act_tools.append([name, params, serves]); }
     }
-    arg_fields: list = [];
+    arg_fields: list[any] = [];
     for kv2 in _items(ir.get("types")) {
         td = kv2[1];
         if isinstance(td, dict) and td.get("kind") == "object" {
@@ -1207,9 +1209,9 @@ def _emit_types(ir: any) -> str {
     return _j("\n", out);
 }
 
-def _node_index(ir: any) -> dict {
+def _node_index(ir: any) -> dict[str, any] {
     types = ir.get("types");
-    idx: dict = {};
+    idx: dict[str, any] = {};
     for n in _list(ir.get("nodes")) {
         if isinstance(n, dict) and n.get("id") {
             idx[n["id"]] = [_arch(n["id"], types), n];
@@ -1281,13 +1283,15 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
         # str inputs to a MODEL slot are capped (see _cap_in): a whole data file
         # routed into a decision slot blew the context window (exoplanet,
         # light-curve CSV into a GEN-ENUM). Code nodes take the full carry.
-        if "any" in jt { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
-        elif jt == "str" { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
         # a list/dict carry is capped the same way, shape preserved: a whole light
         # curve as {"time": [...], "flux": [...]} went into a decision slot verbatim
-        # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored)
-        elif jt.startswith("list") { parts.append(f"list(_cap_seq(self.{_safe(r)}))"); }
+        # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored).
+        # Tested BEFORE the `any` arm: `list[any]` / `dict[str, any]` are containers,
+        # not `any` (they contain the substring since jac 0.37 forbade bare generics)
+        if jt.startswith("list") { parts.append(f"list(_cap_seq(self.{_safe(r)}))"); }
         elif jt.startswith("dict") { parts.append(f"dict(_cap_seq(self.{_safe(r)}))"); }
+        elif "any" in jt { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
+        elif jt == "str" { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
         else { parts.append(f"self.{_safe(r)}"); }
     }
     return _j(", ", parts);
@@ -1298,7 +1302,9 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
 # form before it can be emitted at all.
 def _schematizable(t: str) -> str {
     s = str(t).strip();
-    if s == "dict" { return "dict[str, str]"; }
+    # `dict[str, any]` is what _jac_type emits for an untyped dict carry; byLLM
+    # cannot schematize `any` values either, so it narrows exactly as bare `dict` did
+    if (s == "dict") or (s == "dict[str, any]") { return "dict[str, str]"; }
     if s == "list" { return "list[str]"; }
     return s;
 }
@@ -1337,9 +1343,9 @@ def _consumer_hint(ir: any, carry: str) -> str {
 # model can answer outside the guard set and the route dead-ends (caught live:
 # xlsx's tool_choice slot said "spreadsheet_primary_io"; guards knew "pandas"/
 # "openpyxl"; 8/9 cells silently no-opped). The slot's sem gets the value set.
-def _guard_literals(ir: any, carries: any) -> dict {
+def _guard_literals(ir: any, carries: any) -> dict[str, any] {
     import re;
-    out: dict = {};
+    out: dict[str, any] = {};
     for e in _list(ir.get("edges")) {
         g = str(e.get("guard") or "");
         m = re.match(r"\s*(?:not\s+)?([A-Za-z_]\w*)\s*==\s*(.+)$", g);
@@ -1354,7 +1360,7 @@ def _guard_literals(ir: any, carries: any) -> dict {
         if val.lower() in ["true", "false"] { continue; }
         if re.match(r"^-?\d+(\.\d+)?$", val) { continue; }
         if val in list(carries) { continue; }
-        cur: list = list(out.get(fld, []));
+        cur: list[any] = list(out.get(fld, []));
         if val not in cur { cur.append(val); }
         out[fld] = cur;
     }
@@ -1618,7 +1624,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         # parenthetical/prose comment, e.g. `pages > 1 (user requested more)`. Keep
         # `1`, drop the rest, so a numeric/enum RHS doesn't get quoted as a string.
         if not (rt.startswith("\"") or rt.startswith("'")) {
-            rt = str(re.split(r"[\s(]", rt, 1)[0]);
+            rt = str(re.split(r"[\s(]", rt, maxsplit=1)[0]);
         }
         # true/false RHS — bare OR quoted — is a verdict: translate by carry type
         # (see _bool_guard) so a bool carry never gets compared to a string.
@@ -1651,9 +1657,9 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
 # Emit OSP control flow for a node from its out-edges + guards. Guarded edges ->
 # if/elif conditional visits; a total else advances to a forward default; unguarded
 # self-loops are never followed unconditionally (would be an infinite loop).
-def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = None, types: any = None) -> list {
+def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = None, types: any = None) -> list[any] {
     lines: list = [];
-    guarded: list = [];
+    guarded: list[any] = [];
     fwd_all: list = [];
     fwd_default = "";
     first_fwd = "";
@@ -1701,7 +1707,7 @@ def _emit_flow(out_edges: any, nid: any, nidx: any, m2e: any, carries: any = Non
 # Error escape hatch: run the authored script, and on failure hand the error back
 # to the model (repair_script, by llm) to fix THAT step, retry (bounded), then
 # resume. Returns the walker lines that replace a bare `_exec_script(...)` call.
-def _exec_repair_lines(tgt: any, aarg: str, tt: str) -> list {
+def _exec_repair_lines(tgt: any, aarg: str, tt: str) -> list[any] {
     asn = "";
     if tgt and ((tt == "str") or (tt == "any")) { asn = "self." + _safe(str(tgt)) + " = str(_r[\"path\"]); "; }
     return [
@@ -1715,7 +1721,7 @@ def _exec_repair_lines(tgt: any, aarg: str, tt: str) -> list {
     ];
 }
 
-def _emit_walker(ir: any) -> list {
+def _emit_walker(ir: any) -> list[any] {
     wlk = _dict(ir.get("walker"));
     fm = _dict(ir.get("_frontmatter"));
     name = wlk.get("name") or (_camel(fm.get("name", "agent")) + "Agent");
@@ -1725,7 +1731,7 @@ def _emit_walker(ir: any) -> list {
     edges = _list(ir.get("edges"));
 
     code_owned = _code_written_carries(ir);
-    member_to_enum: dict = {};
+    member_to_enum: dict[str, any] = {};
     for kv in _items(types) {
         td = kv[1];
         if isinstance(td, dict) and td.get("kind") == "enum" {
@@ -1733,7 +1739,7 @@ def _emit_walker(ir: any) -> list {
         }
     }
 
-    out: list = [f"walker {name} {{"];
+    out: list[any] = [f"walker {name} {{"];
     # Only `task` is provided by the harness (run(task, model, skill)); it is the
     # one no-default field and must come first (Jac E2004). EVERY other carry —
     # even role:input ones — gets a default so `Agent(task=task)` constructs.
@@ -1791,7 +1797,7 @@ def _emit_walker(ir: any) -> list {
         if (base in types) and types[base].get("kind") == "enum" { route_field = str(kv3[0]); break; }
     }
 
-    spawn_sibs: list = [];   # [[sibling_walker_name, worker_slot_name], …] emitted after the main walker
+    spawn_sibs: list[any] = [];   # [[sibling_walker_name, worker_slot_name], …] emitted after the main walker
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
         nid = n["id"];
@@ -1812,7 +1818,7 @@ def _emit_walker(ir: any) -> list {
             continue;
         }
 
-        body: list = [];
+        body: list[any] = [];
         can_dispatch = ("args" in ckeys) and (route_field in ckeys);
         if ntype in GEN_TYPES {
             # MUST match the cap in _emit_slots: that one fixes the slot's declared
@@ -1928,7 +1934,7 @@ def _emit_walker(ir: any) -> list {
                 exprR = _toolfn_prefix(str(stR[0])) + "(" + _bind_args(stR[1], reads, carries, types) + ")";
                 for alR in _assign_writes(writes, exprR, carries, types) { body.append(alR); }
             }
-            branches: list = [];
+            branches: list[any] = [];
             default_target = "";
             for e in out_edges {
                 tinfo = nidx.get(e.get("to"));
@@ -2045,7 +2051,7 @@ def _emit_walker(ir: any) -> list {
             wl = "str(" if (tt5 == "str") else "";
             wr = ")" if (tt5 == "str") else "";
             expr = "";
-            exprlines: list = [];
+            exprlines: list[any] = [];
             if ("script" in reads) and ("script" in ckeys) and (tgt5 in ckeys) {
                 # run the authored script with the error escape hatch (repair + retry)
                 aarg = ", self.args" if ("args" in ckeys) else "";
@@ -2245,14 +2251,14 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
     types = ir.get("types");
     edges = _list(ir.get("edges"));
     nodes = _list(ir.get("nodes"));
-    out: list = ["def run(task: str, model: Model, skill: str, params: dict = {}) -> str {", "    llm = model;", ""];
+    out: list[any] = ["def run(task: str, model: Model, skill: str, params: dict[str, any] = {}) -> str {", "    llm = model;", ""];
     if env {
         # environment binding (SkillRT AOT pass 2): probe the manifest BEFORE
         # the walker runs — a missing dep fails loud here, not mid-graph
         out.append("    _env_preflight();");
         out.append("");
     }
-    var: dict = {};
+    var: dict[str, any] = {};
     for n in nodes {
         nid = n.get("id");
         if not nid { continue; }
@@ -2284,7 +2290,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         # with the task string, so a task phrased "approve …" would have silently
         # satisfied the human-review gate (observed live, synthesize_requirement).
         _ir_nodes = _list(ir.get("nodes"));
-        _entry_reads: list = [str(r) for r in _list((_ir_nodes[0] if _ir_nodes else {}).get("reads"))];
+        _entry_reads: list[any] = [str(r) for r in _list((_ir_nodes[0] if _ir_nodes else {}).get("reads"))];
         extra_in: list = [];
         pkeys: list = [];
         for kv in _items(wcar) {
@@ -2326,7 +2332,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
                 _cast = "bool";
                 if _jt == "int" { _cast = "int"; }
                 elif _jt == "float" { _cast = "float"; }
-                elif _jt == "dict" { _cast = "dict"; }
+                elif (_jt == "dict") or _jt.startswith("dict[") { _cast = "dict"; }
                 elif _jt == "list" or _jt.startswith("list[") { _cast = "list"; }
                 # float(<Unknown>) is the one cast jac's checker rejects
                 # (E1053: the SupportsFloat union); route it through str()
@@ -2345,7 +2351,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         # task only READS does not trigger it; names no file, so the scrapes hold)
         out.append("    task = str(_note_task_text(_format_contract(task)));");
         sargs = _j(", ", ["task=task"] + extra_in);
-        out.insert(0, f"glob _EJ_PARAM_KEYS: list = {pkeys};");
+        out.insert(0, f"glob _EJ_PARAM_KEYS: list[any] = {pkeys};");
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
         out.append("    if not agent.report {");
         out.append("        # loud, not silent: an empty report means the walker stopped at a");
@@ -2381,7 +2387,7 @@ def _widen_repair_reads(ir: any) -> None {
         if str(n.get("type")) != "GEN-EDIT" { continue; }
         writes = [str(w) for w in _list(n.get("writes"))];
         if not writes { continue; }
-        reads: list = [str(r) for r in _list(n.get("reads"))];
+        reads: list[any] = [str(r) for r in _list(n.get("reads"))];
         extra: list = [];
         for p in nodes {
             if str(p.get("id")) == str(n.get("id")) { continue; }
@@ -2415,7 +2421,7 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     walker_block = wk[0];
     walker_name = wk[1];
 
-    parts: list = [];
+    parts: list[any] = [];
     sk = fm.get("name", name);
     shape = ir.get("shape", "?");
     parts.append(f"\"\"\"OSP agent — transpiled from agent.ir by agir-playground/transpiler.jac.\n\nSkill: {sk}\nShape: {shape}\nMechanical lowering of the IR as written (not the hand-tuned production agent).\n\"\"\"");
@@ -2436,7 +2442,7 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     if _FALLBACKS {
         # Rung-3 authoring slot for un-embodied tools (see _scoped_author_run). Scoped:
         # it receives only the tool's job + inputs, and returns a runnable script.
-        gs: list = ["# ===== EMBODIMENT FALLBACK (scoped author for un-embodied tools) ====="];
+        gs: list[any] = ["# ===== EMBODIMENT FALLBACK (scoped author for un-embodied tools) ====="];
         gs.append("def _gen_scoped(context: str) -> str by llm();");
         gs.append("sem _gen_scoped = \"You are given ONE specific sub-task and its inputs. Author a COMPLETE, self-contained Python script that performs exactly that sub-task and writes its output file(s) to the current working directory. Ground the script strictly in the described job; do not add unrelated steps. Return ONLY the script — no prose, no explanation, no markdown fences.\";");
         parts.append(_j("\n", gs));
@@ -2455,7 +2461,7 @@ def transpile_ir(ir_text: str, name: str, model_name: str = "") -> str {
 # and/or an input file? Signals: image/file-loading tools (load_image, read_*),
 # and OpArgs/spec fields (image_path, input, inputs, file, source). Returns a list
 # of {kind: 'image'|'file', label, hint} the studio renders as capture widgets.
-def ir_input_shape(ir_text: str) -> list {
+def ir_input_shape(ir_text: str) -> list[any] {
     try { ir = _load_ir(ir_text); } except Exception as ex { return []; }
     has_image = False;
     has_file = False;
@@ -2482,7 +2488,7 @@ def ir_input_shape(ir_text: str) -> list {
         cl = str(ckv[0]).lower();
         if cl in ["uploaded", "image", "img"] { has_image = True; }
     }
-    out: list = [];
+    out: list[any] = [];
     if has_image { out.append({"kind": "image", "label": "Image (upload or paste)", "hint": img_hint or "the agent can use an uploaded image"}); }
     if has_file { out.append({"kind": "file", "label": "Input file", "hint": file_hint or "the agent reads an input file"}); }
     return out;
@@ -2490,13 +2496,13 @@ def ir_input_shape(ir_text: str) -> list {
 
 # Parse an IR into a plain node/edge graph (for the playground's visualizer).
 # Returns {ok, error, name, shape, nodes:[{id,type,owner,doc,surface}], edges:[...]}.
-def ir_graph(ir_text: str) -> dict {
+def ir_graph(ir_text: str) -> dict[str, any] {
     try {
         ir = _load_ir(ir_text);
     } except Exception as ex {
         return {"ok": False, "error": str(ex), "name": "", "shape": "", "nodes": [], "edges": []};
     }
-    nodes: list = [];
+    nodes: list[any] = [];
     for n in _list(ir.get("nodes")) {
         if isinstance(n, dict) {
             au = _dict(n.get("autonomy"));
@@ -2509,7 +2515,7 @@ def ir_graph(ir_text: str) -> dict {
             });
         }
     }
-    edges: list = [];
+    edges: list[any] = [];
     for e in _list(ir.get("edges")) {
         if isinstance(e, dict) {
             edges.append({
@@ -2519,7 +2525,7 @@ def ir_graph(ir_text: str) -> dict {
         }
     }
     # dataflow source: each carried datum + the node(s) that produce it
-    carries: list = [];
+    carries: list[any] = [];
     wk = _dict(ir.get("walker"));
     for kv in _items(wk.get("carries")) {
         c = kv[1];
@@ -2528,7 +2534,7 @@ def ir_graph(ir_text: str) -> dict {
     }
     # context/knowledge source: each static knowledge item + the nodes it sits on
     # + its FULL embodied content (the SKILL.md know-how compiled into the IR).
-    knowledge: list = [];
+    knowledge: list[any] = [];
     for kv2 in _items(ir.get("knowledge")) {
         k = kv2[1];
         ro = k.get("resident_on") if isinstance(k, dict) else None;
@@ -2536,7 +2542,7 @@ def ir_graph(ir_text: str) -> dict {
         knowledge.append({"name": str(kv2[0]), "resident_on": _aslist(ro), "content": kcontent});
     }
     # tools — the deterministic surface; which node each serves + its signature
-    tools: list = [];
+    tools: list[any] = [];
     for kv3 in _items(ir.get("tools")) {
         t = kv3[1];
         if isinstance(t, dict) {

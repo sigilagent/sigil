@@ -357,8 +357,9 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
 # story lands in $SIGIL_HOME/log/error.log either way. Never raises.
 # ---------------------------------------------------------------------------
 def commit_now(context: str = "") -> str {
-    import from jaclang.jac0core.runtime { JacRuntime }
-    import from jaclang.runtimelib.exceptions { WriteConflict }
+    # jac >=0.37 moved both out of jac0core/runtimelib into jaclang.runtime
+    import from jaclang.runtime.runtime { JacRuntime }
+    import from jaclang.runtime.exceptions { WriteConflict }
     import from .sigil_errors { log_error }
     try {
         JacRuntime.commit();
@@ -440,7 +441,7 @@ def _lock_release(fh: any) -> None {
     return None;
 }
 
-def graph_write(mutate: any, context: str = "") -> dict {
+def graph_write(mutate: any, context: str = "") -> dict[str, any] {
     # Run `mutate` — a zero-arg callable that READS the graph and mutates it —
     # as a serialized critical section, then commit it. Returns
     # {"ok": bool, "data": <mutate's return>, "error": str}; never raises, so
@@ -471,7 +472,7 @@ def graph_write(mutate: any, context: str = "") -> dict {
 def execute_module(module_path: str, task: str, model_name: str,
                    skill: str = "", workdir: str = ".", timeout: int = 1800,
                    mcp_json: str = "", signature: str = "",
-                   skill_tools: str = "") -> dict {
+                   skill_tools: str = "") -> dict[str, any] {
     mod = Path(module_path).stem;
     driver = Path(workdir) / f"_driver_{mod}.jac";
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER));
@@ -491,7 +492,7 @@ def execute_module(module_path: str, task: str, model_name: str,
     }
     jacbin = _jac_bin();
     try {
-        p = subprocess.run([jacbin, "run", str(driver)], cwd=workdir, env=env,
+        p = subprocess.run([jacbin, "run", "--no-serve", str(driver)], cwd=workdir, env=env,
                            capture_output=True, text=True, timeout=timeout);
     } except subprocess.TimeoutExpired as e {
         return {"ok": False, "report": "", "error": f"timeout after {timeout}s"};

@@ -10,7 +10,7 @@ so a token never lands in `soul`, logs, or the Observatory.
 import os;
 import from .sigil_core { awaken, Soul }
 
-edge Holds {}   # Soul -> SecretRef
+edge Holds: any --> any {}   # Soul -> SecretRef
 
 node SecretRef {
     has name: str;
@@ -32,10 +32,10 @@ def secret_remove(name: str) -> str {
     return "no such secret: " + name;
 }
 
-def secret_list() -> list {
+def secret_list() -> list[any] {
     # names + their env var + whether the env is currently set — never the value
     soul = awaken();
-    out: list = [];
+    out: list[any] = [];
     for r in _refs(soul) { out.append({"name": r.name, "env": r.env, "set": bool(os.getenv(r.env))}); }
     return out;
 }
@@ -85,7 +85,7 @@ def redact_secrets(text: str) -> str {
     return out;
 }
 
-def secret_test(name: str) -> dict {
+def secret_test(name: str) -> dict[str, any] {
     # prove resolution + redaction WITHOUT ever printing the value
     val = resolve_secret(name);
     demo = resolve_refs("token=secret:" + name);

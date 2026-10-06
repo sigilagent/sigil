@@ -284,10 +284,10 @@ def shape_name(r: Rule) -> str {
 }
 
 
-def stub_specs(spec: RuleSet) -> list {
+def stub_specs(spec: RuleSet) -> list[any] {
     # One stub spec per REQUIRED rule, in spec order. OPTIONAL rules (discretionary,
     # non-agent-bound) are carried as nothing — the gate does not demand them.
-    out: list = [];
+    out: list[any] = [];
     for r in spec.rules {
         sh = shape_name(r);
         if sh == "OPTIONAL" { continue; }
@@ -306,9 +306,9 @@ def skeleton_ir(spec: RuleSet, name: str, description: str = "") -> str {
 }
 
 
-def coverage(spec: RuleSet) -> dict {
+def coverage(spec: RuleSet) -> dict[str, any] {
     # What the skeleton is obliged to cover, by shape — a compile-time report.
-    counts: dict = {};
+    counts: dict[str, any] = {};
     required: list = [];
     for r in spec.rules {
         sh = shape_name(r);

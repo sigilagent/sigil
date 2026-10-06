@@ -762,7 +762,8 @@ def _skill_run(mod, task, timeout=900):
         # hands B the same shelf and the depth is bounded only by the timeout.
         env.pop("SIGIL_SKILL_TOOLS", None)
         env.pop("AGIR_PROGRESS", None)   # the parent's node trace is not the child's
-        p = subprocess.run([sys.executable, "run", path], cwd=os.getcwd(), env=env,
+        # --no-serve: jac >=0.37 serves a file near a web-app project by default
+        p = subprocess.run([sys.executable, "run", "--no-serve", path], cwd=os.getcwd(), env=env,
                            capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return "[skill %s timed out after %ss]" % (mod, timeout)

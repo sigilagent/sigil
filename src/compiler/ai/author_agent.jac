@@ -202,7 +202,7 @@ def _stage(work: str, skill: str, spec: RuleSet, name: str) -> None {
 }
 
 
-def author_agir(skill: str, spec: RuleSet, name: str) -> dict {
+def author_agir(skill: str, spec: RuleSet, name: str) -> dict[str, any] {
     # Run the authoring session. Returns {"ir_text": <authored IR or "">, "notes": [...]}.
     # Never raises into the compile: a failed session is an empty IR and an issue.
     work = tempfile.mkdtemp(prefix="sigil_author_");
@@ -234,7 +234,7 @@ def author_agir(skill: str, spec: RuleSet, name: str) -> dict {
 def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     # The `--agent` front-end, shaped to return the same LiftResult as lift() so
     # compile_skill persists and ejects it through the identical path.
-    def _emit(ev: dict) -> None {
+    def _emit(ev: dict[str, any]) -> None {
         if progress {
             try { progress(ev); } except Exception {  }
         }
@@ -257,7 +257,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "author", "state": "start"});
     au = author_agir(skill, sr.spec, name);
     ir_text: str = str(au["ir_text"]).strip();
-    notes: list = list(au["notes"]);
+    notes: list[any] = list(au["notes"]);
     _emit({"stage": "author", "state": "done", "secs": time.time() - _t1,
            "lines": len(ir_text.splitlines())});
     if not ir_text {
@@ -285,7 +285,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     ir_text = ro.ir_text;
 
     (wf, vb) = _views_from_ir(ir_text);
-    gate_issues: list = gate_standalone(vb);
+    gate_issues: list[any] = gate_standalone(vb);
     if g4.ok {
         sc = gate_struct_cov(sr.spec, wf, g4.module_src);
         for i in sc.issues { gate_issues.append(i); }
@@ -293,7 +293,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t2,
            "g4": g4.ok, "repairs": len(ro.attempts)});
 
-    findings: list = [finding(auto_gate(str(g), "G1"), str(g)) for g in gate_issues]
+    findings: list[any] = [finding(auto_gate(str(g), "G1"), str(g)) for g in gate_issues]
                    + [finding("spec", str(s)) for s in spec_issues];
     status = status_of(g4.ok, findings, [], notes);
     ok = g4.ok and (not spec_issues) and (not gate_issues);

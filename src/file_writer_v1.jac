@@ -337,7 +337,7 @@ walker FileWriterAgent {
     has args: Args = Args();
     has script: str = "";
     has artifact: str = "";
-    has report: str = "";
+    has `report: str = "";
 
     can n_activate with Activate entry {
         _progress("activate");

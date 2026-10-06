@@ -25,7 +25,7 @@ import from .ir_views { LiftResult }
 
 # gate -> severity. G7 is an install-time fact about THIS machine, not a defect
 # in the lift — warn by default, hard only when the embedder opts in.
-glob _SEVERITY: dict = {
+glob _SEVERITY: dict[str, any] = {
     "compile": "fatal",
     "G3": "error", "G6": "error", "G8": "error", "G9": "error", "G12": "error",
     "G1": "warn", "G5": "warn", "G7": "warn", "G10": "warn", "G11": "warn",
@@ -47,7 +47,7 @@ def classify(gate: str, message: str = "") -> str {
     return str(_SEVERITY.get(g, "warn"));
 }
 
-def finding(gate: str, message: str) -> dict {
+def finding(gate: str, message: str) -> dict[str, any] {
     return {"gate": str(gate), "severity": classify(gate, message), "message": str(message)};
 }
 
@@ -57,7 +57,7 @@ def auto_gate(message: str, fallback: str = "assemble") -> str {
     return str(m.group(1)) if m else fallback;
 }
 
-def resolved_by(message: str, fixes: list) -> bool {
+def resolved_by(message: str, fixes: list[any]) -> bool {
     # An issue is superseded when a fix note names one of the same 'quoted'
     # subjects (tool/knowledge/carry/node id). The fix note carries the story
     # forward; keeping the original issue would report a fixed defect as open.
@@ -71,7 +71,7 @@ def resolved_by(message: str, fixes: list) -> bool {
     return False;
 }
 
-def status_of(compiled: bool, findings: list, fixes: list, repairs: list) -> str {
+def status_of(compiled: bool, findings: list[any], fixes: list[any], repairs: list[any]) -> str {
     if not compiled { return "failed"; }
     residual = [f for f in findings if str(f.get("severity")) in ["fatal", "error", "warn"]];
     if residual { return "degraded"; }
@@ -106,11 +106,11 @@ def strict_mode() -> bool {
     return os.environ.get("SIGIL_STRICT", "") not in ["", "0", "false"];
 }
 
-def _sev_rank(f: dict) -> int {
+def _sev_rank(f: dict[str, any]) -> int {
     return int({"fatal": 0, "error": 1, "warn": 2, "info": 3}.get(str(f.get("severity")), 3));
 }
 
-def sort_findings(findings: list) -> list {
+def sort_findings(findings: list[any]) -> list[any] {
     return sorted(list(findings), key=_sev_rank);
 }
 

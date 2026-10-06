@@ -21,10 +21,10 @@ def _docs_dir() -> str {
     return candidates[0];
 }
 
-def _entries() -> list {
+def _entries() -> list[any] {
     # every topic doc as {slug, title, summary, path}, excluding the index README.
     d = _docs_dir();
-    out: list = [];
+    out: list[any] = [];
     if not os.path.isdir(d) { return out; }
     for name in sorted(os.listdir(d)) {
         if not name.endswith(".md") { continue; }
@@ -47,7 +47,7 @@ def _entries() -> list {
     return out;
 }
 
-def doc_topics() -> list {
+def doc_topics() -> list[any] {
     return [{"slug": e["slug"], "title": e["title"], "summary": e["summary"]} for e in _entries()];
 }
 

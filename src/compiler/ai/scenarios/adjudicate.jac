@@ -48,7 +48,7 @@ Notify the release channel.
 
 glob _seen: list = [];
 
-def _capture(ev: dict) -> None { _seen.append(str(ev.get("phase"))); }
+def _capture(ev: dict[str, any]) -> None { _seen.append(str(ev.get("phase"))); }
 
 def _fresh() -> SpecResult {
     # what the extractor would hand over: five unmarked spans, all defaulted to

@@ -50,7 +50,7 @@ printf '\n%s  ◆ Sigil installer%s\n\n' "$P" "$D"
 # `[scale.microservices]` table in jac.toml a hard config error, so every fresh
 # Sigil install after that release provisioned a runtime its own jac.toml could
 # not parse. Bump this WITH the migration, never ahead of it.
-JAC_VERSION="${JAC_VERSION:-0.36.1}"
+JAC_VERSION="${JAC_VERSION:-0.37.25}"
 
 if have jac; then
   info "Found jac: $(jac --version 2>/dev/null | head -1)"
@@ -147,7 +147,7 @@ with entry {
     print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
 }
 PROBE
-probe_out="$( cd "$SIGIL_HOME" && jac run "$probe_dir/probe.jac" 2>/dev/null || true )"
+probe_out="$( cd "$SIGIL_HOME" && jac run --no-serve "$probe_dir/probe.jac" 2>/dev/null || true )"
 case "$probe_out" in
   *sigil-llm-ok*)
     info "LLM runtime ready (byLLM + litellm)."

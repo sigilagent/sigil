@@ -2,7 +2,7 @@
 as truecolor half-blocks (rich markup; rich downsamples per terminal).
 Do not hand-edit; rerun the generator."""
 
-glob BANNER_LOGO: list = [
+glob BANNER_LOGO: list[any] = [
     "        [#52457b]▄[/][#937adb on #b99aff]▀[/][#9279db on #b99bff]▀[/][#4f4377]▄[/]        ",
     "     [#5a4c86]▄[/][#8f78d2]▄[/][#7966b3 on #52467a]▀[/][#7a67b6]▀[/][#6c58a5 on #2b1e4d]▀[/][#6c58a5 on #261a46]▀[/][#7c69b8]▀[/][#7663ae on #56487f]▀[/][#8f78d2]▄[/][#584a82]▄[/]     ",
     "[#493e6e]▄[/][#67579b]▄[/][#6d5ba1]▄[/][#3a3258 on #8871c8]▀[/][#8972c9 on #352e4f]▀[/][#705da5]▀[/]   [#35285d on #322154]▀[/][#312556 on #2e1f4d]▀[/]   [#7160a7]▀[/][#8971c8 on #372e52]▀[/][#393157 on #8871c9]▀[/][#6c5ba0]▄[/][#68569b]▄[/][#493e6e]▄[/]",

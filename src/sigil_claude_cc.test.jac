@@ -234,7 +234,7 @@ test "_parse still handles output that is not json at all" {
 
 
 
-def _write_cfg(dir: str, cfg: dict) -> None {
+def _write_cfg(dir: str, cfg: dict[str, any]) -> None {
     import json;
     import os;
     os.makedirs(dir, exist_ok=True);
@@ -384,7 +384,7 @@ test "_stream_flags: partial messages, which is what turns a reply into deltas" 
 }
 
 test "_feed: text and thinking deltas reach the sink, tagged" {
-    got: list = [];
+    got: list[any] = [];
     def _sink(kind: str, text: str) { got.append([kind, text]); }
     set_stream_sink(_sink);
     assert _feed({"type": "stream_event", "event": {"type": "content_block_delta",

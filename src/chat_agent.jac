@@ -43,8 +43,8 @@ import from .sigil_skill_tools { run_skill, skill_tools, skill_tool_index, _tail
 import from .sigil_errors { friendly_llm_error, log_error }
 
 glob chat_llm: any = Model(model_name="gpt-4o-mini");
-glob CHAT_HISTORY: list = [];
-glob CHAT_INFO: dict = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
+glob CHAT_HISTORY: list[any] = [];
+glob CHAT_INFO: dict[str, any] = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
 
 def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
@@ -62,8 +62,8 @@ def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
 # alone, and is visible to the next tick — the same isolation tick_isolated
 # uses, pointed the other way. Reads go through it too, so run counts are the
 # daemon's real numbers, not this process's frozen copy.
-def _cron_cli(args: list, timeout_s: int = 300) -> str {
-    argv = [_jac_bin(), "run", entry_script(), "--", "cron"] + [str(a) for a in args];
+def _cron_cli(args: list[any], timeout_s: int = 300) -> str {
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "cron"] + [str(a) for a in args];
     try {
         p = subprocess.run(argv, cwd=project_root(), capture_output=True,
                            text=True, timeout=timeout_s);
@@ -223,7 +223,7 @@ sem mcp_call.name = "The MCP tool name.";
 sem mcp_call.args_json = "The tool's arguments as a JSON object string (name->value); '{}' if none.";
 def mcp_call(name: str, args_json: str) -> str {
     _trace("mcp", name);
-    args: dict = {};
+    args: dict[str, any] = {};
     try { args = dict(json.loads(args_json)) if args_json.strip() else {}; }
     except Exception as e { return "bad args_json (must be a JSON object): " + str(e)[:120]; }
     res = dispatch(name, [args]);
@@ -395,7 +395,7 @@ def _refresh_info(message: str) -> None {
         shelf.append(str(e["tool"]) + ((" — " + it) if it else "")
                      + "  (runs=" + str(e["runs"]) + ")");
     }
-    info: dict = {
+    info: dict[str, any] = {
         "agent_name": str(s["name"]),
         "persona": str(s["persona"]) if s["persona"] else "a pragmatic, autonomous operator",
         "principles": [str(e) for e in list(s["ethos"])],
@@ -410,7 +410,7 @@ def _refresh_info(message: str) -> None {
     CHAT_INFO.update(info);
 }
 
-def chat_turn(message: str) -> dict {
+def chat_turn(message: str) -> dict[str, any] {
     # One conversational turn. Rebinds the chat model from the graph (so
     # `configure chat_model` applies live), injects the soul via incl_info, runs the
     # ReAct agent, and STREAMS the reply token-by-token: chat_agent is `stream=True`,

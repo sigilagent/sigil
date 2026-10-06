@@ -15,7 +15,7 @@ import from "./vis_interop.js" { makeNetwork, makeDataSet }
 # node group -> vis colour object (background / border / hover highlight).
 # Palette = the website's (docs/index.html): gold soul, violet registry,
 # cyan compiled core (skills), light-violet memory, sky mcp.
-def _vcolor(group: str) -> dict {
+def _vcolor(group: str) -> dict[str, any] {
     bg = "#6f6c86";
     if group == "soul" { bg = "#f5c451"; }
     elif group == "registry" { bg = "#8b5cf6"; }
@@ -29,7 +29,7 @@ def _vcolor(group: str) -> dict {
 
 def _eid(src: str, dst: str, kind: str) -> str { return src + "->" + dst + ":" + kind; }
 
-def:pub GraphCanvas(nodes: list, edges: list, dark: bool, sel: str, onSelect: Callable[[str, str], None]) -> JsxElement {
+def:pub GraphCanvas(nodes: list[any], edges: list[any], dark: bool, sel: str, onSelect: Callable[[str, str], None]) -> JsxElement {
     has containerRef: Ref[any] = Ref();
     has netRef: Ref[any] = Ref();
     has dsNodesRef: Ref[any] = Ref();
@@ -48,7 +48,7 @@ def:pub GraphCanvas(nodes: list, edges: list, dark: bool, sel: str, onSelect: Ca
         der: any = dsEdgesRef;
         dnr.current = dn;
         der.current = de;
-        options: dict = {
+        options: dict[str, any] = {
             "autoResize": True,
             "nodes": {"shape": "dot", "size": 16, "borderWidth": 2,
                       "shadow": {"enabled": True, "color": "rgba(0,0,0,0.25)", "size": 6}},
@@ -101,11 +101,11 @@ def:pub GraphCanvas(nodes: list, edges: list, dark: bool, sel: str, onSelect: Ca
         der.current.update(ve);
 
         # prune nodes/edges that no longer exist
-        keepN: dict = {};
+        keepN: dict[str, any] = {};
         for n in nodes { keepN[str(n.id)] = True; }
         goneN = [str(x["id"]) for x in dnr.current.get() if str(x["id"]) not in keepN];
         if goneN { dnr.current.remove(goneN); }
-        keepE: dict = {};
+        keepE: dict[str, any] = {};
         for e in edges { keepE[_eid(str(e.src), str(e.dst), str(e.kind))] = True; }
         goneE = [str(x["id"]) for x in der.current.get() if str(x["id"]) not in keepE];
         if goneE { der.current.remove(goneE); }

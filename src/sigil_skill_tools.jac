@@ -57,7 +57,7 @@ def tool_name(signature: str) -> str {
     return ("skill_" + safe)[:64];
 }
 
-def describe(row: dict) -> str {
+def describe(row: dict[str, any]) -> str {
     # The description IS the trigger — this is what the model routes on, so it
     # leads with what the skill is for and closes with whether it has ever
     # worked. A skill with a track record is a safer reach than one without.
@@ -74,11 +74,11 @@ def describe(row: dict) -> str {
             + " doing the same work by hand with the file/shell tools.");
 }
 
-def gated_library() -> list {
+def gated_library() -> list[any] {
     # The skills this agent may see, policy applied. Deny wins, then allow-list —
     # the shared rule from `tool_allowed`, keyed on the tool name so the operator
     # writes `configure tool_deny skill_clean_csv` and means it everywhere.
-    out: list = [];
+    out: list[any] = [];
     for e in library() {
         if tool_allowed(tool_name(str(e.get("signature", "")))) { out.append(e); }
     }
@@ -116,7 +116,7 @@ def gate(signature: str, task: str) -> str {
 # ---------------------------------------------------------------------------
 # The runner — one place every skill invocation goes through
 # ---------------------------------------------------------------------------
-def _tail_progress(path: str, flag: dict) -> None {
+def _tail_progress(path: str, flag: dict[str, any]) -> None {
     # The compiled module appends one JSON line per node entry to $AGIR_PROGRESS;
     # turn those into live `skill ▸ <node>` trace lines while the run is going,
     # so a multi-minute procedure is visible instead of a frozen spinner.
@@ -174,10 +174,10 @@ def _run_locked(sig: str, t: str) -> str {
     ppath = os.path.join(tempfile.mkdtemp(prefix="sigil_skill_"), "agir.progress");
     prev = os.environ.get("AGIR_PROGRESS");
     os.environ["AGIR_PROGRESS"] = ppath;
-    flag: dict = {"done": False};
+    flag: dict[str, any] = {"done": False};
     th = threading.Thread(target=_tail_progress, args=(ppath, flag), daemon=True);
     th.start();
-    r: dict = {};
+    r: dict[str, any] = {};
     try {
         r = run_task(t, sig);
     } finally {
@@ -224,11 +224,11 @@ def _make_tool(signature: str, description: str) -> any {
     return Tool(func=fn);
 }
 
-def skill_tools() -> list {
+def skill_tools() -> list[any] {
     # THE tool list. Pass it straight into `by llm(tools=[...] + skill_tools())`:
     # byLLM re-evaluates call params per invocation, so this reflects the library
     # as it stands right now, policy already applied.
-    out: list = [];
+    out: list[any] = [];
     for e in gated_library() {
         try { out.append(_make_tool(str(e.get("signature", "")), describe(e))); }
         except Exception as ex {}   # one malformed entry must not cost the whole belt
@@ -236,7 +236,7 @@ def skill_tools() -> list {
     return out;
 }
 
-def skill_tool_index() -> list {
+def skill_tool_index() -> list[any] {
     # What the tool list contains, as plain data — for the REPL's `/skills`, the
     # CLI, and tests that should not have to introspect byLLM objects.
     return [{"tool": tool_name(str(e.get("signature", ""))), "signature": str(e.get("signature", "")),
@@ -251,7 +251,7 @@ def skill_manifest(exclude: str = "") -> str {
     # SIGIL_SKILL_TOOLS and the artifact's prelude rebuilds the tools from it.
     # `exclude` drops the running skill itself — a procedure that can call itself
     # is a recursion waiting to happen.
-    rows: list = [];
+    rows: list[any] = [];
     for e in gated_library() {
         sig = str(e.get("signature", ""));
         if exclude and (sig == str(exclude)) { continue; }

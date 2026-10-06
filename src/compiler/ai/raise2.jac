@@ -64,7 +64,7 @@ def pin_raise2_llms(m: any) -> None {
 # — faithfulness closure, mechanical rungs, repair ladder, G4 — is unchanged.
 #   SIGIL_AUTHOR=buildout   skeleton-first, region-scoped build-out
 #   (default)               single-pass direct author
-def _author(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict {
+def _author(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict[str, any] {
     if os.environ.get("SIGIL_AUTHOR", "").strip().lower() == "buildout" {
         return author_buildout(skill, spec, name, gaps);
     }
@@ -85,7 +85,7 @@ def _directives(fr: FaithReport) -> str {
         + " remove any node that realizes no rule.",
         "THEN realize each of these specific gaps in its required shape:"
     ];
-    all_gaps: list = fr.dropped + fr.added;
+    all_gaps: list[any] = fr.dropped + fr.added;
     for g in all_gaps[:_DIRECTIVE_CAP] { lines.append("- " + str(g.message)); }
     if len(all_gaps) > _DIRECTIVE_CAP {
         lines.append("- ... and " + str(len(all_gaps) - _DIRECTIVE_CAP)
@@ -115,7 +115,7 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
     # to, or obligations stated only there never become rules — and a rule that
     # was never extracted cannot be realized, demanded, or reported missing.
     bundle = bundle_skill(skill, skill_dir);
-    bundled: list = list(bundle["files"]);
+    bundled: list[any] = list(bundle["files"]);
     if bundled {
         skill = str(bundle["text"]);
         # `pre` was extracted from SKILL.md alone; it no longer describes this
@@ -170,7 +170,7 @@ def _constraint_drop_ids(fr: FaithReport) -> list[str] {
     return out;
 }
 
-def embody_siblings(ir_text: str, skill_dir: str) -> dict {
+def embody_siblings(ir_text: str, skill_dir: str) -> dict[str, any] {
     # Pull the content of any sibling the IR only POINTS at into the IR itself.
     # Split out of raise_from_spec so the wiring is unit-testable without a
     # model: the bug this fixes was not a broken autofix (autofix.test.jac
