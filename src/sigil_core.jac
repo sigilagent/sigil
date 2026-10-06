@@ -35,7 +35,9 @@ with entry {
     # debugging detail, not conversation. Warnings and errors still pass;
     # SIGIL_VERBOSE=1 restores the full runtime narration.
     if (os.getenv("SIGIL_VERBOSE") or "").strip().lower() not in ["1", "true", "yes", "on"] {
+        # jac >=0.37 logs under jaclang.runtime.*; jaclang.runtimelib is the 0.36 name
         logging.getLogger("jaclang.runtimelib").setLevel(int(logging.WARNING));
+        logging.getLogger("jaclang.runtime").setLevel(int(logging.WARNING));
     }
 }
 

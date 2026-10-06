@@ -357,8 +357,9 @@ def write_module(osp_source: str, signature: str, version: int, workdir: str = "
 # story lands in $SIGIL_HOME/log/error.log either way. Never raises.
 # ---------------------------------------------------------------------------
 def commit_now(context: str = "") -> str {
-    import from jaclang.jac0core.runtime { JacRuntime }
-    import from jaclang.runtimelib.exceptions { WriteConflict }
+    # jac >=0.37 moved both out of jac0core/runtimelib into jaclang.runtime
+    import from jaclang.runtime.runtime { JacRuntime }
+    import from jaclang.runtime.exceptions { WriteConflict }
     import from .sigil_errors { log_error }
     try {
         JacRuntime.commit();
