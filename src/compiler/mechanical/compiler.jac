@@ -1283,13 +1283,15 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
         # str inputs to a MODEL slot are capped (see _cap_in): a whole data file
         # routed into a decision slot blew the context window (exoplanet,
         # light-curve CSV into a GEN-ENUM). Code nodes take the full carry.
-        if "any" in jt { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
-        elif jt == "str" { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
         # a list/dict carry is capped the same way, shape preserved: a whole light
         # curve as {"time": [...], "flux": [...]} went into a decision slot verbatim
-        # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored)
-        elif jt.startswith("list") { parts.append(f"list(_cap_seq(self.{_safe(r)}))"); }
+        # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored).
+        # Tested BEFORE the `any` arm: `list[any]` / `dict[str, any]` are containers,
+        # not `any` (they contain the substring since jac 0.37 forbade bare generics)
+        if jt.startswith("list") { parts.append(f"list(_cap_seq(self.{_safe(r)}))"); }
         elif jt.startswith("dict") { parts.append(f"dict(_cap_seq(self.{_safe(r)}))"); }
+        elif "any" in jt { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
+        elif jt == "str" { parts.append(f"str(_cap_in(self.{_safe(r)}))"); }
         else { parts.append(f"self.{_safe(r)}"); }
     }
     return _j(", ", parts);
@@ -1622,7 +1624,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         # parenthetical/prose comment, e.g. `pages > 1 (user requested more)`. Keep
         # `1`, drop the rest, so a numeric/enum RHS doesn't get quoted as a string.
         if not (rt.startswith("\"") or rt.startswith("'")) {
-            rt = str(re.split(r"[\s(]", rt, 1)[0]);
+            rt = str(re.split(r"[\s(]", rt, maxsplit=1)[0]);
         }
         # true/false RHS — bare OR quoted — is a verdict: translate by carry type
         # (see _bool_guard) so a bool carry never gets compared to a string.
