@@ -491,7 +491,7 @@ def execute_module(module_path: str, task: str, model_name: str,
     }
     jacbin = _jac_bin();
     try {
-        p = subprocess.run([jacbin, "run", str(driver)], cwd=workdir, env=env,
+        p = subprocess.run([jacbin, "run", "--no-serve", str(driver)], cwd=workdir, env=env,
                            capture_output=True, text=True, timeout=timeout);
     } except subprocess.TimeoutExpired as e {
         return {"ok": False, "report": "", "error": f"timeout after {timeout}s"};

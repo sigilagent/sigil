@@ -147,7 +147,7 @@ with entry {
     print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
 }
 PROBE
-probe_out="$( cd "$SIGIL_HOME" && jac run "$probe_dir/probe.jac" 2>/dev/null || true )"
+probe_out="$( cd "$SIGIL_HOME" && jac run --no-serve "$probe_dir/probe.jac" 2>/dev/null || true )"
 case "$probe_out" in
   *sigil-llm-ok*)
     info "LLM runtime ready (byLLM + litellm)."

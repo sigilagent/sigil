@@ -97,7 +97,7 @@ jobs:
               print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
           }
           PROBE
-          out="$(jac run "$RUNNER_TEMP/llm_probe.jac")"
+          out="$(jac run --no-serve "$RUNNER_TEMP/llm_probe.jac")"
           echo "$out"
           case "$out" in
             *sigil-llm-ok*) ;;

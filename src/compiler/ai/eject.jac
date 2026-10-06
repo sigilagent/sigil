@@ -22,9 +22,9 @@ def eject_program(module_src: str, name: str) -> str {
     # `#` opens a comment in jac, so the shebang line is legal source; `env -S`
     # splits the argument so `./prog.jac task` execs `jac run ./prog.jac task`.
     header = (
-        "#!/usr/bin/env -S jac run\n"
+        "#!/usr/bin/env -S jac run --no-serve\n"
         + "# " + name + " — standalone agent ejected by the sigil AI compiler.\n"
-        + "# Usage: ./" + name + ".jac \"<task>\"   (or: jac run " + name + ".jac -- \"<task>\")\n"
+        + "# Usage: ./" + name + ".jac \"<task>\"   (or: jac run --no-serve " + name + ".jac -- \"<task>\")\n"
         + "# Model: $SIGIL_MODEL, else $SIGIL_SMALL, else gpt-4o-mini.\n\n"
     );
     shim = (
