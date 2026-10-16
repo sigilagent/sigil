@@ -5,8 +5,9 @@
 #   curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash
 #
 # What it does:
-#   1. installs the native `jac` runtime (self-contained binary) if it's missing
-#   2. fetches the Sigil source into  ~/.sigil/app   (override with $SIGIL_HOME)
+#   1. fetches the Sigil source into  ~/.sigil/app   (override with $SIGIL_HOME)
+#   2. makes sure the jac it runs on is the version it pins (jac.toml `jac-version`),
+#      installing that native `jac` binary into ~/.local/bin if yours differs
 #   3. provisions the runtime deps (PyYAML + the LLM runtime) into the project
 #   4. drops a `sigil` launcher onto your PATH  (~/.local/bin, override $SIGIL_BIN_DIR)
 #
@@ -17,6 +18,7 @@
 #   SIGIL_BIN_DIR  where the launcher goes     (default: ~/.local/bin)
 #   SIGIL_REF      branch / tag / commit       (default: main in the repo copy;
 #                  a release asset is rewritten to pin its own tag — see below)
+#   JAC_VERSION    the jac to install          (default: the fetched tree's pin)
 
 set -euo pipefail
 
@@ -29,6 +31,9 @@ BIN_DIR="${SIGIL_BIN_DIR:-$HOME/.local/bin}"
 # copy stays on main. SIGIL_REF always overrides either.
 DEFAULT_REF="main"
 REF="${SIGIL_REF:-$DEFAULT_REF}"
+# The PATH you came in with: installing jac below prepends ~/.local/bin for this
+# script only, and the closing PATH advice has to describe your shell, not ours.
+ORIG_PATH="$PATH"
 
 # ---- pretty output -----------------------------------------------------------
 if [ -t 1 ]; then
@@ -43,27 +48,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 printf '\n%s  ◆ Sigil installer%s\n\n' "$P" "$D"
 
-# ---- 1. native jac runtime ---------------------------------------------------
-# PINNED to the jac this release is known to work against. Unpinned, the line
-# below installed whatever jac had published most recently, which is a moving
-# dependency on someone else's release schedule: jac v0.37 made the
-# `[scale.microservices]` table in jac.toml a hard config error, so every fresh
-# Sigil install after that release provisioned a runtime its own jac.toml could
-# not parse. Bump this WITH the migration, never ahead of it.
-JAC_VERSION="${JAC_VERSION:-0.37.25}"
-
-if have jac; then
-  info "Found jac: $(jac --version 2>/dev/null | head -1)"
-else
-  info "Installing the native jac runtime (v${JAC_VERSION})…"
-  curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
-    | bash -s -- --version "$JAC_VERSION" \
-    || die "jac install failed. See https://www.jac-lang.org for manual instructions."
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-have jac || die "jac is not on your PATH. Add \$HOME/.local/bin to PATH and re-run this script."
-
-# ---- 2. fetch Sigil source ---------------------------------------------------
+# ---- 1. fetch Sigil source ---------------------------------------------------
 info "Fetching Sigil ($REF) → $SIGIL_HOME"
 mkdir -p "$(dirname "$SIGIL_HOME")"
 if have git; then
@@ -105,6 +90,45 @@ else
 fi
 [ -f "$SIGIL_HOME/src/main.jac" ] || die "Sigil source looks incomplete (no src/main.jac in $SIGIL_HOME)."
 
+# ---- 2. the jac this Sigil pins ----------------------------------------------
+# PINNED: jac ships breaking changes as clean breaks, so Sigil runs on exactly the
+# jac it was tested against. The pin is jac.toml's `jac-version` in the tree just
+# fetched, so a release's installer and the tree it installs cannot disagree.
+# Unpinned, this installed whatever jac was newest — v0.37 made a jac.toml table
+# a hard error and every fresh install broke. Worse, an existing jac was kept
+# whatever its version, so `sigil update` left every earlier install (jac 0.36.1)
+# on a jac whose `jac run` rejects the flags this tree passes.
+DEFAULT_JAC_VERSION="0.37.25"   # for a tree from before jac.toml carried the pin
+pinned="$(sed -n 's/^jac-version *= *"=*\([0-9][0-9.]*\)".*/\1/p' "$SIGIL_HOME/jac.toml" 2>/dev/null | head -1 || true)"
+JAC_VERSION="${JAC_VERSION:-${pinned:-$DEFAULT_JAC_VERSION}}"
+jac_ver() { "$1" --version 2>/dev/null | sed -n 's/^jac \([0-9][0-9.]*\).*/\1/p' | head -1 || true; }
+
+JAC_BIN="$(command -v jac 2>/dev/null || true)"
+found="${JAC_BIN:+$(jac_ver "$JAC_BIN")}"
+if [ -n "$JAC_BIN" ] && [ "$found" = "$JAC_VERSION" ]; then
+  info "Found jac $JAC_VERSION: $JAC_BIN"
+else
+  if [ -n "$JAC_BIN" ]; then
+    info "Found jac ${found:-of unknown version} at $JAC_BIN; this Sigil runs on jac $JAC_VERSION — installing it to ~/.local/bin…"
+  else
+    info "Installing the native jac runtime (v${JAC_VERSION})…"
+  fi
+  curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
+    | bash -s -- --version "$JAC_VERSION" \
+    || die "jac $JAC_VERSION install failed. See https://www.jac-lang.org for manual instructions."
+  export PATH="$HOME/.local/bin:$PATH"
+  JAC_BIN="$HOME/.local/bin/jac"
+  got="$(jac_ver "$JAC_BIN")"
+  [ "$got" = "$JAC_VERSION" ] || die "installed jac reports '${got:-nothing}', expected $JAC_VERSION ($JAC_BIN)."
+  # An older jac EARLIER on your PATH (a venv, conda, /usr/local) still answers to
+  # `jac` in your shell. Sigil does not care — the launcher below is pinned to
+  # this binary — but you should know which one you get when you type `jac`.
+  shadow="$(PATH="$ORIG_PATH" command -v jac 2>/dev/null || true)"
+  if [ -n "$shadow" ] && [ "$shadow" != "$JAC_BIN" ]; then
+    warn "your PATH finds another jac first ($shadow, $(jac_ver "$shadow")). Sigil uses $JAC_BIN."
+  fi
+fi
+
 # ---- 3. runtime dependencies -------------------------------------------------
 # Bare `jac install` provisions two things at once: jac.toml's [dependencies] (pyyaml
 # for the AG-IR compiler, rich + prompt_toolkit for the `chat` REPL) AND the capability
@@ -125,15 +149,15 @@ info "Provisioning dependencies (LLM runtime, chat REPL, everything jac.toml dec
 # discarding stderr turned "your runtime cannot parse jac.toml" into a one-line
 # warning nobody could act on. Same reasoning as the byLLM probe below — an
 # install that reports success while being unusable is the failure worth catching.
-if ! dep_log="$( cd "$SIGIL_HOME" && jac install 2>&1 )"; then
+if ! dep_log="$( cd "$SIGIL_HOME" && "$JAC_BIN" install 2>&1 )"; then
   warn "dependency install failed — Sigil will not run until this is fixed:"
   printf '%s\n' "$dep_log" | sed 's/^/    /' >&2
   case "$dep_log" in
     *"jac.toml is invalid"*)
-      warn "  this jac ($(jac --version 2>/dev/null | head -1)) cannot parse Sigil's jac.toml."
-      warn "  install the pinned runtime: curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version $JAC_VERSION"
+      warn "  this jac ($("$JAC_BIN" --version 2>/dev/null | head -1)) cannot parse Sigil's jac.toml"
+      warn "  (JAC_VERSION=$JAC_VERSION; the tree pins ${pinned:-nothing})."
       ;;
-    *) warn "  re-run \`jac install\` in $SIGIL_HOME before your first solve." ;;
+    *) warn "  re-run \`$JAC_BIN install\` in $SIGIL_HOME before your first solve." ;;
   esac
 fi
 
@@ -147,14 +171,14 @@ with entry {
     print("sigil-llm-ok" if HAS_LITELLM else "sigil-llm-missing");
 }
 PROBE
-probe_out="$( cd "$SIGIL_HOME" && jac run --no-serve "$probe_dir/probe.jac" 2>/dev/null || true )"
+probe_out="$( cd "$SIGIL_HOME" && "$JAC_BIN" run --no-serve "$probe_dir/probe.jac" 2>/dev/null || true )"
 case "$probe_out" in
   *sigil-llm-ok*)
     info "LLM runtime ready (byLLM + litellm)."
     ;;
   *)
     warn "byLLM resolved no litellm backend — model calls will fail on the first solve."
-    warn "  fix: cd $SIGIL_HOME && jac install   (jac.toml must keep its top-level [byllm] section)"
+    warn "  fix: cd $SIGIL_HOME && $JAC_BIN install   (jac.toml must keep its top-level [byllm] section)"
     ;;
 esac
 rm -rf "$probe_dir"
@@ -168,6 +192,9 @@ cat > "$BIN_DIR/sigil" <<EOF
 # SIGIL_PWD default records the app dir and every relative path the
 # user typed (e.g. \`sigil compile ./SKILL.md\`) resolves wrong.
 export SIGIL_PWD="\${SIGIL_PWD:-\$PWD}"
+# The jac this install verified (jac.toml's pin) — not whichever \`jac\` a
+# later shell finds first. SIGIL_JAC set by the caller still wins.
+export SIGIL_JAC="\${SIGIL_JAC:-$JAC_BIN}"
 cd "$SIGIL_HOME" && exec ./sigil "\$@"
 EOF
 chmod +x "$BIN_DIR/sigil"
@@ -178,7 +205,7 @@ printf '\n%s  ✓ Sigil installed%s\n\n' "$G" "$D"
 printf '    source     %s\n' "$SIGIL_HOME"
 printf '    launcher   %s\n\n' "$BIN_DIR/sigil"
 
-case ":$PATH:" in
+case ":$ORIG_PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) warn "add the launcher to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
