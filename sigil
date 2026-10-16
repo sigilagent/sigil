@@ -26,6 +26,7 @@
 #   sigil login                        # once — caches a JWT
 #
 # Config via env:  SIGIL_HOME (state) · SIGIL_URL (gateway) · SIGIL_USER / SIGIL_PASS · SIGIL_JAC
+#                  SIGIL_JAC_CHECK=0 (run on a jac other than the pinned one)
 set -euo pipefail
 
 URL="${SIGIL_URL:-http://localhost:8199}"
@@ -38,6 +39,27 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 export SIGIL_PWD="${SIGIL_PWD:-$PWD}"
 cd "$HERE"
 JAC="${SIGIL_JAC:-$(command -v jac || echo "$HOME/.local/bin/jac")}"
+# Everything Sigil spawns (subprocesses, the `jac check` gate on compiled skills)
+# resolves jac through SIGIL_JAC first, so they all run the binary checked below.
+export SIGIL_JAC="$JAC"
+
+# jac.toml pins the jac this tree is tested against (`jac-version`). Another jac
+# fails in ways that look like Sigil bugs — 0.36's `jac run` rejects --no-serve,
+# an older one cannot parse jac.toml — so say so up front instead.
+# SIGIL_JAC_CHECK=0 (or false/no/off) skips the check.
+check_jac() {
+  case "${SIGIL_JAC_CHECK:-1}" in 0|false|no|off) return 0 ;; esac
+  local want have
+  want="$(sed -n 's/^jac-version *= *"=*\([0-9][0-9.]*\)".*/\1/p' "$HERE/jac.toml" | head -1 || true)"
+  [ -z "$want" ] && return 0
+  have="$("$JAC" --version 2>/dev/null | sed -n 's/^jac \([0-9][0-9.]*\).*/\1/p' | head -1 || true)"
+  [ "$have" = "$want" ] && return 0
+  echo "sigil: this Sigil runs on jac $want, but $JAC is ${have:+jac }${have:-missing or not runnable}." >&2
+  echo "  fix:  sigil update            reinstalls Sigil and jac $want" >&2
+  echo "  or:   SIGIL_JAC=<path to a jac $want binary> sigil …" >&2
+  echo "        SIGIL_JAC_CHECK=0 sigil …   to run on this jac anyway" >&2
+  exit 1
+}
 TOKFILE="${SIGIL_TOKENFILE:-$HOME/.sigil/token}"
 TOKEN="${SIGIL_TOKEN:-$(cat "$TOKFILE" 2>/dev/null || true)}"
 
@@ -88,7 +110,8 @@ case "$cmd" in
   # `serve` alone is the foreground server on SIGIL_PORT; `serve start|stop|
   # status|logs` are the lifecycle subcommands and must reach main.jac verbatim
   # (passing SIGIL_PORT in their place is how `serve start` became `serve 8199`).
-  serve)      if [ "$#" -gt 0 ]; then exec "$JAC" run --no-serve "$HERE/src/main.jac" -- serve "$@";
+  serve)      check_jac
+              if [ "$#" -gt 0 ]; then exec "$JAC" run --no-serve "$HERE/src/main.jac" -- serve "$@";
               else exec "$JAC" run --no-serve "$HERE/src/main.jac" -- serve "${SIGIL_PORT:-8199}"; fi ;;
   login)      login ;;
   update)     echo "Updating Sigil to the latest release…"
@@ -99,6 +122,7 @@ case "$cmd" in
     # Export SIGIL_URL to talk to a running gateway (sigil serve) instead.
     if [ -z "${SIGIL_URL+set}" ]; then
       [ "$cmd" = "local" ] && { cmd="${1:-help}"; shift || true; }
+      check_jac
       exec "$JAC" run --no-serve "$HERE/src/main.jac" -- "$cmd" "$@"
     fi
     # GATEWAY mode — SIGIL_URL is set: POST to the running agent's HTTP endpoints.

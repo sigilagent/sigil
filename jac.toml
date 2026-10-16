@@ -3,6 +3,13 @@ name = "sigil"
 version = "0.5.3"
 description = "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction."
 entry-point = "observatory"
+# The jac this tree is built and tested against — the ONE place it is pinned.
+# install.sh installs exactly this version, the `sigil` launcher refuses to run
+# under any other (SIGIL_JAC_CHECK=0 skips that), and CI installs it too. jac
+# ships breaking changes as clean breaks, so another version fails in ways that
+# look like Sigil bugs. jac itself only reads this at `jac scale deploy`.
+# Bump it WITH the migration that makes the tree work on the new version.
+jac-version = "==0.37.25"
 
 # byLLM is CORE to jac: the native `jac` binary bundles it as the built-in `byllm`
 # plugin, so there is NO `pip install byllm`. Import it as
@@ -55,23 +62,10 @@ httpx = "latest"
 [byllm.model]
 default_model = "gpt-4o-mini"
 
-# NOTE the section name: jac-scale reads `[scale.*]`, NOT `[plugins.scale.*]`.
-# Both keys below sat under the `plugins.` prefix and were therefore SILENTLY
-# IGNORED — shelf_db_path fell back to jac-scale's own `.jac/data/anchor_store.db`
-# default, which is where the running Observatory's (empty) graph went. The
-# jac-scale docs bundled in the runtime closure show the `[plugins.scale.…]`
-# form, so this is a docs bug rather than a typo here; verified by A/B on jac
-# 0.34.5 (`[scale.database]` applies the pin, `[plugins.scale.database]` does not).
-#
-# The two doors are NOT one graph, and this pin cannot make them one: jac keys a
-# ROOT entry's store to the [project] name and a SUBDIRECTORY entry's to that
-# script's filename, so `jac run src/main.jac` (the CLI) resolves to
-# .jac/data/main.db while `jac start observatory.jac` resolves to sigil.db. What
-# makes the Observatory show the CLI's agent is src/sigil_api.jac: every endpoint
-# runs its request in a fresh `jac run` against the CLI's store. This pin only
-# names the server's OWN store. Overridden by MONGODB_URI if set.
-[scale.database]
-shelf_db_path = ".jac/data/sigil.db"
+# No [scale.database] table: jac 0.37 keeps the graph in its embedded Postgres
+# and dropped `shelf_db_path` (it warned as an unknown key on every command).
+# The Observatory still shows the CLI's agent the way it always has:
+# src/sigil_api.jac runs each endpoint's request in a fresh `jac run` of the CLI.
 
 # The client's `sv import from src.sigil` makes jac auto-detect a microservice
 # split (gateway + src.sigil subprocess). Sigil is one agent on one graph, so the

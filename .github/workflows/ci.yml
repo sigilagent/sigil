@@ -56,12 +56,13 @@ jobs:
         # ran — on branches that had touched nothing near it. Tracking latest also
         # means the break lands on whoever pushes next rather than on whoever is
         # ready to handle it. Upgrading is now an explicit commit that moves this
-        # number and carries the migration with it (see JAC_VERSION below).
+        # number and carries the migration with it. The number is jac.toml's
+        # `jac-version` — the same pin install.sh installs and the launcher checks.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Last version this tree is known green on. Bump WITH the migration.
-          JAC_VERSION: "0.37.25"
         run: |
+          JAC_VERSION="$(sed -n 's/^jac-version *= *"=*\([0-9][0-9.]*\)".*/\1/p' jac.toml | head -1)"
+          [ -n "$JAC_VERSION" ] || { echo "::error::jac.toml has no jac-version pin"; exit 1; }
           for i in 1 2 3; do
             curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
               | bash -s -- --version "$JAC_VERSION" && break
@@ -148,3 +149,104 @@ jobs:
           jac run --no-serve src/compiler/ai/scenarios/lift_direct.jac
           jac run --no-serve src/compiler/ai/scenarios/runtime_budget.jac
           jac run --no-serve src/compiler/ai/scenarios/raise2_canonicalize.jac
+
+  # What a user actually gets: install.sh, then the `sigil` launcher on PATH. The
+  # job above drives src/main.jac directly, so it never touches the installer,
+  # the launcher, `sigil serve`, `sigil login` or the daemon — every one of which
+  # a release ships. It starts where every existing install is: an older jac
+  # already on PATH (earlier releases pinned 0.36.1), because `sigil update` is
+  # just install.sh again.
+  install:
+    name: install & serve
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The CLI auto-starts the scheduler; the daemon step below starts it itself.
+      SIGIL_NO_DAEMON: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start from the jac earlier releases installed
+        run: |
+          for i in 1 2 3; do
+            curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh \
+              | bash -s -- --version 0.36.1 && break
+            echo "install attempt $i failed; retrying in $((i*10))s..."
+            sleep $((i*10))
+          done
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/jac" --version
+
+      # The installer clones SIGIL_REF from GitHub, so check it got this commit:
+      # its fallback clones the default branch when the ref is missing.
+      - name: Install Sigil from this commit
+        env:
+          SIGIL_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          bash ./install.sh
+          want="$(sed -n 's/^jac-version *= *"=*\([0-9][0-9.]*\)".*/\1/p' jac.toml | head -1)"
+          have="$(jac --version | awk '{print $2}')"
+          [ "$have" = "$want" ] || { echo "::error::install.sh left jac $have on PATH; this tree pins $want"; exit 1; }
+          at="$(git -C "$HOME/.sigil/app" rev-parse HEAD)"
+          [ "$at" = "${{ github.event.pull_request.head.sha || github.sha }}" ] \
+            || { echo "::error::installed $at, not this commit"; exit 1; }
+
+      - name: The launcher refuses a jac other than the pin
+        run: |
+          printf '#!/bin/sh\necho "jac 0.36.1  (stub)"\n' > "$RUNNER_TEMP/oldjac"
+          chmod +x "$RUNNER_TEMP/oldjac"
+          if out="$(SIGIL_JAC="$RUNNER_TEMP/oldjac" sigil soul 2>&1)"; then
+            echo "::error::sigil ran under jac 0.36.1"; exit 1
+          fi
+          echo "$out"
+          echo "$out" | grep -q "runs on jac"
+
+      # Two separate processes: the write has to survive the first one exiting.
+      - name: The CLI keeps its graph between runs
+        timeout-minutes: 12
+        env:
+          SIGIL_NO_SERVE: "1"
+        run: |
+          sigil configure small_model ci/persist-check
+          sigil soul | tee "$RUNNER_TEMP/soul.txt"
+          grep -q 'small=ci/persist-check' "$RUNNER_TEMP/soul.txt"
+
+      # The release notes' quickstart: serve, login, then a command routed through
+      # the gateway — which must see the graph the CLI wrote above.
+      - name: sigil serve, login, and a call through the gateway
+        timeout-minutes: 15
+        run: |
+          sigil serve start
+          for i in $(seq 1 150); do
+            curl -fsS -o /dev/null http://localhost:8199/ && break
+            sleep 4
+          done
+          curl -fsS -o /dev/null http://localhost:8199/ \
+            || { echo "::error::the Observatory never answered on :8199"; exit 1; }
+          sigil login
+          SIGIL_URL=http://localhost:8199 sigil soul | tee "$RUNNER_TEMP/gateway.txt"
+          grep -q 'ci/persist-check' "$RUNNER_TEMP/gateway.txt"
+
+      - name: The daemon starts and stays up
+        timeout-minutes: 8
+        env:
+          SIGIL_NO_SERVE: "1"
+        run: |
+          sigil daemon start 10
+          sleep 45
+          sigil daemon status | tee "$RUNNER_TEMP/daemon.txt"
+          grep -q 'running' "$RUNNER_TEMP/daemon.txt"
+
+      - name: Service logs
+        if: always()
+        env:
+          SIGIL_NO_SERVE: "1"
+        run: |
+          for f in "$HOME"/.sigil/log/*; do
+            [ -f "$f" ] || continue
+            echo "===== $f"; tail -n 80 "$f"
+          done
+          sigil daemon stop || true
+          sigil serve stop || true

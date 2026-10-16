@@ -157,9 +157,11 @@ jobs:
           curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash
           \`\`\`
 
-          The installer pulls the native \`jac\` runtime, fetches Sigil into \`~/.sigil/app\`,
-          provisions the compiler's one dependency (PyYAML), and drops a \`sigil\` launcher on
-          your PATH. No root; safe to re-run. Verify the download against \`install.sh.sha256\`.
+          The installer fetches Sigil into \`~/.sigil/app\`, installs the native \`jac\` version
+          this release is pinned to (replacing a different one in \`~/.local/bin\`), provisions
+          everything jac.toml declares, and drops a \`sigil\` launcher on your PATH. No root;
+          safe to re-run — \`sigil update\` does exactly that. Verify the download against
+          \`install.sh.sha256\`.
 
           This release's installer is **pinned to $TAG** — it installs exactly this commit,
           not main. Set \`SIGIL_REF\` (branch / tag / commit) to override.
