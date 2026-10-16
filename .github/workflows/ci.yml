@@ -229,6 +229,44 @@ jobs:
           SIGIL_URL=http://localhost:8199 sigil soul | tee "$RUNNER_TEMP/gateway.txt"
           grep -q 'ci/persist-check' "$RUNNER_TEMP/gateway.txt"
 
+      # The Observatory's endpoints run tools and register commands, without a
+      # login. Only this machine's own pages and clients may reach them.
+      - name: The Observatory is closed to the network and to other websites
+        timeout-minutes: 5
+        run: |
+          # listening on loopback only, not on the runner's network address
+          ss -ltn | grep ':8199 ' | tee "$RUNNER_TEMP/listen.txt"
+          if grep -vE '127\.0\.0\.1:8199|\[::1\]:8199' "$RUNNER_TEMP/listen.txt" | grep -q ':8199'; then
+            echo "::error::the Observatory listens beyond loopback"; exit 1
+          fi
+          lan="$(hostname -I | awk '{print $1}')"
+          if curl -fsS --max-time 5 -o /dev/null "http://$lan:8199/"; then
+            echo "::error::the Observatory answers on $lan"; exit 1
+          fi
+          # another website's page cannot drive it; refusals answer before any work
+          post() {
+            curl -sS -o /dev/null -w '%{http_code}' --max-time 120 -X POST \
+              http://localhost:8199/walker/api_soul -H 'Content-Type: application/json' -d '{}' "$@"
+          }
+          check() { got="$(post "${@:2}")"; echo "$1 -> $got"; [ "$got" = "$1" ]; }
+          check 403 -H 'Origin: https://evil.example'
+          check 403 -H 'Origin: null'
+          check 403 -H 'Sec-Fetch-Site: cross-site'
+          check 403 -H 'Host: evil.example:8199'          # DNS rebinding
+          check 200 -H 'Origin: http://localhost:8199' -H 'Sec-Fetch-Site: same-origin'
+          # no CORS grant to other sites
+          if curl -sS -D - -o /dev/null -X OPTIONS http://localhost:8199/walker/api_soul \
+               -H 'Origin: https://evil.example' -H 'Access-Control-Request-Method: POST' \
+             | grep -qi '^access-control-allow-origin'; then
+            echo "::error::CORS still grants other origins"; exit 1
+          fi
+          # no admin portal, so no default-password admin account
+          if grep -qE 'Admin portal endpoints registered|created with default' "$HOME/.sigil/log/observatory.log"; then
+            echo "::error::jac's admin portal is still enabled"; exit 1
+          fi
+          # the client bundle (which now carries the embed check) built
+          grep -q 'Client bundle built' "$HOME/.sigil/log/observatory.log"
+
       - name: The daemon starts and stays up
         timeout-minutes: 8
         env:

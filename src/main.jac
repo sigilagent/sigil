@@ -53,7 +53,7 @@ import from src.sigil_api { JSON_MARKER }
 import from src.eject_agent { eject_agent, carries_compiler }
 import from src.sigil_serve {
     serve_start, serve_stop, serve_status, serve_logs, mark_serving, unmark_serving,
-    ensure_server
+    ensure_server, embed_url
 }
 import from src.sigil_daemon {
     daemon_run, daemon_start, daemon_stop, daemon_status, daemon_logs, daemon_running,
@@ -572,7 +572,16 @@ def serve_observatory(port: str) {
     aligned = _align_guest_root(data);
     # jac >=0.37 retired `jac start`: `jac run --serve` is the server, and a web-app
     # defaults to --dev (HMR) — the Observatory is a production serve
-    cmdline = [_jac_bin(), "run", "--serve", "--no-dev", "--port", port, os.path.join(proj, "observatory.jac")];
+    # Loopback only: the endpoints run tools, and jac's default 0.0.0.0 put them
+    # on every network this machine joins. SIGIL_SERVE_HOST=0.0.0.0 opts back in.
+    # The server process inherits the variable, so src/sigil_api.jac knows which
+    # Host headers are its own (see _foreign_request).
+    host = os.getenv("SIGIL_SERVE_HOST") or "127.0.0.1";
+    os.environ["SIGIL_SERVE_HOST"] = host;
+    cmdline = [_jac_bin(), "run", "--serve", "--no-dev", "--host", host, "--port", port,
+               os.path.join(proj, "observatory.jac")];
+    print("Sigil Observatory → " + embed_url(port) + "   (or http://localhost:" + port + ")");
+    sys.stdout.flush();
     p = subprocess.Popen(cmdline, cwd=proj);
     # Record ourselves as THE observatory, whether this is a terminal run or the
     # detached child of `serve start` — otherwise `serve status` would only ever
@@ -686,6 +695,7 @@ with entry:__main__ {
             _st = serve_status();
             _own = _st["owner"];
             print("observatory: " + str(_st["url"]));
+            print("  open   : " + embed_url(str(_st["port"])));
             if _own {
                 print("  status : answering" + ("   (adopted: not started by sigil)" if _st["adopted"] else ""));
             } elif _st["running"] {
@@ -713,6 +723,7 @@ with entry:__main__ {
             } else {
                 print("observatory started — pid " + str(r["pid"]) + ", " + str(r["url"]));
             }
+            print("  open: " + embed_url(str(r.get("port") or OBSERVATORY_PORT)));
             print("  log : " + str(r["log"]) + "   (sigil serve logs)");
             print("  stop: sigil serve stop");
         } elif sub == "stop" {

@@ -8,7 +8,7 @@ subdirectory entry emits compiled/src/observatory.js while _entry.js imports
 An OpenClaw-style web front-end, built in Jac: watch the agent's own graph evolve
 live (soul, skills, memory, MCP servers, run lineage) and see 100% token
 observability on every LLM call. Importing `sigil` registers its `api_*`
-walkers as HTTP endpoints; the `cl` block mounts the browser app.
+walkers as HTTP endpoints; `app()` below mounts the browser app.
 """
 
 import from src.sigil {
@@ -42,7 +42,16 @@ import from src.channels { api_inbound }
 
 import "./src/global.css";
 import from web.app { App }
+import from "./web/embed_interop.js" { embedAllowed }
 
 def:pub app() -> JsxElement {
+    # Framed by any site but local.sigilagent.com: a notice, not the Observatory
+    # (clickjacking — see web/embed_interop.js).
+    if not embedAllowed() {
+        return <div className="min-h-screen bg-[#08080d] text-slate-300 p-8 font-sans text-sm">
+            Sigil's Observatory runs on this machine. Open it at local.sigilagent.com
+            or on localhost directly — it does not load inside other sites.
+        </div>;
+    }
     return <App/>;
 }

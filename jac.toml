@@ -67,6 +67,27 @@ default_model = "gpt-4o-mini"
 # The Observatory still shows the CLI's agent the way it always has:
 # src/sigil_api.jac runs each endpoint's request in a fresh `jac run` of the CLI.
 
+# The Observatory is a tool for this machine, not a public service. Its endpoints
+# run tools and register commands, so the server keeps every door it does not
+# need shut:
+# - no CORS grant to any other site (jac's default is "*"). The Observatory's own
+#   page is same-origin with its API and needs none; the page at
+#   local.sigilagent.com embeds it rather than calling it. (src/sigil_api.jac
+#   also refuses cross-site requests outright — CORS alone only hides the
+#   response, it does not stop a request from running.)
+# - none of jac's built-in /docs or /graph pages
+# - no admin portal: jac otherwise creates an `admin` account with a default
+#   password and serves /admin. Sigil does not use it.
+# The listening address (loopback only) is set where the server is started:
+# src/main.jac, SIGIL_SERVE_HOST to override.
+[serve]
+cors_origins = []
+docs_enabled = false
+graph_enabled = false
+
+[scale.admin]
+enabled = false
+
 # The client's `sv import from src.sigil` makes jac auto-detect a microservice
 # split (gateway + src.sigil subprocess). Sigil is one agent on one graph, so the
 # apps must stay colocated in one process or the Observatory and the API stop
