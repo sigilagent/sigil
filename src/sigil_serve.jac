@@ -32,6 +32,15 @@ import from .sigil_runtime {
 
 glob SERVE_PID: str = "observatory";     # pidfile name under $SIGIL_HOME/run
 glob DEFAULT_PORT: str = "8199";
+# The Observatory at an address without a port: the page at local.sigilagent.com
+# (repo sigilagent/local) embeds THIS machine's server, so it shows your agent,
+# never anyone else's. A non-default port rides along as ?port=.
+glob EMBED_PAGE: str = "https://local.sigilagent.com";
+
+def embed_url(prt: str) -> str {
+    p = str(prt).strip();
+    return EMBED_PAGE if (p == DEFAULT_PORT or not p) else (EMBED_PAGE + "/?port=" + p);
+}
 
 def serve_log_path() -> str {
     return os.path.join(log_dir(), "observatory.log");

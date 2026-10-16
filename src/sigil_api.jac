@@ -101,11 +101,75 @@ def api_call(name: str, args: dict[str, any], timeout_s: int = 900) -> dict[str,
             "error": str(body.get("error") or "")};
 }
 
+# ---------------------------------------------------------------------------
+# Only this machine's own pages may drive the agent.
+#
+# The endpoints run tools, register commands and rewrite the graph, and they are
+# `walker:pub` (no login) so the Observatory and the `sigil` gateway can call
+# them. What stops another website from calling them through your browser is
+# this check, made before a request does anything:
+#   - Sec-Fetch-Site `cross-site` / `same-site`: the request came from another
+#     site's page. Browsers set the header and pages cannot change it.
+#   - an Origin that is not this server's own (including "null", which sandboxed
+#     frames and file:// pages send): the same, for browsers without it.
+#   - a Host that is not loopback while the server listens on loopback: DNS
+#     rebinding, where another site's name resolves to 127.0.0.1 and its page
+#     becomes "same-origin" with this server.
+# CORS cannot do this job: it hides a response from the page that asked, but a
+# POST that needs no preflight (no Content-Type, or a form) still runs.
+# Clients that are not browsers (the `sigil` gateway, curl) send none of these
+# headers and pass on a loopback Host. The page at local.sigilagent.com embeds
+# the Observatory rather than calling it, so the requests it causes are the
+# Observatory's own, same-origin, and pass too.
+# ---------------------------------------------------------------------------
+glob LOOPBACK_HOSTS: list[str] = ["localhost", "127.0.0.1", "::1"];
+
+def _is_loopback(host: str) -> bool {
+    h = host.strip().lower().strip("[]");
+    return (h in LOOPBACK_HOSTS) or h.startswith("127.") or h.endswith(".localhost");
+}
+
+def _foreign_request() -> str {
+    # "" when the request may proceed, else why it was refused.
+    import from urllib.parse { urlsplit }
+    # jac >=0.37.25. Without it the origin cannot be checked, and an unchecked
+    # request is exactly what this exists to stop: refuse.
+    try {
+        import from jaclang.server.exchange { current_request }
+    } except Exception as e {
+        return "refused: this jac cannot report where the request came from (" + str(e) + ")";
+    }
+    req = current_request();
+    if req is None {
+        return "";   # not an HTTP request: the CLI, a test, the daemon
+    }
+    site = str(req.header("sec-fetch-site") or "").lower();
+    if site in ["cross-site", "same-site"] {
+        return "refused: a request from another website's page";
+    }
+    here = str(req.origin or "");
+    host = str(urlsplit(here).hostname or "") if here else "";
+    if _is_loopback(os.getenv("SIGIL_SERVE_HOST") or "127.0.0.1") and (not _is_loopback(host)) {
+        return "refused: this server answers to localhost, not '" + host + "'";
+    }
+    origin = str(req.header("origin") or "");
+    if origin and (origin.rstrip("/").lower() != here.rstrip("/").lower()) {
+        return "refused: a request from " + origin;
+    }
+    return "";
+}
+
 def report_for(name: str, args: dict[str, any]) -> any {
     # What a `walker:pub` reports. On success the caller sees exactly what the
     # local function would have returned; on failure it sees why, rather than a
     # plausible-looking empty answer — which is how "the Observatory works" went
     # unnoticed for so long.
+    refusal = _foreign_request();
+    if refusal {
+        import from jaclang.server.exchange { respond }
+        respond(status=403);
+        return {"ok": False, "error": refusal};
+    }
     r = api_call(name, args);
     if r["ok"] { return r["data"]; }
     return {"ok": False, "error": str(r["error"]),
