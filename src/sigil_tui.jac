@@ -245,7 +245,9 @@ def _draw(c: any, b: Block, text: str) -> None {
         # a grid, not prefixed text, so a long line wraps INSIDE the gutter
         g = Table.grid(padding=0);
         g.add_column(width=4, style="#45455a");
-        g.add_column(ratio=1);
+        # fold: a column's default is ellipsis, which would cut an unbroken
+        # path or URL short instead of wrapping it
+        g.add_column(ratio=1, overflow="fold");
         for ln in text.split(chr(10)) { g.add_row("  │ ", Text.from_ansi(ln, style="dim")); }
         c.print(g);
     } elif k == "error" {

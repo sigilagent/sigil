@@ -290,12 +290,15 @@ test "slash commands draw into the transcript; the screen-owning ones are handle
     assert _slash(st, "/config") == "config";
     assert _slash(st, "/clear") == "" and len(st.blocks) == 0;
     assert _slash(st, "/help") == "";
-    txt = st.blocks[-1].text;
+    # read what is DRAWN: rich's highlighter styles "/copy" as a path, so the
+    # raw ANSI has escape codes between "/" and "copy"
+    def shown() -> str { return chr(10).join(_plain(_render(st.blocks[-1], 120))); }
+    txt = shown();
     assert "/copy" in txt and "keys" in txt and "interrupt the agent" in txt;
     _slash(st, "/copy");
-    assert "nothing to copy yet" in st.blocks[-1].text;
+    assert "nothing to copy yet" in shown();
     _slash(st, "/nope");
-    assert "unknown command" in st.blocks[-1].text;
+    assert "unknown command" in shown();
 }
 
 # ---------------------------------------------------------------------------
