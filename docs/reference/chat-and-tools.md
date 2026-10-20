@@ -4,6 +4,31 @@
 can do everything from. It renders replies as markdown, streams a live trace of
 every tool call, and prompts inline to approve any gated shell command.
 
+## The screen
+
+On a real terminal `sigil chat` takes over the whole screen, the way vim or
+Claude Code do, and gives your shell back exactly as it was when you leave. The
+screen holds a scrollable transcript (your turns, the streamed reply, every tool
+call and approval, slash-command output, anything a tool prints), a status row
+with what the agent is doing and for how long, a bordered input box, and a
+footer with the model, sandbox and skill count.
+
+| key | does |
+|---|---|
+| `⏎` · `^J` or `⌥⏎` | send · new line |
+| `esc` | interrupt the agent (mid-turn) · deny an approval |
+| `^C` | interrupt · clear the input · press twice to quit |
+| `^D` | quit |
+| `PgUp` `PgDn`, mouse wheel | scroll back · `End` returns to the latest |
+| `y` / `n` | answer an approval |
+
+Messages typed while the agent is working are queued and sent in order when the
+turn ends. The mouse is captured for scrolling, so select text with shift-drag
+(option-drag in iTerm2), or use `/copy` to put the last reply on the clipboard.
+
+`sigil chat --classic` (or `SIGIL_TUI=0`) keeps the inline REPL instead, and a
+piped or scripted run (stdin or stdout not a terminal) always gets it.
+
 The agent decides first whether a message needs a tool at all. Greetings,
 questions, and anything answerable in words get a plain reply. Tools are for real
 side effects: files, code, live data, scheduling, memory, delegation.
@@ -96,8 +121,8 @@ itself.
 
 `/help` · `/soul` · `/config` · `/tools` · `/workspace` · `/sandbox <mode>` ·
 `/cron` · `/channels` · `/connect <kind>` · `/skills` · `/docs [topic]` ·
-`/model <tier> <name>` · `/remember <fact>` · `/recall <query>` · `/reset` ·
-`/clear` · `/exit`.
+`/model <tier> <name>` · `/remember <fact>` · `/recall <query>` · `/copy` ·
+`/reset` · `/clear` · `/exit`.
 
 ## Tool policy
 
