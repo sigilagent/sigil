@@ -4,6 +4,10 @@
 can do everything from. It renders replies as markdown, streams a live trace of
 every tool call, and prompts inline to approve any gated shell command.
 
+Bare `sigil` on a terminal opens it too, and so does `sigil --claude` alone. When
+nothing is listening for a conversation (a pipe, a script, CI) or `SIGIL_URL`
+points at a gateway, bare `sigil` prints the help instead; `sigil help` always does.
+
 ## The screen
 
 On a real terminal `sigil chat` takes over the whole screen, the way vim or

@@ -219,8 +219,9 @@ cat <<'EOF'
     export OPENAI_API_KEY=sk-...       # a model key (or point it at a local model)
 
     # just use it — runs locally, no server needed:
+    sigil                              # chat with your agent
     sigil solve "turn report.pdf into a clean CSV"
-    sigil soul | sigil tasks list | sigil chat
+    sigil soul | sigil tasks list
 
     # optional — a live web dashboard to watch it work:
     sigil serve                        # Observatory web UI + HTTP API

@@ -12,7 +12,7 @@ npm install -g @sigilagent/sigil
 sigil compile ./SKILL.md -e agent.jac        # the compiler, end to end
 sigil solve "turn report.pdf into clean CSV" # the agent: compile on miss, reuse on hit
 sigil library                                # the compiled skills, with run stats
-sigil chat                                   # the conversational agent over the same graph
+sigil                                        # chat: the conversational agent over the same graph
 ```
 
 Docs: [sigilagent.com](https://sigilagent.com) · [github.com/sigilagent/sigil](https://github.com/sigilagent/sigil)

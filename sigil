@@ -2,6 +2,7 @@
 # sigil — talk to your Sigil agent.
 #
 # Runs locally by default — no server needed:
+#   sigil                              # chat with your agent (same as `sigil chat`)
 #   sigil solve "turn report.pdf into a clean CSV"
 #   sigil soul | tasks list | models list | teach "…" | recall "…"
 #   sigil chat | config                # interactive
@@ -101,7 +102,9 @@ login() {
   echo "logged in as '$user' — token cached at $TOKFILE"
 }
 
-cmd="${1:-help}"; shift || true
+usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"; }
+
+cmd="${1:-}"; shift || true
 case "$cmd" in
   # NOT `jac start` directly: src/main.jac's serve pins the working directory and
   # aligns the server's guest root before the server boots. Exec'ing jac start
@@ -116,7 +119,15 @@ case "$cmd" in
   login)      login ;;
   update)     echo "Updating Sigil to the latest release…"
               exec bash -c 'curl -fsSL "${SIGIL_INSTALL_URL:-https://github.com/sigilagent/sigil/releases/latest/download/install.sh}" | bash' ;;
-  help|"")    awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0" ;;
+  help)       usage ;;
+  # Bare `sigil` on a terminal is the chat: the agent's front door. Anywhere
+  # that can't hold a conversation (a pipe, a script, CI) it stays this help,
+  # and so it does in gateway mode, whose `chat` sends a single message.
+  "")         if [ -t 0 ] && [ -t 1 ] && [ -z "${SIGIL_URL+set}" ]; then
+                check_jac
+                exec "$JAC" run --no-serve "$HERE/src/main.jac" -- chat
+              fi
+              usage ;;
   *)
     # LOCAL by default — run the full CLI straight through src/main.jac, no server.
     # Export SIGIL_URL to talk to a running gateway (sigil serve) instead.
