@@ -255,3 +255,8 @@ examples/csv-clean/cleaned.csv
 # local drafts and research notes that live at the repo root while in progress
 /blog.md
 /hackernews_relevant.txt
+
+# npm package: install.sh is copied in at publish time (release.yml); its
+# launcher lives in npm/bin, which the generic bin/ rule above would hide.
+npm/install.sh
+!npm/bin/

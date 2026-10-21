@@ -50,6 +50,8 @@ SIGIL_MODEL=ollama_chat/qwen3:8b ./agent.jac "..."   # any model can run it
 
 ```bash
 curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash
+# or
+npm install -g @sigilagent/sigil
 ```
 
 ```bash

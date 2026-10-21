@@ -16,6 +16,8 @@
 # Env knobs:
 #   SIGIL_HOME     where the source lives      (default: ~/.sigil/app)
 #   SIGIL_BIN_DIR  where the launcher goes     (default: ~/.local/bin)
+#   SIGIL_PATH_CHECK=0  don't ask for SIGIL_BIN_DIR on PATH (the npm package
+#                  puts its own `sigil` there and keeps this shim private)
 #   SIGIL_REF      branch / tag / commit       (default: main in the repo copy;
 #                  a release asset is rewritten to pin its own tag — see below)
 #   JAC_VERSION    the jac to install          (default: the fetched tree's pin)
@@ -205,7 +207,8 @@ printf '\n%s  ✓ Sigil installed%s\n\n' "$G" "$D"
 printf '    source     %s\n' "$SIGIL_HOME"
 printf '    launcher   %s\n\n' "$BIN_DIR/sigil"
 
-case ":$ORIG_PATH:" in
+case "${SIGIL_PATH_CHECK:-1}:$ORIG_PATH:" in
+  0:*|false:*|no:*|off:*) : ;;
   *":$BIN_DIR:"*) : ;;
   *) warn "add the launcher to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac

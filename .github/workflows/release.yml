@@ -14,9 +14,12 @@ on:
         description: "Version tag to create & release (e.g. v0.2.0)"
         required: true
 
-# Creating releases and tags needs write access to repo contents.
+# Creating releases and tags needs write access to repo contents. id-token is
+# npm trusted publishing: the registry trusts this workflow's OIDC token, so no
+# NPM_TOKEN secret exists to leak or expire.
 permissions:
   contents: write
+  id-token: write
 
 # Never release the same tag twice concurrently.
 concurrency:
@@ -188,3 +191,32 @@ jobs:
               --title "Sigil $TAG" \
               --notes-file "$notes"
           fi
+
+      # npm: `npm i -g @sigilagent/sigil` is the same release by another door. The
+      # package is npm/bin/sigil (a launcher) plus the installer pinned above, so
+      # it installs exactly this tag into ~/.sigil/app. Runs after the release
+      # exists because the launcher's first run fetches the tag. npm never takes a
+      # version twice, so a re-run that only refreshes assets skips the publish.
+      #
+      # Trusted publishing needs npm >= 11.5.1 (Node 24 ships it) and no
+      # registry-url: setup-node's .npmrc would offer a placeholder token first.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Publish to npm
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          cd npm
+          name="$(node -p 'require("./package.json").name')"
+          if npm view "$name@$v" version >/dev/null 2>&1; then
+            echo "$name@$v is already on npm — nothing to publish."
+            exit 0
+          fi
+          cp ../install.sh .
+          npm version "$v" --no-git-tag-version --allow-same-version
+          npm publish --access public --provenance
