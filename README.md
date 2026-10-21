@@ -63,7 +63,7 @@ launcher whose first run performs that install, pinned to the package's version,
 sigil compile ./SKILL.md -e agent.jac        # the compiler, end to end
 sigil solve "turn report.pdf into clean CSV" # the agent: compile on miss, reuse on hit
 sigil library                                # the compiled skills, with run stats
-sigil chat                                   # the conversational agent over the same graph
+sigil                                        # chat: the conversational agent over the same graph
 ```
 
 Models are configured on the graph, seeded on first boot from `SIGIL_FRONTIER`

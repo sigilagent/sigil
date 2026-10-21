@@ -90,6 +90,11 @@ def cli_args(raw: list[any]) -> list[any] {
     return out;
 }
 
+def _interactive() -> bool {
+    try { return bool(sys.stdin.isatty() and sys.stdout.isatty()); }
+    except Exception { return False; }
+}
+
 glob _CV: dict[str, any] = {"open": "", "line": ""};          # current in-flight stage: label + rendered line
 glob _HB: dict[str, any] = {"on": False, "t0": 0.0, "gen": 0}; # the stage heartbeat (see _hb_tick)
 
@@ -628,7 +633,10 @@ with entry:__main__ {
     # a variable already exported in the shell keeps its value.
     try { load_secret_env(); } except Exception as _senv { }
     argv = cli_args(sys.argv);
-    cmd = _arg(argv, 0) if argv else "help";
+    # No command on a real terminal is the chat, as it is for the bare `sigil`
+    # launcher; that covers a lone global flag too (`sigil --claude`). Piped or
+    # scripted, nothing is listening for a conversation, so it is the help.
+    cmd = _arg(argv, 0) if argv else ("chat" if _interactive() else "help");
 
     # The scheduler and the Observatory come up because you used the CLI, not
     # because you also remembered to start them. A schedule someone set should
@@ -1702,6 +1710,7 @@ with entry:__main__ {
         print("");
         print("use it");
         print("  chat [--classic]                    the whole agent from one conversation, full-screen (--classic: inline)");
+        print("                                      (bare `sigil` on a terminal opens it too)");
         print("  start | kill                        bring the scheduler + Observatory up, or put both down and keep them down");
         print("  observatory                         where to open the web UI — the scheduler and server come up on their own");
         print("  serve [port]                        run the Observatory in THIS terminal instead (own port 8199, claimed strictly — never falls back)");
