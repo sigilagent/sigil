@@ -180,6 +180,12 @@ Install SIGIL on macOS or Linux:
 curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash
 ```
 
+or with npm:
+
+```bash
+npm install -g @sigilagent/sigil
+```
+
 Compile an existing skill:
 
 ```bash

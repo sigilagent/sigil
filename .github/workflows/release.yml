@@ -158,7 +158,12 @@ jobs:
 
           \`\`\`bash
           curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash
+          # or
+          npm install -g @sigilagent/sigil
           \`\`\`
+
+          The npm package (\`@sigilagent/sigil@${TAG#v}\`) is a launcher: the first time you
+          run \`sigil\`, it runs this release's installer for you.
 
           The installer fetches Sigil into \`~/.sigil/app\`, installs the native \`jac\` version
           this release is pinned to (replacing a different one in \`~/.local/bin\`), provisions

@@ -33,6 +33,7 @@ And Sigil itself:
 
 ```bash
 curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash
+#   or: npm install -g @sigilagent/sigil
 sigil docs                # prints the reference topic list — the install is good
 ```
 
