@@ -50,7 +50,8 @@ so a `configure` change takes effect on the next turn with no restart.
 
 ## Interfaces
 
-- `sigil chat` — the conversational REPL (markdown, live tool trace, inline approvals).
+- `sigil chat` — the conversational agent, full-screen (markdown, live tool trace,
+  inline approvals); `sigil chat --classic` for the inline REPL.
 - `sigil <command>` — one-shot CLI (`solve`, `soul`, `configure`, `cron`, `channel`,
   `docs`, `models`, `teach`, `recall`, …). Run `sigil` with no args for the full list.
 - `sigil serve` (= `jac start observatory.jac`) — the full-stack server: REST API + the Observatory web UI

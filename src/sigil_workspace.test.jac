@@ -214,3 +214,18 @@ test "before_tool and after_tool fire around a tool call" {
     hook_remove("_t_after_hook");
     hook_remove("_t_fail_hook");
 }
+
+test "the start sink hears a tool begin, and a sink that raises cannot stop the tool" {
+    # the full-screen chat's status row reads "running <command>" from here
+    seen: list[any] = [];
+    def sink(tool: str, detail: str) -> None { seen.append([tool, detail]); }
+    set_start_sink(sink);
+    try { _trace_start("exec", "npm test"); }
+    finally { set_start_sink(None); }
+    assert seen == [["exec", "npm test"]];
+
+    def boom(tool: str, detail: str) -> None { raise RuntimeError("sink bug"); }
+    set_start_sink(boom);
+    try { _trace_start("exec", "echo still-runs"); }
+    finally { set_start_sink(None); }
+}

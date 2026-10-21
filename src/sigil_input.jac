@@ -47,6 +47,7 @@ glob COMMANDS: list[any] = [
       ["router", "routes a task to a skill"]]],
     ["/remember <fact>", "store a durable memory", []],
     ["/recall <query>", "search memories", []],
+    ["/copy", "copy the last reply to the clipboard", []],
     ["/reset", "clear the conversation (keeps graph)", []],
     ["/clear", "clear the screen", []],
     ["/exit", "quit (also Ctrl-D)", []]

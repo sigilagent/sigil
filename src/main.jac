@@ -1649,9 +1649,14 @@ with entry:__main__ {
         else { print("usage: session note <ch> <peer> <role> <text>|show <ch> <peer>|reset <ch> <peer>|list"); }
     } elif cmd == "chat" {
         import from src.sigil_chat { chat_repl }
+        import from src.sigil_tui { tui_wanted, tui_chat }
+        # Full-screen by default on a real terminal; `chat --classic` (or
+        # SIGIL_TUI=0, or any piped run) is the inline REPL.
         # ^C between turns (banner, prompt teardown) exits quietly, never a traceback
-        try { chat_repl(); }
-        except KeyboardInterrupt { print(); }
+        try {
+            if tui_wanted([str(a) for a in argv[1:]]) { tui_chat(); }
+            else { chat_repl(); }
+        } except KeyboardInterrupt { print(); }
     } elif cmd == "setup" {
         import from src.sigil_chat { setup_wizard }
         setup_wizard();
@@ -1685,7 +1690,7 @@ with entry:__main__ {
         print("                                        claude mcp add sigil -- sigil mcp-serve");
         print("");
         print("use it");
-        print("  chat                                conversational tool-using REPL — the whole agent from one conversation");
+        print("  chat [--classic]                    the whole agent from one conversation, full-screen (--classic: inline)");
         print("  start | kill                        bring the scheduler + Observatory up, or put both down and keep them down");
         print("  observatory                         where to open the web UI — the scheduler and server come up on their own");
         print("  serve [port]                        run the Observatory in THIS terminal instead (own port 8199, claimed strictly — never falls back)");

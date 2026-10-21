@@ -48,9 +48,11 @@ import from .sigil_secrets { resolve_refs, redact_secrets }
 # ---------------------------------------------------------------------------
 glob TRACE: list[any] = [];        # [{tool, detail, ok}] — every tool call this process
 glob _SINK: any = None;       # callback(tool, detail, ok) — live render hook
+glob _START_SINK: any = None; # callback(tool, detail) — a tool has STARTED (the full-screen chat's status row)
 glob _APPROVER: any = None;   # callback(command)->bool — inline approve of a pending exec
 
 def set_trace_sink(fn: any) -> None { _SINK = fn; }
+def set_start_sink(fn: any) -> None { _START_SINK = fn; }
 def set_approver(fn: any) -> None { _APPROVER = fn; }
 def drain_trace() -> list[any] { out = list(TRACE); TRACE = []; return out; }
 
@@ -84,6 +86,9 @@ def _trace_start(tool: str, detail: str) -> None {
     # decision hooks land, veto) rather than only witness the aftermath.
     try { fire_hooks("before_tool", str(tool) + ": " + str(detail)[:200]); }
     except Exception as e {  }
+    if _START_SINK is not None {
+        try { _START_SINK(tool, detail); } except Exception as e2 {}
+    }
     return None;
 }
 

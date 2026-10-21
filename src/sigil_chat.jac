@@ -110,6 +110,31 @@ def _sync_toolbar() {
     } except Exception { set_toolbar(""); }
 }
 
+glob _LAST: dict[str, str] = {"reply": ""};   # the last full reply, for /copy
+
+def copy_to_clipboard(text: str, tty_fd: int) -> str {
+    # The OS clipboard tool when there is one; otherwise OSC 52, which asks the
+    # terminal itself to set the clipboard (it works over SSH, where pbcopy
+    # would set the REMOTE machine's clipboard). tty_fd is wherever the real
+    # terminal is: fd 1 inline, a private duplicate under the full-screen chat.
+    import subprocess;
+    import base64;
+    if not text { return "nothing to copy yet"; }
+    tools = [["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]];
+    for argv in tools {
+        try {
+            p = subprocess.run(argv, input=text.encode("utf-8"), stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=5);
+            if p.returncode == 0 { return "copied the last reply (" + str(len(text)) + " chars)"; }
+        } except Exception {}
+    }
+    try {
+        b64 = base64.b64encode(text.encode("utf-8")).decode("ascii");
+        os.write(tty_fd, (chr(27) + "]52;c;" + b64 + chr(7)).encode("ascii"));
+        return "sent the last reply to the terminal's clipboard (OSC 52)";
+    } except Exception as e { return "could not copy: " + str(e); }
+}
+
 def _tool_style(tool: str) -> str {
     warm = ["exec", "write", "edit", "schedule", "unschedule", "message", "learn", "kill", "compile"];
     return "yellow" if tool in warm else "cyan";
@@ -433,6 +458,7 @@ def _run_and_render(console: any, message: str) {
         r = chat_turn(message);
     }
     interrupted = bool(r.get("interrupted") or False);
+    _LAST["reply"] = str(r.get("reply") or "");
     if _STREAMED {
         # A reply almost never ends with a newline, so the last line is still in the
         # buffer — flush it or the final sentence never reaches the screen.
@@ -481,6 +507,7 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/docs" { _show_docs(console, rest); }
     elif verb in ["/skills", "/library"] { _show_library(console); }
     elif verb == "/clear" { console.clear(); }
+    elif verb == "/copy" { console.print("[dim]  " + copy_to_clipboard(_LAST["reply"], 1) + "[/dim]"); }
     elif verb == "/reset" { console.print("[green]  ✓[/green] [dim]" + str(chat_reset()) + "[/dim]"); }
     elif verb == "/sandbox" {
         if rest { console.print("[green]  ✓[/green] [dim]" + str(configure("sandbox", rest)) + "[/dim]"); _sync_toolbar(); _commit_ui(console, "/sandbox"); }
