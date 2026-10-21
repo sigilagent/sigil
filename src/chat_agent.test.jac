@@ -73,3 +73,19 @@ test "use_skill's progress tail turns node events into skill trace lines" {
     assert "fetch_top_ids" in joined, joined;
     assert "judge_relevance" in joined, joined;
 }
+
+test "a history handed back by the console always opens on a user turn" {
+    # The console trims the browser's history to its last 32 messages; the cut
+    # can land on a tool result or an assistant tool call, which providers reject
+    # as the first message of a conversation.
+    h: list[any] = [
+        {"role": "tool", "content": "orphan result", "tool_call_id": "c1"},
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {"role": "user", "content": "next question"},
+        {"role": "assistant", "content": "answer"}
+    ];
+    out = _starts_clean(h);
+    assert [m["role"] for m in out] == ["user", "assistant"], str(out);
+    assert _starts_clean([{"role": "assistant", "content": "x"}]) == [];
+    assert _starts_clean([]) == [];
+}

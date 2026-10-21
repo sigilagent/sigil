@@ -134,6 +134,14 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
         return ("the provider rejected the credentials for '" + name + "' — check the "
                 + "API key (or run `claude` to sign in, for --claude mode)." + hint);
     }
+    # An empty balance arrives as a 429 (OpenAI) or a 400 (Anthropic), and
+    # "wait a moment and try again" sent people to retry something that only
+    # money fixes.
+    if (("no credits" in low) or ("insufficient_quota" in low) or ("credit balance" in low)
+            or ("exceeded your current quota" in low)) {
+        return ("the provider account behind '" + name + "' has no credits left — add "
+                + "credits, or pick another model with " + fix + "." + hint);
+    }
     if (("429" in low) or ("rate limit" in low) or ("ratelimit" in low)
             or ("quota" in low) or ("overloaded" in low) or ("529" in low)) {
         # A subscription session limit names the time it resets. That is the one
@@ -156,6 +164,13 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
     if ("not found on path" in low) or ("install claude code" in low) {
         return ("the Claude Code CLI isn't installed (or not on PATH) — install it, "
                 + "or run without --claude mode." + hint);
+    }
+    # The graph store, not the model: a dropped connection (08006) or a row lock
+    # held by another Sigil process (55P03, "lock timeout"). The second one would
+    # otherwise land in the timeout branch below and blame the model.
+    if ("08006" in low) or ("mid-transaction" in low) or ("55p03" in low) or ("lock timeout" in low) {
+        return ("Sigil's graph store dropped the work before it was saved (a lost "
+                + "connection or another Sigil process holding a lock) — run it again." + hint);
     }
     if ("timed out" in low) or ("timeout" in low) {
         return ("the call to '" + name + "' timed out — the provider may be slow or "

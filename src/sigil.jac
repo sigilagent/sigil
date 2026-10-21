@@ -275,6 +275,23 @@ def lint_skill(source: str, name: str = "") -> dict[str, any] {
     return {"spec": sr, "findings": lint_findings(body, sr)};
 }
 
+def _out_of_txn(fn: any) -> any {
+    # A compile reads the graph when it starts and writes the skill when it ends,
+    # with minutes of model calls in between, and with --clarify (or the
+    # console's "Ask me") a person answering at their own pace. jac 0.37's store
+    # ends a session left idle INSIDE a transaction for 5 minutes, so the final
+    # write died with 08006 "connection lost mid-transaction". Ending the read
+    # transaction at every progress event and before every question keeps the
+    # session out of one while nothing touches the graph.
+    if fn is None { return None; }
+    def wrapped(x: any) -> any {
+        import from .sigil_runtime { commit_now }
+        commit_now("compile");
+        return fn(x);
+    }
+    return wrapped;
+}
+
 def compile_skill(source: str, eject: bool = False, eject_path: str = "",
                   progress: any = None, agent: bool = False,
                   skill_dir: str = "", strict: bool = False,
@@ -292,6 +309,8 @@ def compile_skill(source: str, eject: bool = False, eject_path: str = "",
     import from .compiler.ai.lift { lift, pin_all_lift_llms, set_lift_progress }
     import from .compiler.ai.eject { eject_program, write_program, copy_skill_sidecars }
     import from .compiler.ai.report { explain, strict_mode }
+    progress = _out_of_txn(progress);
+    ask = _out_of_txn(ask);
     soul = awaken();
     reg = [soul -->[?:Registry]][0];
     set_lift_progress(progress);

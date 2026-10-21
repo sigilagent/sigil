@@ -452,3 +452,46 @@ def chat_reset() -> str {
     CHAT_HISTORY = [];
     return "conversation reset";
 }
+
+def _starts_clean(h: list[any]) -> list[any] {
+    # A conversation handed back to the model must open on a user turn. Trimming
+    # from the front (to stay bounded) can leave a tool result or an assistant
+    # tool call with nothing before it, and providers reject that sequence.
+    i = 0;
+    while i < len(h) {
+        m = h[i];
+        if isinstance(m, dict) and (str(m.get("role", "")) == "user") { break; }
+        i += 1;
+    }
+    return h[i:];
+}
+
+def _plain_last_user(h: list[any], message: str) -> list[any] {
+    # byLLM saves each user turn as the agent's whole instruction, its incl_info
+    # context and then the message (~6 KB). A past turn only needs what was
+    # typed; the instruction and a fresh context come with the next turn anyway.
+    out = list(h);
+    i = len(out) - 1;
+    while i >= 0 {
+        m = out[i];
+        if isinstance(m, dict) and (str(m.get("role", "")) == "user") {
+            out[i] = {**m, "content": message};
+            break;
+        }
+        i -= 1;
+    }
+    return out;
+}
+
+def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
+    # One chat turn for the web console. The REPL keeps CHAT_HISTORY alive in its
+    # own process; a console request runs in a fresh process, so the browser holds
+    # the conversation and hands it back each turn. Same agent, same tools, same
+    # approvals: a shell command that needs one is queued, and the console shows
+    # it beside the reply.
+    CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
+    out = chat_turn(message);
+    out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
+    out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
+    return out;
+}

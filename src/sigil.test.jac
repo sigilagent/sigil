@@ -137,3 +137,14 @@ test "lineage_src recovers the original skill document across versions" {
     reg +>:Crystallized:+> TaskGraph(signature="other", intent="", agir="", module="", version=9, skill_src="# other doc");
     assert lineage_src(reg, "hn-watch") == "# amended SKILL.md";
 }
+
+test "a compile's progress and ask callbacks still pass through after the commit wrapper" {
+    # _out_of_txn ends the store transaction before each call; the callback
+    # itself must see the same argument and its answer must come back.
+    seen: list[any] = [];
+    def cb(x: any) -> any { seen.append(x); return "answer:" + str(x); }
+    w = _out_of_txn(cb);
+    assert w("q1") == "answer:q1";
+    assert seen == ["q1"];
+    assert _out_of_txn(None) is None;
+}

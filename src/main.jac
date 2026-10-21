@@ -44,7 +44,7 @@ import from src.approvals { approvals_get, approvals_set, allowlist_add, check_e
 import from src.sigil_skill_tools { skill_tool_index }
 import from src.agent { run_task }
 import from src.sigil_tasks { tasks_list, tasks_show }
-import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets }
+import from src.sigil_secrets { secret_add, secret_remove, secret_list, secret_test, redact_secrets, load_secret_env }
 import from src.sigil_plugins { plugin_install, plugin_list, plugin_remove }
 import from src.sigil_migrate { migrate_openclaw }
 import from src.sigil_runtime { _jac_bin, read_pid, project_root }
@@ -623,6 +623,10 @@ with entry:__main__ {
     # tracebacks over the terminal. byLLM's loguru output and litellm's banners
     # go to $SIGIL_HOME/log/error.log; each surface reports one sentence.
     install_error_log();
+    # Keys saved from the console's Keys & secrets page live in
+    # $SIGIL_HOME/secrets.env. Load them before anything reads a provider key;
+    # a variable already exported in the shell keeps its value.
+    try { load_secret_env(); } except Exception as _senv { }
     argv = cli_args(sys.argv);
     cmd = _arg(argv, 0) if argv else "help";
 
@@ -1085,6 +1089,7 @@ with entry:__main__ {
         import json;
         name = _arg(argv, 1);
         raw = _arg(argv, 2) if len(argv) > 2 else "{}";
+        if raw == "-" { raw = sys.stdin.read(); }   # api_call sends a large payload this way
         a: dict[str, any] = {};
         try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
         payload: dict[str, any] = {"ok": True, "data": None, "error": ""};
@@ -1183,6 +1188,12 @@ with entry:__main__ {
             elif name == "hooks" { payload["data"] = hook_list(); }
             elif name == "channels" { payload["data"] = channel_list(); }
             elif name == "approvals" { payload["data"] = approvals_get(); }
+            elif name == "console" {
+                # Everything the web console adds, behind one name: see
+                # src/sigil_console.jac for the ops and what each returns.
+                import from src.sigil_console { console_dispatch }
+                payload["data"] = console_dispatch(str(a.get("op", "")), dict(a.get("args") or {}));
+            }
             else {
                 payload["ok"] = False;
                 payload["error"] = "unknown api '" + str(name) + "'";

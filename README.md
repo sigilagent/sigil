@@ -183,8 +183,8 @@ asks before the agent starts one on its own.
 
 Around that: chat (a tool-using ReAct agent with file, shell and web tools behind
 an exec-approval gate), MCP tool servers, Discord / Telegram / WhatsApp / Slack
-channels, cron jobs as real graph nodes, and the Observatory — `sigil serve`, a
-live web UI over the graph with token observability on every run.
+channels, cron jobs as real graph nodes, and a web console — `sigil serve` —
+for compiling skills, running them and watching every run's tokens.
 
 ## Layout
 
@@ -201,7 +201,7 @@ src/
   chat_agent.jac         the conversational ReAct agent
   sigil_skill_tools.jac  every compiled skill as a gated tool on that agent
   sigil_workspace.jac    tool-belt: file tools, gated exec, SSRF-guarded web
-web/                     the Observatory browser client
+web/                     the web console (one module per page)
 tools/sandbox/           containerized harness for running compiled agents
 .jac/data/               (runtime) the persistent graph
 ```

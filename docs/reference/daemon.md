@@ -143,6 +143,31 @@ sigil api soul '{}'           # the same seam, from the shell (JSON out)
 A request therefore costs one process start. For a local dashboard that is the
 right trade against showing a confident, empty agent.
 
+### What the console does
+
+The web UI is a console for the whole agent, organised around the compiler:
+
+- **Compile** — drop a skill folder (or name one on disk), pick how unclear
+  rules are settled (*Ask me*, *Let Sigil decide*, *Treat as optional*), and
+  watch the stages run. With *Ask me*, the compile pauses on each unclear rule
+  until you answer Do, Maybe or Don't in the page.
+- **Library** and **Skill** — every compiled skill with its version, origin,
+  runs and last grade; per skill, its AG-IR graph, SKILL.md beside the AG-IR,
+  the gate results, runs and versions, plus Run, Eval, Relearn, Forget and
+  whether MCP clients may call it.
+- **Chat**, **Runs**, **Usage**, **Memory**, **Automations** (cron and hooks),
+  **Approvals**, **Channels**, **MCP & tools**, **Settings** and **Docs**.
+
+Two things the console adds outside the graph:
+
+- A compile started from the console runs as a detached process with its files
+  under `$SIGIL_HOME/compile/<job>/` (the uploaded skill, progress events, the
+  open question and the result), so the page can be closed and reopened.
+- **Settings › Keys & secrets** stores keys you paste in
+  `$SIGIL_HOME/secrets.env`, created readable by you alone (0600). Every Sigil
+  process loads it at start, and a variable already exported in your shell
+  always wins over the file.
+
 ### Running it in the background
 
 Bare `sigil serve` holds the terminal until Ctrl-C. The subcommands give it the

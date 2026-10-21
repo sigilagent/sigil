@@ -63,3 +63,50 @@ test "peek_exec answers without queueing a question nobody asked" {
     approvals_set("allowlist", "on-miss");
     approvals_clear();
 }
+
+test "allow once lets exactly one run of that command through" {
+    # The console's "Allow once" button. It used to record the decision and
+    # nothing read it back, so the retried command just queued again.
+    before = approvals_get();
+    approvals_clear();
+    approvals_set("allowlist", "on-miss");
+
+    cmd = "_t_once_only --flag";
+    assert str(check_exec(cmd)["decision"]) == "approval-pending";
+    r = approve_exact(cmd, "allow-once");
+    assert r["ok"], str(r);
+    assert str(check_exec(cmd)["decision"]) == "allow", "the grant should cover the next run";
+    assert str(check_exec(cmd)["decision"]) == "approval-pending", "and only that run";
+    spent = [h for h in approvals_history() if h["cmd"] == cmd];
+    assert spent and (spent[0]["status"] == "used"), str(spent);
+
+    approvals_clear();
+    approvals_set(str(before["security"]), str(before["ask"]));
+}
+
+test "approve_exact answers one whole command, never a prefix" {
+    before = approvals_get();
+    approvals_clear();
+    approvals_set("allowlist", "on-miss");
+
+    cmd = "_t_exact_bin --one";
+    check_exec(cmd);
+    assert not approve_exact("_t_exact_bin", "allow-once")["ok"], "a prefix is not the command";
+    bad = approve_exact(cmd, "maybe");
+    assert (not bad["ok"]) and ("decision must be" in str(bad["error"]));
+
+    # "allow-always" allowlists the pattern it is given ...
+    r = approve_exact(cmd, "allow-always", "_t_exact_bin *");
+    assert r["ok"] and (r["rule"] == "_t_exact_bin *"), str(r);
+    assert str(check_exec("_t_exact_bin --two")["decision"]) == "allow";
+    allowlist_remove("_t_exact_bin *");
+
+    # ... or the command's first word when it is given none
+    check_exec("_t_first_word --x");
+    r2 = approve_exact("_t_first_word --x", "allow-always");
+    assert r2["rule"] == "_t_first_word", str(r2);
+    allowlist_remove("_t_first_word");
+
+    approvals_clear();
+    approvals_set(str(before["security"]), str(before["ask"]));
+}

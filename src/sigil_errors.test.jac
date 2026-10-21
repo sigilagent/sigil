@@ -108,3 +108,21 @@ test "a session limit reports when it resets, not just 'try again'" {
     r = friendly_llm_error("litellm.RateLimitError: 429 slow down", "gpt-5");
     assert "rate-limiting or overloaded" in r;
 }
+
+test "an empty provider balance says so instead of 'wait a moment'" {
+    o = friendly_llm_error("litellm.RateLimitError: RateLimitError: OpenAIException - You have no credits remaining. Add credits to continue using the API", "gpt-5", "frontier");
+    assert ("no credits left" in o) and ("gpt-5" in o), o;
+    assert "wait a moment" not in o, o;
+    a = friendly_llm_error("BadRequestError: Your credit balance is too low to access the Anthropic API", "claude-sonnet-4-5");
+    assert "no credits left" in a, a;
+    q = friendly_llm_error("Error code: 429 - {'error': {'code': 'insufficient_quota'}}", "gpt-5");
+    assert "no credits left" in q, q;
+}
+
+test "a graph-store failure is not blamed on the model" {
+    s = friendly_llm_error("PgWireError: {'C': '08006', 'M': 'connection lost mid-transaction; retry'}", "gpt-5");
+    assert "graph store" in s, s;
+    assert "model call failed" not in s, s;
+    l = friendly_llm_error("55P03 canceling statement due to lock timeout", "gpt-5");
+    assert ("graph store" in l) and ("timed out" not in l), l;
+}

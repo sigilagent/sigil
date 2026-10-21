@@ -2,7 +2,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Sigil website palette (docs/index.html :root) — the slate ramp is re-tinted
-   to the site's violet-greys so every slate-* class in the app lands on-brand:
+   to the site's violet-greys so every slate-* class lands on-brand:
    950 = --bg, 900 = --panel, 800 ≈ --line on dark, 400 = --muted, 600 = --faint. */
 @theme {
   --color-slate-50: #f7f6fb;
@@ -19,6 +19,73 @@
   --color-sigil-gold: #f5c451;
 }
 
-html, body, #root { height: 100%; margin: 0; }
-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* The console's surfaces and text, as variables so `.light` can swap them.
+   ink-0 is the page, ink-1 insets and the sidebar, ink-2 cards, ink-3 raised
+   controls, ink-4 a selected segment. The text tones pass 4.5:1 on ink-2 in
+   both themes; `faint` is the floor for small text. */
+@theme inline {
+  --color-ink-0: var(--sg-ink-0);
+  --color-ink-1: var(--sg-ink-1);
+  --color-ink-2: var(--sg-ink-2);
+  --color-ink-3: var(--sg-ink-3);
+  --color-ink-4: var(--sg-ink-4);
+  --color-line: var(--sg-line);
+  --color-line-2: var(--sg-line-2);
+  --color-fg: var(--sg-fg);
+  --color-fg-2: var(--sg-fg-2);
+  --color-muted: var(--sg-muted);
+  --color-faint: var(--sg-faint);
+  --color-acc: var(--sg-acc);
+  --color-ok: var(--sg-ok);
+  --color-bad: var(--sg-bad);
+  --color-warn: var(--sg-warn);
+  --color-live: var(--sg-live);
+  --color-sky: var(--sg-sky);
+}
+
+:root {
+  --sg-ink-0: #08080d;
+  --sg-ink-1: #0d0d16;
+  --sg-ink-2: #12121d;
+  --sg-ink-3: #171726;
+  --sg-ink-4: #262338;
+  --sg-line: #1f1d2e;
+  --sg-line-2: #2b2940;
+  --sg-fg: #e9e7f3;
+  --sg-fg-2: #c9c5dc;
+  --sg-muted: #a3a0bb;
+  --sg-faint: #8a87a3;
+  --sg-acc: #c4b5fd;
+  --sg-ok: #86efac;
+  --sg-bad: #fca5a5;
+  --sg-warn: #fcd34d;
+  --sg-live: #67e8f9;
+  --sg-sky: #7dd3fc;
+  color-scheme: dark;
+}
+
+.light {
+  --sg-ink-0: #f7f6fb;
+  --sg-ink-1: #efedf6;
+  --sg-ink-2: #ffffff;
+  --sg-ink-3: #f4f2fa;
+  --sg-ink-4: #e3dff0;
+  --sg-line: #e3e0ee;
+  --sg-line-2: #d3cfe3;
+  --sg-fg: #1a1826;
+  --sg-fg-2: #3f3b54;
+  --sg-muted: #57536d;
+  --sg-faint: #66627c;
+  --sg-acc: #6d28d9;
+  --sg-ok: #15803d;
+  --sg-bad: #b91c1c;
+  --sg-warn: #a16207;
+  --sg-live: #0e7490;
+  --sg-sky: #0369a1;
+  color-scheme: light;
+}
+
+html, body, #root { min-height: 100%; margin: 0; }
+body { background: var(--sg-ink-0); }
+textarea { font-family: inherit; }
 .vis-network:focus { outline: none; }
