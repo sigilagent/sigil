@@ -5,10 +5,11 @@ module from the BASENAME of entry-point (cli/commands/impl/eject.impl.jac), so a
 subdirectory entry emits compiled/src/observatory.js while _entry.js imports
 ./observatory.js — and the build dies at "Could not resolve ./observatory.js".
 
-An OpenClaw-style web front-end, built in Jac: watch the agent's own graph evolve
-live (soul, skills, memory, MCP servers, run lineage) and see 100% token
-observability on every LLM call. Importing `sigil` registers its `api_*`
-walkers as HTTP endpoints; `app()` below mounts the browser app.
+Sigil's web console, built in Jac: compile a SKILL.md and watch every stage, see
+each compiled skill from its source to its AG-IR and gates, chat with the agent,
+and run everything around it (runs, spend, memory, schedules, approvals,
+channels, MCP, keys and models). Importing `sigil` and `sigil_console` registers
+their `api_*` walkers as HTTP endpoints; `app()` below mounts the browser app.
 """
 
 import from src.sigil {
@@ -39,6 +40,7 @@ import from src.sigil {
 import from src.agent { api_chat_completions, api_models, api_tools_invoke }
 import from src.cron { api_cron_tick }
 import from src.channels { api_inbound }
+import from src.sigil_console { api_console }
 
 import "./src/global.css";
 import from web.app { App }

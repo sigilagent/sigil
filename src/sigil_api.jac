@@ -38,7 +38,7 @@ glob API_NAMES: list[str] = [
     "configure", "solve", "register_skill", "add_mcp", "eval", "relearn",
     "forget", "chat", "models", "tools_invoke", "inbound", "cron_tick",
     "cron_list", "cron_runs", "cron_enable", "cron_remove", "skill_agir",
-    "tasks", "hooks", "channels", "approvals"
+    "tasks", "hooks", "channels", "approvals", "console"
 ];
 
 def in_child() -> bool {
@@ -62,6 +62,8 @@ def child_env() -> dict[str, any] {
     return out;
 }
 
+glob ARGV_PAYLOAD_MAX: int = 32000;
+
 def api_call(name: str, args: dict[str, any], timeout_s: int = 900) -> dict[str, any] {
     # Run one API request against the real graph. Returns
     # {"ok": bool, "data": <whatever the call returned>, "error": str}.
@@ -76,10 +78,13 @@ def api_call(name: str, args: dict[str, any], timeout_s: int = 900) -> dict[str,
         return {"ok": False, "data": None, "error": "arguments are not JSON: " + str(e)[:200]};
     }
     env = child_env();
-    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "api", name, payload];
+    # A large payload (a long chat history) goes on stdin: Linux caps one argv
+    # string at 128 KB, and the call would fail before Sigil saw it.
+    big = len(payload) > ARGV_PAYLOAD_MAX;
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "api", name, ("-" if big else payload)];
     try {
         p = subprocess.run(argv, cwd=project_root(), env=env, capture_output=True,
-                           text=True, timeout=timeout_s);
+                           text=True, timeout=timeout_s, input=(payload if big else None));
     } except subprocess.TimeoutExpired as ex {
         return {"ok": False, "data": None, "error": "timed out after " + str(timeout_s) + "s"};
     } except Exception as exc {

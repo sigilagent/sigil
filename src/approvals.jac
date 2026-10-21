@@ -25,7 +25,7 @@ node AllowRule { has pattern: str; }
 
 node Approval {
     has cmd: str;
-    has status: str = "pending";       # pending | allow-once | allow-always | deny
+    has status: str = "pending";       # pending | allow-once | allow-always | deny | used (a spent allow-once)
     has ts: float = 0.0;
 }
 
@@ -178,6 +178,15 @@ def check_exec(cmd: str) -> dict[str, any] {
     if p.security == "deny" {
         return {"decision": "deny", "reason": "exec.security=deny"};
     }
+    # A one-time grant ("allow once") is spent by the next run of exactly that
+    # command. Until this, `approve(..., "allow-once")` recorded the decision
+    # and nothing ever read it back, so the command just queued again.
+    for a in [p -->[?:Approval]] {
+        if (a.status == "allow-once") and (a.cmd == cmd) {
+            a.status = "used";
+            return {"decision": "allow", "reason": "approved once by the operator"};
+        }
+    }
     rules = [r.pattern for r in [p -->[?:AllowRule]]];
     if p.security == "full" {
         if p.ask == "always" { return _pend(p, cmd); }
@@ -202,4 +211,39 @@ def approve(cmd_prefix: str, decision: str) -> str {
         }
     }
     return "no pending approval matching: " + cmd_prefix;
+}
+
+glob DECISIONS: list[str] = ["allow-once", "allow-always", "deny"];
+
+def approve_exact(cmd: str, decision: str, pattern: str = "") -> dict[str, any] {
+    # The console's answer to one pending approval. It matches the WHOLE command:
+    # `approve` matches a prefix, which suits a typed CLI and not a button next
+    # to one specific command. "allow-always" allowlists `pattern`, or the
+    # command's first word when none is given (what `approve` has always done).
+    if decision not in DECISIONS {
+        return {"ok": False, "error": "decision must be one of: " + ", ".join(DECISIONS)};
+    }
+    p = _policy();
+    for a in [p -->[?:Approval]] {
+        if (a.status == "pending") and (a.cmd == cmd) {
+            a.status = decision;
+            a.ts = _ts();
+            rule = "";
+            if decision == "allow-always" {
+                rule = pattern.strip() if pattern.strip() else (cmd.strip().split(" ")[0] if cmd.strip() else "");
+                if rule { allowlist_add(rule); }
+            }
+            return {"ok": True, "cmd": cmd, "decision": decision, "rule": rule};
+        }
+    }
+    return {"ok": False, "error": "no pending approval for: " + cmd[:80]};
+}
+
+def approvals_history(n: int = 40) -> list[any] {
+    # Decided approvals, newest first: what the operator (or a spent one-time
+    # grant) said about each command that asked.
+    p = _policy();
+    rows = [a for a in [p -->[?:Approval]] if a.status != "pending"];
+    ranked = sorted(rows, key=_by_ts, reverse=True);
+    return [{"cmd": a.cmd, "status": a.status, "ts": a.ts} for a in ranked[:n]];
 }
