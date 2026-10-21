@@ -7,6 +7,7 @@
   <p>
     <a href="https://github.com/sigilagent/sigil/actions/workflows/ci.yml"><img src="https://github.com/sigilagent/sigil/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/sigilagent/sigil/releases/latest"><img src="https://img.shields.io/github/v/release/sigilagent/sigil?color=8b5cf6" alt="release"></a>
+    <a href="https://www.npmjs.com/package/@sigilagent/sigil"><img src="https://img.shields.io/npm/v/@sigilagent/sigil?color=8b5cf6&label=npm" alt="npm"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/sigilagent/sigil?color=8b5cf6" alt="license"></a>
     <a href="https://sigilagent.com"><img src="https://img.shields.io/badge/site-sigilagent.com-22d3ee" alt="website"></a>
     <a href="https://sigilagent.com/reference/"><img src="https://img.shields.io/badge/docs-reference-22d3ee" alt="docs"></a>
@@ -53,6 +54,10 @@ curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.
 # or
 npm install -g @sigilagent/sigil
 ```
+
+macOS and Linux. Both land the same release in `~/.sigil/app`: the npm package is a
+launcher whose first run performs that install, pinned to the package's version, so
+`npm update -g @sigilagent/sigil` is how an npm install moves to the next release.
 
 ```bash
 sigil compile ./SKILL.md -e agent.jac        # the compiler, end to end

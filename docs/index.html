@@ -298,6 +298,14 @@
   /* full-width: the code + install bars align with the copy above them */
   .hero-install{margin:0 0 30px;max-width:none}
   .hero-install-label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  /* curl | npm switch over an install one-liner; every switch on the page moves together */
+  .inst-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}
+  .inst-head .hero-install-label{margin-bottom:0}
+  .inst-tabs{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.03)}
+  .inst-tabs button{font-family:var(--mono);font-size:11.5px;color:var(--faint);background:none;border:0;border-radius:6px;padding:3px 11px;cursor:pointer;transition:.15s}
+  .inst-tabs button:hover{color:var(--text)}
+  .inst-tabs button[aria-pressed="true"]{color:var(--text);background:rgba(139,92,246,.24)}
+  [data-inst-panel][hidden]{display:none}
   .hero-install .oneliner{padding:14px 16px;gap:12px}
   .hero-install .oneliner code{font-size:13px}
   .hero-install .oneliner .pr{font-size:13px}
@@ -513,11 +521,22 @@
           </div>
           <p class="hero-tag" style="margin:10px 0 0">No API key? <a href="#claude" style="color:var(--cyan)">Compile on the Claude Code CLI you already have</a> — and serve the skills back to it as tools.</p>
         </div>
-        <div class="hero-install">
-          <span class="hero-install-label">Install · macOS &amp; Linux</span>
-          <div class="oneliner" data-code>
+        <div class="hero-install" data-installer>
+          <div class="inst-head">
+            <span class="hero-install-label">Install · macOS &amp; Linux</span>
+            <div class="inst-tabs" role="group" aria-label="Install with">
+              <button type="button" data-inst="curl" aria-pressed="true">curl</button>
+              <button type="button" data-inst="npm" aria-pressed="false">npm</button>
+            </div>
+          </div>
+          <div class="oneliner" data-code data-inst-panel="curl">
             <span class="pr">$</span>
             <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
+            <button class="copy-btn">Copy</button>
+          </div>
+          <div class="oneliner" data-code data-inst-panel="npm" hidden>
+            <span class="pr">$</span>
+            <div class="ol-scroll"><pre><code>npm install -g @sigilagent/sigil</code></pre></div>
             <button class="copy-btn">Copy</button>
           </div>
         </div>
@@ -886,15 +905,34 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
     <div class="section-head">
       <div class="kicker">Download &amp; install</div>
       <h2 class="section-title">One command. The compiler and the whole agent.</h2>
-      <p>The installer pulls the self-contained <code>jac</code> runtime, fetches Sigil, provisions its one compiler dependency, and drops a <code>sigil</code> launcher on your PATH. No root, no <code>pip install</code>, safe to re-run.</p>
+      <p>The installer pulls the self-contained <code>jac</code> runtime, fetches Sigil, provisions its one compiler dependency, and drops a <code>sigil</code> launcher on your PATH. No root, no <code>pip install</code>, safe to re-run. Prefer npm? <code>@sigilagent/sigil</code> runs this same installer the first time you launch it, pinned to its own release.</p>
     </div>
 
-    <div class="oneliner" data-code>
-      <span class="pr">$</span>
-      <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
-      <button class="copy-btn">Copy</button>
+    <div data-installer>
+      <div class="inst-head">
+        <span class="hero-install-label">macOS &amp; Linux</span>
+        <div class="inst-tabs" role="group" aria-label="Install with">
+          <button type="button" data-inst="curl" aria-pressed="true">curl</button>
+          <button type="button" data-inst="npm" aria-pressed="false">npm</button>
+        </div>
+      </div>
+      <div data-inst-panel="curl">
+        <div class="oneliner" data-code>
+          <span class="pr">$</span>
+          <div class="ol-scroll"><pre><code>curl -fsSL https://github.com/sigilagent/sigil/releases/latest/download/install.sh | bash</code></pre></div>
+          <button class="copy-btn">Copy</button>
+        </div>
+        <p class="oneliner-note">installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
+      </div>
+      <div data-inst-panel="npm" hidden>
+        <div class="oneliner" data-code>
+          <span class="pr">$</span>
+          <div class="ol-scroll"><pre><code>npm install -g @sigilagent/sigil</code></pre></div>
+          <button class="copy-btn">Copy</button>
+        </div>
+        <p class="oneliner-note">first <code style="color:var(--muted)">sigil</code> run installs the matching release to <code style="color:var(--muted)">~/.sigil/app</code> · upgrade with <code style="color:var(--muted)">npm update -g @sigilagent/sigil</code></p>
+      </div>
     </div>
-    <p class="oneliner-note">macOS &amp; Linux · installs to <code style="color:var(--muted)">~/.sigil/app</code> · override with <code style="color:var(--muted)">SIGIL_HOME</code>, <code style="color:var(--muted)">SIGIL_BIN_DIR</code>, <code style="color:var(--muted)">SIGIL_REF</code></p>
 
     <div class="what-grid">
       <div class="what"><div class="k">01</div><h4>Native runtime</h4><p>Installs one small self-contained program; no Python, no dependencies to manage.</p></div>
@@ -1075,6 +1113,20 @@ jac install
       navigator.clipboard.writeText(code).then(function(){
         var t = btn.textContent; btn.textContent = 'Copied ✓';
         setTimeout(function(){ btn.textContent = t; }, 1400);
+      });
+    });
+  });
+  // curl | npm install switch: picking one flips every switch on the page
+  document.querySelectorAll('[data-installer] [data-inst]').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      var pick = tab.getAttribute('data-inst');
+      document.querySelectorAll('[data-installer]').forEach(function(group){
+        group.querySelectorAll('[data-inst]').forEach(function(t){
+          t.setAttribute('aria-pressed', String(t.getAttribute('data-inst') === pick));
+        });
+        group.querySelectorAll('[data-inst-panel]').forEach(function(p){
+          p.hidden = p.getAttribute('data-inst-panel') !== pick;
+        });
       });
     });
   });
