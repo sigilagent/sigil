@@ -1,0 +1,21 @@
+{
+  "name": "@sigilagent/sigil",
+  "version": "0.0.0",
+  "description": "The skill compiler: SKILL.md compiled through a typed AG-IR into a runnable agent harness, so any model (small and local included) follows the skill by construction.",
+  "keywords": ["agent", "skills", "compiler", "llm", "jac", "mcp"],
+  "homepage": "https://sigilagent.com",
+  "bugs": "https://github.com/sigilagent/sigil/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sigilagent/sigil.git",
+    "directory": "npm"
+  },
+  "license": "MIT",
+  "author": "Jayanaka Dantanarayana",
+  "bin": { "sigil": "bin/sigil" },
+  "files": ["bin/", "install.sh"],
+  "os": ["darwin", "linux"],
+  "scripts": {
+    "prepublishOnly": "test -f install.sh && test \"$npm_package_version\" != 0.0.0"
+  }
+}

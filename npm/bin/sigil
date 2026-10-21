@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# sigil — the npm entry point (`npm i -g @sigilagent/sigil`, or `npx @sigilagent/sigil`).
+#
+# Sigil does not run out of node_modules. It lives where the curl installer puts
+# it, ~/.sigil/app, because the graph is keyed to the app's path: run it from the
+# package directory and every `npm update` would replace the agent with an empty
+# one. So this script only makes sure ~/.sigil/app is at least this package's
+# version — running the install.sh shipped beside it, pinned to the matching
+# tag, when it is not — and then hands over to the real launcher.
+#
+# It only ever upgrades. A tree already newer than the package (`sigil update`,
+# a curl install) is left exactly as it is.
+#
+# SIGIL_HOME is the STATE dir here, as it is everywhere in the runtime
+# (default ~/.sigil). The app is $SIGIL_HOME/app. install.sh calls the app dir
+# SIGIL_HOME, so that meaning is handed to it alone and never exported.
+set -euo pipefail
+
+STATE="${SIGIL_HOME:-$HOME/.sigil}"
+APP="$STATE/app"
+BIN="$STATE/bin"   # install.sh's launcher shim lands here, off PATH: npm owns `sigil`
+
+# npm links bin/sigil into a bin dir on PATH; find the package behind the link.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+done
+PKG="$(cd -P "$(dirname "$src")/.." && pwd)"
+
+want="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$PKG/package.json" | head -1)"
+have="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$APP/jac.toml" 2>/dev/null | head -1 || true)"
+newest="$(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -1)"
+
+# Exported, so `sigil update` (which re-runs the latest release's install.sh)
+# refreshes this launcher too instead of planting a second one in ~/.local/bin.
+export SIGIL_BIN_DIR="$BIN" SIGIL_PATH_CHECK=0
+
+if [ -z "$have" ] || { [ "$have" != "$want" ] && [ "$newest" = "$want" ]; }; then
+  # stdout belongs to the command the user typed: `sigil soul | jq` on a first
+  # run must not get the installer's banner.
+  SIGIL_HOME="$APP" SIGIL_REF="v$want" bash "$PKG/install.sh" >&2
+fi
+
+# install.sh's shim pins the jac it verified (SIGIL_JAC). A tree that was
+# installed some other way has no shim here; its own launcher checks jac itself.
+[ -x "$BIN/sigil" ] && exec "$BIN/sigil" "$@"
+exec "$APP/sigil" "$@"
