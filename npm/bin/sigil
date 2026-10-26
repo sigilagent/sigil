@@ -38,9 +38,15 @@ newest="$(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -1)"
 export SIGIL_BIN_DIR="$BIN" SIGIL_PATH_CHECK=0
 
 if [ -z "$have" ] || { [ "$have" != "$want" ] && [ "$newest" = "$want" ]; }; then
+  # The installer's first-run wizard (connect a model, start at login) only
+  # when the user typed a bare `sigil` at a terminal: in front of any other
+  # command (`sigil soul | jq`) a page of questions is in the way.
+  wizard=0
+  if [ "$#" -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then wizard=1; fi
   # stdout belongs to the command the user typed: `sigil soul | jq` on a first
   # run must not get the installer's banner.
-  SIGIL_HOME="$APP" SIGIL_REF="v$want" bash "$PKG/install.sh" >&2
+  SIGIL_HOME="$APP" SIGIL_STATE_HOME="$STATE" SIGIL_REF="v$want" SIGIL_WIZARD="$wizard" \
+    bash "$PKG/install.sh" >&2
 fi
 
 # install.sh's shim pins the jac it verified (SIGIL_JAC). A tree that was

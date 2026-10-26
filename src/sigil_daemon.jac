@@ -203,6 +203,21 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
     # supervisors racing for port 8199, and `serve stop` knows only one pidfile,
     # so the surplus could not be cleaned up. Set it in the environment, once,
     # here: every child the daemon ever spawns inherits it.
+    #
+    # Started as the login service (`sigil daemon install`), the daemon is how
+    # Sigil comes back after a reboot, and Sigil is the scheduler AND the
+    # Observatory: the unit sets SIGIL_SERVICE_SERVE=1, so bring the Observatory
+    # up here, before SIGIL_CHILD is set (ensure_server declines for a child).
+    # It honours a deliberate `serve stop` and SIGIL_NO_SERVE like every other
+    # autostart. `sigil daemon start` by hand does not set the variable, so it
+    # still starts the scheduler alone.
+    if str(os.environ.get("SIGIL_SERVICE_SERVE") or "") == "1" {
+        try {
+            import from .sigil_serve { ensure_server }
+            sv = ensure_server();
+            _log("observatory at login: " + ("started" if sv.get("started") else str(sv.get("reason") or "not started")));
+        } except Exception as _sverr { _log("observatory at login failed: " + str(_sverr)[:160]); }
+    }
     os.environ["SIGIL_CHILD"] = "1";
     _STOP["now"] = False;
     _install_stop_handlers();
@@ -516,8 +531,30 @@ def service_status() -> str {
     return "installed" if os.path.exists(service_path()) else "absent";
 }
 
+def _service_env() -> list[any] {
+    # [name, value] the login service runs with. launchd and systemd start it
+    # with a bare PATH, which finds neither jac in ~/.local/bin nor the CLIs a
+    # tier or a job may drive (claude, ollama under nvm or Homebrew). Record the
+    # PATH of the shell that installed the service, the jac this Sigil runs on,
+    # and SIGIL_SERVICE_SERVE so the service brings the Observatory up too.
+    out: list[any] = [["SIGIL_SERVICE_SERVE", "1"], ["SIGIL_JAC", _jac_bin()]];
+    pth = str(os.environ.get("PATH") or "");
+    if pth { out.append(["PATH", pth]); }
+    home = str(os.environ.get("SIGIL_HOME") or "");
+    if home { out.append(["SIGIL_HOME", home]); }
+    return out;
+}
+
+def _xml(s: str) -> str {
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+}
+
 def _plist_body(interval_s: int) -> str {
     launcher = _launcher();
+    envxml = "";
+    for kv in _service_env() {
+        envxml += "    <key>" + _xml(str(kv[0])) + "</key><string>" + _xml(str(kv[1])) + "</string>" + chr(10);
+    }
     return ('<?xml version="1.0" encoding="UTF-8"?>' + chr(10)
         + '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         + '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">' + chr(10)
@@ -530,6 +567,7 @@ def _plist_body(interval_s: int) -> str {
         + '    <string>' + str(interval_s) + '</string>' + chr(10)
         + '  </array>' + chr(10)
         + '  <key>WorkingDirectory</key><string>' + project_root() + '</string>' + chr(10)
+        + '  <key>EnvironmentVariables</key><dict>' + chr(10) + envxml + '  </dict>' + chr(10)
         + '  <key>RunAtLoad</key><true/>' + chr(10)
         + '  <key>KeepAlive</key><true/>' + chr(10)
         + '  <key>StandardOutPath</key><string>' + log_path() + '</string>' + chr(10)
@@ -539,12 +577,18 @@ def _plist_body(interval_s: int) -> str {
 
 def _unit_body(interval_s: int) -> str {
     launcher = _launcher();
+    envlines = "";
+    for kv in _service_env() {
+        # Quoted whole: systemd splits an unquoted Environment= value on spaces.
+        envlines += "Environment=\"" + str(kv[0]) + "=" + str(kv[1]).replace("\"", "\\\"") + "\"" + chr(10);
+    }
     return ("[Unit]" + chr(10)
-        + "Description=Sigil agent daemon (scheduler and channels)" + chr(10)
+        + "Description=Sigil agent daemon (scheduler, channels and the Observatory)" + chr(10)
         + "After=network-online.target" + chr(10) + chr(10)
         + "[Service]" + chr(10)
         + "Type=simple" + chr(10)
         + "WorkingDirectory=" + project_root() + chr(10)
+        + envlines
         + "ExecStart=" + launcher + " daemon run " + str(interval_s) + chr(10)
         + "Restart=always" + chr(10)
         + "RestartSec=10" + chr(10)
