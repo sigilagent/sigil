@@ -189,7 +189,7 @@ def _show_channels(console: any) {
 def _show_channel_guide(console: any, kind: str) {
     if not kind { console.print("[dim]  usage: /channel <discord|telegram|whatsapp|slack>[/dim]"); return; }
     console.print();
-    console.print(Panel(Text(channel_setup_guide(kind)), title="[dim]connect " + kind + "[/dim]",
+    console.print(Panel(Text(channel_setup_guide(kind)), title="[dim]channel " + kind + "[/dim]",
                         title_align="left", border_style="grey37", padding=(0, 1)));
     console.print();
 }
