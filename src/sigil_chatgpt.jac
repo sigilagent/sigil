@@ -17,7 +17,7 @@ Two halves live here:
   and every compiled-skill subprocess share the record, and two of them racing a
   rotating refresh token would sign the user out.
 - **The model.** A litellm handler under the ``chatgpt`` prefix, the same seam
-  ``claude-cc`` uses: any tier named ``chatgpt/<model>`` is one streamed
+  ``claude-cc`` uses: any tier named ``chatgpt-plan/<model>`` is one streamed
   Responses request. Bound with ``native_tools: False``, so byLLM carries tools
   and output schemas as prose exactly as it does for claude-cc, and the request
   stays inside what plan usage accepts (``store: false``, ``stream: true``, no
@@ -39,7 +39,12 @@ import time
 import urllib.parse
 import uuid
 
-PROVIDER = "chatgpt"
+PROVIDER = "chatgpt-plan"
+# litellm ships its own `chatgpt/` provider: it borrows the Codex CLI's OAuth client
+# for chatgpt.com/backend-api, the route OpenAI tells apps not to use, and litellm
+# dispatches it before any custom provider. So Sigil's route has its own prefix,
+# and a `chatgpt/...` name is translated here before it can ever reach litellm.
+LEGACY_PREFIX = "chatgpt/"
 APP_NAME = "Sigil"
 
 ISSUER = "https://auth.openai.com"
@@ -430,7 +435,7 @@ def refresh_models() -> list:
 
 
 def auth_status() -> dict:
-    """What a `chatgpt/...` tier would run on, without a network call.
+    """What a `chatgpt-plan/...` tier would run on, without a network call.
 
     {"mode": "plan" | "disabled" | "none", "account": email, "models": [slugs]}
     """
@@ -447,15 +452,25 @@ def auth_status() -> dict:
 # The model
 # ---------------------------------------------------------------------------
 def is_chatgpt(model_name: str) -> bool:
-    """True for a model string this provider owns (`chatgpt/...`)."""
-    return str(model_name or "").startswith(PROVIDER + "/")
+    """True for a model string this provider owns (`chatgpt-plan/...`, or the
+    `chatgpt/...` spelling that plan_model translates)."""
+    n = str(model_name or "")
+    return n.startswith(PROVIDER + "/") or n.startswith(LEGACY_PREFIX)
+
+
+def plan_model(model_name: str) -> str:
+    """The name to hand litellm: `chatgpt/x` becomes `chatgpt-plan/x`."""
+    n = str(model_name or "")
+    return PROVIDER + "/" + n[len(LEGACY_PREFIX):] if n.startswith(LEGACY_PREFIX) else n
 
 
 def _slug(model: str) -> str:
-    """`chatgpt/gpt-x` -> `gpt-x`; `default` is the first model in the catalog."""
+    """`chatgpt-plan/gpt-x` -> `gpt-x`; `default` is the first model in the catalog."""
     name = str(model or "")
     if name.startswith(PROVIDER + "/"):
         name = name[len(PROVIDER) + 1:]
+    elif name.startswith(LEGACY_PREFIX):
+        name = name[len(LEGACY_PREFIX):]
     if name in ("", "default"):
         st = auth_status()
         if not st["models"]:
@@ -465,7 +480,7 @@ def _slug(model: str) -> str:
                 pass
             st = auth_status()
         if not st["models"]:
-            raise _terminal("no models are listed for this ChatGPT account — name one, e.g. `chatgpt/<model>`")
+            raise _terminal("no models are listed for this ChatGPT account — name one, e.g. `chatgpt-plan/<model>`")
         name = st["models"][0]
     return name
 

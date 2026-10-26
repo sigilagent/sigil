@@ -21,7 +21,7 @@ import json;
 import logging;
 import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
-import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt }
+import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt, plan_model }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
@@ -221,12 +221,14 @@ def model_for(name: str) -> Model {
         install_claude_cc();
         return Model(model_name=name, config={"native_tools": False});
     }
-    # A `chatgpt/...` tier is a Responses request on the user's ChatGPT plan
+    # A `chatgpt-plan/...` tier is a Responses request on the user's ChatGPT plan
     # (sigil_chatgpt). Same contract as claude-cc: tools and the output schema
     # travel as prose, which keeps every request inside what plan usage accepts.
+    # plan_model translates a `chatgpt/...` spelling, which litellm would
+    # otherwise route to its own Codex-client provider instead.
     if is_chatgpt(name) {
         install_chatgpt();
-        return Model(model_name=name, config={"native_tools": False});
+        return Model(model_name=plan_model(name), config={"native_tools": False});
     }
     # `ollama-cloud/<model>` is Ollama's hosted API, with no local Ollama. The
     # base goes on this Model alone: litellm reads OLLAMA_API_BASE for EVERY

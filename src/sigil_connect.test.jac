@@ -10,7 +10,8 @@ def _fake(pid: str, connected: bool, models: list[str]) -> dict[str, any] {
 }
 
 test "provider_of: each prefix lands on its route" {
-    assert provider_of("chatgpt/gpt-x") == "chatgpt";
+    assert provider_of("chatgpt-plan/gpt-x") == "chatgpt";
+    assert provider_of("chatgpt/gpt-x") == "chatgpt";      # the spelling plan_model translates
     assert provider_of("claude-cc/opus") == "claude-code";
     assert provider_of("ollama_chat/qwen3:8b") == "ollama";
     assert provider_of("ollama_chat/glm-5.3:cloud") == "ollama";        # through the signed-in local daemon
@@ -26,11 +27,11 @@ test "provider_of: each prefix lands on its route" {
 }
 
 test "suggest_tiers: subscriptions take the frontier, the cheap model the small tier" {
-    rows = [_fake("chatgpt", True, ["chatgpt/gpt-a", "chatgpt/gpt-a-mini"]), _fake("openai", True, [])];
+    rows = [_fake("chatgpt", True, ["chatgpt-plan/gpt-a", "chatgpt-plan/gpt-a-mini"]), _fake("openai", True, [])];
     t = suggest_tiers(rows);
-    assert t["frontier"] == "chatgpt/gpt-a";
-    assert t["chat"] == "chatgpt/gpt-a";
-    assert t["small"] == "chatgpt/gpt-a-mini";
+    assert t["frontier"] == "chatgpt-plan/gpt-a";
+    assert t["chat"] == "chatgpt-plan/gpt-a";
+    assert t["small"] == "chatgpt-plan/gpt-a-mini";
     assert t["router"] == t["small"];
 }
 
@@ -54,16 +55,16 @@ test "suggest_tiers: nothing connected suggests nothing" {
 }
 
 test "tiers_for: the route you picked takes the frontier; a CLI does not take the small tier" {
-    rows = [_fake("claude-code", True, ["claude-cc/opus"]), _fake("chatgpt", True, ["chatgpt/gpt-a"])];
+    rows = [_fake("claude-code", True, ["claude-cc/opus"]), _fake("chatgpt", True, ["chatgpt-plan/gpt-a"])];
     t = tiers_for("claude-code", rows);
     assert t["frontier"] == "claude-cc/opus";
-    assert t["small"] == "chatgpt/gpt-a";
+    assert t["small"] == "chatgpt-plan/gpt-a";
     assert tiers_for("openai", rows) == {};   # not connected: nothing to offer
 }
 
 test "model_ready: a tier on a disconnected route says why" {
     rows = [_fake("chatgpt", False, []), _fake("openai", True, [])];
-    bad = model_ready("chatgpt/default", rows);
+    bad = model_ready("chatgpt-plan/default", rows);
     assert not bad["ok"];
     assert bad["provider"] == "chatgpt";
     assert bool(bad["why"]);

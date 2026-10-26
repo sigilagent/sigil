@@ -26,7 +26,7 @@ Model names are litellm strings (via byLLM), so every provider litellm supports 
 
 | Provider | Example name | Auth (`sigil connect …`) |
 |---|---|---|
-| ChatGPT plan | `chatgpt/default`, `chatgpt/<model>` | `chatgpt`: browser sign-in, no key |
+| ChatGPT plan | `chatgpt-plan/default`, `chatgpt-plan/<model>` | `chatgpt`: browser sign-in, no key |
 | Claude Code CLI | `claude-cc/opus` | `claude-code`: your Claude Code login, no key |
 | OpenRouter | `openrouter/openrouter/auto` | `openrouter`: browser sign-in, Sigil gets a key |
 | Ollama (local) | `ollama_chat/qwen3:8b` | `ollama`: none, local daemon |

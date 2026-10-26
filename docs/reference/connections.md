@@ -1,7 +1,7 @@
 # Connections
 
 A connection is how Sigil reaches a model. Every model tier is a model name
-(`chatgpt/<model>`, `claude-cc/opus`, `ollama_chat/qwen3:8b`, `openai/gpt-5`), and
+(`chatgpt-plan/<model>`, `claude-cc/opus`, `ollama_chat/qwen3:8b`, `openai/gpt-5`), and
 a name only works when a connection stands behind it.
 
 Sigil cannot compile, chat or route without one, so **setup requires a
@@ -50,7 +50,7 @@ and no partner key. Each model call is one request to the public Responses API
   your plan Sigil may use. On Plus, the five-hour limit is shared with every other
   app that uses your plan.
 - **Models** are the ones your account lists. Sigil fetches that list when you
-  sign in. `chatgpt/default` means the first one, and `sigil connections` shows
+  sign in. `chatgpt-plan/default` means the first one, and `sigil connections` shows
   them all.
 - **No CLI in the loop.** A call is a direct API request, so there is no
   per-call preamble or process start like the Claude Code route has. That makes

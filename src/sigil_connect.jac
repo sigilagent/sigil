@@ -1,6 +1,6 @@
 """Connections — every route Sigil has to a model, and whether each one is live.
 
-A model tier is a litellm name (`chatgpt/gpt-x`, `claude-cc/opus`,
+A model tier is a litellm name (`chatgpt-plan/gpt-x`, `claude-cc/opus`,
 `ollama_chat/qwen3:8b`, `openai/gpt-5`), and a name is only as good as the
 credential behind it. This module is the one place that knows both halves: which
 routes exist, how to connect each one, and whether the tiers on the graph have a
@@ -84,7 +84,7 @@ def provider_of(model: str) -> str {
     # which case litellm gets the name as is and nobody claims to know better.
     m = str(model or "").strip().lower();
     if not m { return ""; }
-    if m.startswith("chatgpt/") { return "chatgpt"; }
+    if m.startswith("chatgpt-plan/") or m.startswith("chatgpt/") { return "chatgpt"; }
     if m.startswith("claude-cc/") { return "claude-code"; }
     if m.startswith("ollama-cloud/") { return "ollama-cloud"; }
     if m.startswith("ollama") { return "ollama"; }
@@ -160,7 +160,7 @@ def provider_status(pid: str) -> dict[str, any] {
         st: dict[str, any] = chatgpt_auth();
         mode = str(st["mode"]);
         r["account"] = str(st["account"]);
-        r["models"] = ["chatgpt/" + str(m) for m in list(st["models"])];
+        r["models"] = ["chatgpt-plan/" + str(m) for m in list(st["models"])];
         r["connected"] = mode == "plan";
         r["detail"] = ("signed in as " + str(st["account"])) if mode == "plan"
                       else ("signed in, but plan use was not allowed" if mode == "disabled" else "not signed in");
@@ -258,7 +258,7 @@ def _pick_small_chatgpt(models: list[any]) -> str {
         low = str(m).lower();
         if ("mini" in low) or ("nano" in low) or ("fast" in low) or ("instant" in low) { return str(m); }
     }
-    return str(models[0]) if models else "chatgpt/default";
+    return str(models[0]) if models else "chatgpt-plan/default";
 }
 
 def _pick_ollama(big: bool) -> str {
@@ -285,7 +285,7 @@ def _model_for(pid: str, row: dict[str, any], tier: str) -> str {
     big = tier == "frontier";
     if pid == "chatgpt" {
         ms = list(row["models"]);
-        if big { return str(ms[0]) if ms else "chatgpt/default"; }
+        if big { return str(ms[0]) if ms else "chatgpt-plan/default"; }
         return _pick_small_chatgpt(ms);
     }
     if pid == "claude-code" { return "claude-cc/opus" if big else "claude-cc/haiku"; }

@@ -63,6 +63,7 @@ glob TIERS: list[any] = [
 # [model-name prefix, provider, the env var its key lives in ("" when none is needed)].
 # The same prefixes keys_overview uses to say which tier needs which key.
 glob PROVIDERS: list[any] = [
+    ["chatgpt-plan/", "ChatGPT", ""],
     ["chatgpt/", "ChatGPT", ""],
     ["claude-cc/", "Claude Code", ""],
     ["ollama-cloud/", "Ollama Cloud", "OLLAMA_API_KEY"],

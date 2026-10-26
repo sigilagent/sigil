@@ -35,8 +35,9 @@ def _query(url: str) -> dict[str, str] {
 }
 
 test "is_chatgpt: only the chatgpt/ prefix is ours" {
-    assert is_chatgpt("chatgpt/default");
-    assert is_chatgpt("chatgpt/gpt-x");
+    assert is_chatgpt("chatgpt-plan/default");
+    assert is_chatgpt("chatgpt-plan/gpt-x");
+    assert is_chatgpt("chatgpt/gpt-x");                 # translated, never handed to litellm as is
     assert not is_chatgpt("chatgpt-4o-latest");   # an OpenAI API model, billed by key
     assert not is_chatgpt("openai/gpt-5");
     assert not is_chatgpt("");
@@ -211,7 +212,8 @@ test "the credential file is private" {
 test "_slug: default is the account's first model" {
     _home();
     _write(creds_path(), {"refresh_token": "r", "plan_enabled": True, "models": [{"slug": "gpt-a"}, {"slug": "gpt-b"}]});
-    assert _slug("chatgpt/default") == "gpt-a";
+    assert _slug("chatgpt-plan/default") == "gpt-a";
+    assert _slug("chatgpt-plan/gpt-b") == "gpt-b";
     assert _slug("chatgpt/gpt-b") == "gpt-b";
     assert _slug("gpt-b") == "gpt-b";   # litellm may strip the prefix first
 }
@@ -222,4 +224,13 @@ test "_events: server-sent events parse to JSON objects" {
     evs: any = list(_events(FakeResp(lines=lines)));
     assert len(evs) == 2;
     assert str(dict(evs[1])["type"]) == "response.completed";
+}
+
+test "plan_model: litellm never sees the chatgpt/ prefix it owns" {
+    # litellm's built-in `chatgpt/` provider borrows the Codex CLI's client for
+    # chatgpt.com/backend-api and is dispatched before any custom provider.
+    assert plan_model("chatgpt/gpt-x") == "chatgpt-plan/gpt-x";
+    assert plan_model("chatgpt-plan/gpt-x") == "chatgpt-plan/gpt-x";
+    assert plan_model("openai/gpt-5") == "openai/gpt-5";
+    assert PROVIDER != "chatgpt";
 }
