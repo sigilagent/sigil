@@ -246,7 +246,9 @@ if [ "${SIGIL_PRECOMPILE:-1}" != 0 ]; then
   clog="$STATE_DIR/log/install-compile.log"
   info "Compiling Sigil (once; a minute or two)…"
   t0="$(date +%s)"
-  ( SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil help ) >"$clog" 2>&1 &
+  # `local help`, not `help`: the launcher answers a bare `help` itself, in bash,
+  # without ever starting jac — and starting jac on main.jac is the whole point.
+  ( SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil local help ) >"$clog" 2>&1 &
   cpid=$!
   if [ -t 1 ]; then
     while kill -0 "$cpid" 2>/dev/null; do
