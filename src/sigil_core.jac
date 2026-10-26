@@ -21,6 +21,7 @@ import json;
 import logging;
 import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
+import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt, plan_model }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
@@ -208,6 +209,9 @@ def latest_by_sig(compiled_lib: list[TaskGraph]) -> list[TaskGraph] {
 # from graph config (so the model tiers, ethos, and contract are all graph state,
 # not env or files). Mirrors how a compiled agent rebinds `llm` in run().
 # ---------------------------------------------------------------------------
+glob OLLAMA_CLOUD_PREFIX: str = "ollama-cloud/";
+glob OLLAMA_CLOUD_BASE: str = "https://ollama.com";
+
 def model_for(name: str) -> Model {
     # A `claude-cc/...` tier is answered by the local Claude Code CLI instead of a
     # provider API: register the litellm handler on first use, and declare no
@@ -216,6 +220,23 @@ def model_for(name: str) -> Model {
     if is_claude_cc(name) {
         install_claude_cc();
         return Model(model_name=name, config={"native_tools": False});
+    }
+    # A `chatgpt-plan/...` tier is a Responses request on the user's ChatGPT plan
+    # (sigil_chatgpt). Same contract as claude-cc: tools and the output schema
+    # travel as prose, which keeps every request inside what plan usage accepts.
+    # plan_model translates a `chatgpt/...` spelling, which litellm would
+    # otherwise route to its own Codex-client provider instead.
+    if is_chatgpt(name) {
+        install_chatgpt();
+        return Model(model_name=plan_model(name), config={"native_tools": False});
+    }
+    # `ollama-cloud/<model>` is Ollama's hosted API, with no local Ollama. The
+    # base goes on this Model alone: litellm reads OLLAMA_API_BASE for EVERY
+    # ollama call, so setting it in the environment would send the local tiers
+    # to the cloud too.
+    if name.startswith(OLLAMA_CLOUD_PREFIX) {
+        return Model(model_name="ollama_chat/" + name[len(OLLAMA_CLOUD_PREFIX):], api_base=OLLAMA_CLOUD_BASE,
+                     api_key=str(os.getenv("OLLAMA_API_KEY") or ""));
     }
     return Model(model_name=name);
 }

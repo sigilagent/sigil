@@ -177,7 +177,7 @@ jobs:
           Then:
 
           \`\`\`bash
-          export OPENAI_API_KEY=sk-...     # your frontier provider key
+          sigil setup                      # connect a model: ChatGPT sign-in, Claude Code, OpenRouter, Ollama, or a key
           sigil serve                      # start the Observatory gateway
           sigil login                      # once — caches a JWT
           sigil solve "extract the tables from report.pdf as csv"

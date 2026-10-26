@@ -39,7 +39,7 @@ glob RUNTIME_MODULES: list[str] = [
     "agent", "cron", "channels", "hooks", "approvals", "sigil_sessions",
     "sigil_secrets", "sigil_transports", "sigil_bridge", "sigil_daemon",
     "sigil_tasks", "sigil_workspace", "sigil_subagents", "sigil_mcp",
-    "sigil_claude_cc", "sigil_observe", "sigil_docs", "sigil_channels_setup",
+    "sigil_claude_cc", "sigil_chatgpt", "sigil_observe", "sigil_docs", "sigil_channels_setup",
     "chat_agent", "sigil_chat", "sigil_logo"
 ];
 

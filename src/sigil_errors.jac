@@ -99,6 +99,16 @@ def friendly_llm_error(err: any, model: str = "", tier: str = "") -> str {
     fix = (("`sigil configure " + tier + "_model <name>`") if tier
            else "`sigil models set <tier> <name>` (see `sigil models list`)");
     hint = "  — full detail: " + error_log_path();
+    # The providers Sigil owns already phrase their failures for a person
+    # ("chatgpt: your ChatGPT plan's usage limit for Sigil is reached — see …").
+    # Pass that sentence through: the generic branches below would replace a
+    # precise fix with a guess.
+    ours = re.search(r"chatgpt: ([^\n]+)", s);
+    if ours {
+        msg = str(ours.group(1)).strip().rstrip(".");
+        msg = re.split(r"\s+(?:LiteLLM Retried|Received Model Group)", msg)[0].strip().rstrip(".");
+        return (msg + "." + hint);
+    }
     # Not a model failure at all: jac 0.36 dropped litellm from the runtime closure,
     # so a runtime provisioned without the `llm` capability swaps in byLLM's `_optdeps`
     # stub and every call dies as an AttributeError on a SimpleNamespace.

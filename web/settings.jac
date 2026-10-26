@@ -1,16 +1,23 @@
 """Settings: every setting the agent has, one section at a time.
 
-#/settings/<section> is that section (keys, models, behaviour, agent, workspace,
-system); plain #/settings opens Keys & secrets. Each section fetches what it
-shows the first time it opens, and shows what it saw last time at once:
+#/settings/<section> is that section (connections, keys, models, behaviour,
+agent, workspace, system); plain #/settings opens Connections. Each section
+fetches what it shows the first time it opens, and shows what it saw last time
+at once:
 
+- connections: the `connections` op (src/sigil_connect.jac): every route to a
+  model, whether it is live, and whether each tier has one. A browser sign-in
+  (ChatGPT, OpenRouter) is `connect_start`, which runs the loopback listener in
+  the server process and returns the link; the page opens it in a tab and polls
+  `connect_poll`. A pasted key is `connect_key`; `connect_apply` points the tiers
+  at a connection.
 - keys: the `keys` op (src/sigil_console.jac keys_overview). A value is never
   sent to the browser, only whether it is set, where from, and its last four
   characters. Saving and clearing a value run in the server process
   (`secret_save`, `secret_delete`); testing one (`secret_test`) and dropping a
   named reference (`secret_remove`) run against the graph.
 - models: the `models` op (tiers, aliases, fallbacks, Claude Code mode, the
-  models already pulled into a local Ollama). Each tier saves through the
+  models already pulled into a local Ollama and those the connections offer). Each tier saves through the
   `api_configure` walker, as `configure <tier>_model <name>` does.
 - behaviour, agent, workspace, system: the `system` op. Its `soul` holds the
   config values; each one saves through `api_configure`.
@@ -22,11 +29,12 @@ import from .ui {
     PageHead, Icon, Toggle, Segmented, Note, Spinner, CARD, BTN_SM, BTN2_SM, BTN_GHOST_SM, BTN_BAD_SM,
     INP, AREA, SELECT, LABEL, LINK, chip, dotCls
 }
-import from "./console_interop.js" { navTo, seen, remember, focusId, fmtAgo }
+import from "./console_interop.js" { navTo, seen, remember, focusId, fmtAgo, copyText, openBlank, pointTab, closeTab }
 import from react { useEffect }
 
 # [section, label]; "tools" leaves for the MCP & tools page, where the policy lives.
 glob SECTIONS: list[any] = [
+    ["connections", "Connections"],
     ["agent", "Agent"],
     ["keys", "Keys & secrets"],
     ["models", "Models"],
@@ -35,7 +43,14 @@ glob SECTIONS: list[any] = [
     ["workspace", "Workspace & sandbox"],
     ["system", "System"]
 ];
-glob SECTION_KEYS: list[str] = ["agent", "keys", "models", "behaviour", "workspace", "system"];
+glob SECTION_KEYS: list[str] = ["connections", "agent", "keys", "models", "behaviour", "workspace", "system"];
+
+# [group label, connection ids] in the order the Connections section lists them.
+glob CONN_GROUPS: list[any] = [
+    ["Sign in with your browser", ["chatgpt", "openrouter"]],
+    ["Already on this machine", ["claude-code", "ollama"]],
+    ["API keys", ["openai", "anthropic", "gemini", "zai", "ollama-cloud"]]
+];
 
 # [tier, label, config key, what the tier does]
 glob TIERS: list[any] = [
@@ -48,7 +63,10 @@ glob TIERS: list[any] = [
 # [model-name prefix, provider, the env var its key lives in ("" when none is needed)].
 # The same prefixes keys_overview uses to say which tier needs which key.
 glob PROVIDERS: list[any] = [
+    ["chatgpt-plan/", "ChatGPT", ""],
+    ["chatgpt/", "ChatGPT", ""],
     ["claude-cc/", "Claude Code", ""],
+    ["ollama-cloud/", "Ollama Cloud", "OLLAMA_API_KEY"],
     ["ollama", "Ollama", ""],
     ["openrouter/", "OpenRouter", "OPENROUTER_API_KEY"],
     ["openai/", "OpenAI", "OPENAI_API_KEY"],
@@ -178,9 +196,15 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     has nsName: str = "";
     has nsEnv: str = "";
     has nsVal: str = "";
+    has cdata: any = None;
+    has cerr: str = "";
+    has flows: dict[str, any] = {};
+    has connEdit: str = "";
+    has connDraft: str = "";
+    has justConnected: str = "";
 
-    raw = str(route[1]) if (len(route) > 1) else "keys";
-    sec = raw if (raw in SECTION_KEYS) else "keys";
+    raw = str(route[1]) if (len(route) > 1) else "connections";
+    sec = raw if (raw in SECTION_KEYS) else "connections";
 
     async def call(op: str, args: dict[str, any]) -> any {
         r = root spawn api_console(op=op, args=args);
@@ -217,8 +241,15 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         elif m { serr = str(m.error); }
     }
 
+    async def loadConns() {
+        m: any = await call("connections", {});
+        if m and (not m.error) { cdata = remember("settings.connections", m); cerr = ""; }
+        elif m { cerr = str(m.error); }
+    }
+
     def loadOp(op: str) {
-        if op == "keys" { loadKeys(); }
+        if op == "connections" { loadConns(); }
+        elif op == "keys" { loadKeys(); }
         elif op == "models" { loadModels(); }
         else { loadSystem(); }
     }
@@ -230,12 +261,14 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         if pm { mdata = pm; }
         ps: any = seen("settings.system");
         if ps { sysv = ps; }
+        pc: any = seen("settings.connections");
+        if pc { cdata = pc; }
     }
 
     # Fetch a section's data the first time it opens on this visit. Models also
     # wants the keys, to say whether each tier's provider key is set.
     useEffect(lambda {
-        want = "keys" if (sec == "keys") else ("models" if (sec == "models") else "system");
+        want = sec if (sec in ["connections", "keys", "models"]) else "system";
         nf: dict[str, bool] = {**fetched};
         if want not in fetched {
             nf[want] = True;
@@ -345,6 +378,123 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
             else { say("Saved the name " + nm + ", but " + ev + " is not set yet. Set it below or export it in your shell.", "warn"); }
             loadKeys();
         } else { say(str(m.error) if m else "Sigil did not answer.", "bad"); }
+    }
+
+    # --- connections ------------------------------------------------------
+    def setFlow(pid: str, f: dict[str, any]) { flows = {**flows, (pid): f}; }
+
+    async def pollFlow(pid: str, fid: str, tab: any, n: int) {
+        m: any = await call("connect_poll", {"id": fid});
+        st = str(m.state) if m else "unknown";
+        if (st == "waiting") and (n < 300) {
+            setTimeout(lambda { pollFlow(pid, fid, tab, n + 1); }, 2000);
+            return;
+        }
+        if st == "ok" {
+            setFlow(pid, {"id": fid, "state": "ok", "url": "", "detail": str(m.detail or "")});
+            justConnected = pid;
+            say(provider_name(pid) + ": " + str(m.detail or "connected") + ".", "ok");
+            loadConns();
+            refresh();
+        } else {
+            setFlow(pid, {"id": fid, "state": "error", "url": "", "detail": str(m.detail or "the sign-in did not finish") if m else "Sigil did not answer"});
+            say(provider_name(pid) + ": " + (str(m.detail or "the sign-in did not finish") if m else "Sigil did not answer."), "bad");
+        }
+    }
+
+    async def startSignin(pid: str, fresh: bool) {
+        # The tab opens now, inside the click; it gets the link once it exists.
+        tab: any = openBlank();
+        setFlow(pid, {"id": "", "state": "starting", "url": "", "detail": ""});
+        m: any = await call("connect_start", {"provider": pid, "fresh": fresh});
+        if (not m) or (not m.url) {
+            closeTab(tab);
+            setFlow(pid, {"id": "", "state": "error", "url": "", "detail": str(m.error) if (m and m.error) else "could not start the sign-in"});
+            say(provider_name(pid) + ": " + (str(m.error) if (m and m.error) else "could not start the sign-in."), "bad");
+            return;
+        }
+        pointTab(tab, str(m.url));
+        setFlow(pid, {"id": str(m.id), "state": "waiting", "url": str(m.url), "detail": ""});
+        pollFlow(pid, str(m.id), tab, 0);
+    }
+
+    def cancelFlow(pid: str) { setFlow(pid, {"id": "", "state": "", "url": "", "detail": ""}); }
+
+    # Each `connections` read is a fresh Sigil process (~10s), so show what a
+    # change did at once and let the reload that follows confirm it.
+    def patchConn(pid: str, p: dict[str, any]) {
+        if not cdata { return; }
+        cdata = {**cdata, "rows": [({**r, **p} if (str(r.id) == pid) else r) for r in list(cdata.rows or [])]};
+    }
+
+    def patchTiers(t: any) {
+        if (not cdata) or (not cdata.tiers) { return; }
+        nt: dict[str, any] = {};
+        for tr in TIERS {
+            k = str(tr[0]);
+            v = str(t[k] or "") if t else "";
+            nt[k] = {"model": v, "ok": True, "provider": "", "why": ""} if v else cdata.tiers[k];
+        }
+        cdata = {**cdata, "tiers": nt, "ok": True};
+    }
+
+    def provider_name(pid: str) -> str {
+        if cdata and cdata.rows {
+            for r in list(cdata.rows) { if str(r.id) == pid { return str(r.label); } }
+        }
+        return pid;
+    }
+
+    async def saveConnKey(pid: str) {
+        v = connDraft;
+        if (not v.strip()) or (busy != "") { return; }
+        busy = "ck:" + pid;
+        m: any = await call("connect_key", {"provider": pid, "value": v});
+        busy = "";
+        if m and m.ok {
+            connEdit = "";
+            connDraft = "";
+            justConnected = pid;
+            patchConn(pid, {"connected": True, "detail": "key set (saved by Sigil)"});
+            say(provider_name(pid) + " key saved and working.", "ok");
+            loadConns();
+            refresh();
+        } elif m and m.env {
+            connDraft = "";
+            connEdit = "";
+            patchConn(pid, {"connected": True, "detail": "key set (saved by Sigil), but its test failed"});
+            say(provider_name(pid) + " key saved, but the test failed: " + str(m.detail or ""), "bad");
+            loadConns();
+        } else { say(str(m.error) if (m and m.error) else "Sigil did not answer.", "bad"); }
+    }
+
+    async def removeConn(pid: str) {
+        busy = "rmc:" + pid;
+        m: any = await call("connect_remove", {"provider": pid});
+        busy = "";
+        say(provider_name(pid) + ": " + (str(m.detail) if m else "Sigil did not answer."), "ok" if (m and m.ok) else "bad");
+        if m and m.ok { patchConn(pid, {"connected": False, "detail": "not connected"}); }
+        if justConnected == pid { justConnected = ""; }
+        loadConns();
+        refresh();
+    }
+
+    async def applyTiers(t: any, label: str) {
+        if busy != "" { return; }
+        busy = "apply";
+        m: any = await call("connect_apply", {"tiers": t});
+        busy = "";
+        if m and m.ok {
+            justConnected = "";
+            patchTiers(t);
+            say("The tiers now use " + label + ", from the next run.", "ok");
+            # The Models section reads the tiers too: fetch it fresh next time.
+            nf: dict[str, bool] = {};
+            for (k, v) in fetched.items() { if k != "models" { nf[k] = v; } }
+            fetched = nf;
+            loadConns();
+            refresh();
+        } else { say(str(m.error) if (m and m.error) else "Sigil did not answer.", "bad"); }
     }
 
     # --- models -----------------------------------------------------------
@@ -565,6 +715,131 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         </section>;
     }
 
+    def tierLine(t: str, x: any) -> JsxElement {
+        return <span key={t} className={chip("ok" if x.ok else "bad")} title={str(x.why or "")}>
+            {("✓ " if x.ok else "✗ ") + t + " · " + (str(x.model) if x.model else "unset")}
+        </span>;
+    }
+
+    def tiersSummary(t: any) -> str {
+        return "frontier " + str(t.frontier or "") + " · small " + str(t.small or "");
+    }
+
+    def connActions(r: any) -> JsxElement {
+        pid = str(r.id);
+        f: any = flows[pid] if (pid in flows) else None;
+        fst = str(f.state) if f else "";
+        sug: any = cdata.suggest_for[pid] if (cdata.suggest_for and (pid in cdata.suggest_for)) else None;
+        useBtn = (<button type="button" className={BTN2_SM} disabled={busy != ""} title={tiersSummary(sug) if sug else ""}
+            onClick={lambda (e: MouseEvent) { applyTiers(sug, str(r.label)); }}>{"Applying…" if (busy == "apply") else "Use for tiers"}</button>) if (r.connected and sug) else None;
+        if (str(r.kind) == "signin") and (fst in ["starting", "waiting"]) {
+            return <span className="flex flex-wrap items-center gap-2">
+                <Spinner label="Waiting for the sign-in in your browser…"/>
+                {(<a href={str(f.url)} target="_blank" rel="noreferrer" className={LINK + " text-xs no-underline"}>Open the sign-in page</a>) if f.url else None}
+                <button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { cancelFlow(pid); }}>Cancel</button>
+            </span>;
+        }
+        if str(r.kind) == "signin" {
+            if r.connected {
+                return <span className="flex flex-wrap items-center gap-1.5">
+                    {useBtn}
+                    {(<a href={str(cdata.usage_url)} target="_blank" rel="noreferrer" className={BTN_GHOST_SM + " no-underline"}>Manage usage ↗</a>) if (pid == "chatgpt") else None}
+                    <button type="button" className={BTN_BAD_SM} disabled={busy != ""}
+                        onClick={lambda (e: MouseEvent) { removeConn(pid); }}>{"Signing out…" if (busy == ("rmc:" + pid)) else ("Sign out" if (pid == "chatgpt") else "Disconnect")}</button>
+                </span>;
+            }
+            return <button type="button" className={BTN_SM} disabled={busy != ""}
+                onClick={lambda (e: MouseEvent) { startSignin(pid, False); }}>{"Continue with ChatGPT" if (pid == "chatgpt") else ("Sign in to " + str(r.label))}</button>;
+        }
+        if str(r.kind) == "key" {
+            return <span className="flex flex-wrap items-center gap-1.5">
+                {useBtn}
+                <button type="button" className={BTN_GHOST_SM if r.connected else BTN_SM} disabled={busy != ""}
+                    onClick={lambda (e: MouseEvent) { connEdit = pid; connDraft = ""; focusId("ck-" + pid); }}>{"Replace" if r.connected else "Add key"}</button>
+                {(<button type="button" className={BTN_BAD_SM} disabled={busy != ""}
+                    onClick={lambda (e: MouseEvent) { removeConn(pid); }}>{"Removing…" if (busy == ("rmc:" + pid)) else "Remove"}</button>) if r.connected else None}
+            </span>;
+        }
+        return <span className="flex flex-wrap items-center gap-1.5">
+            {useBtn}
+            {(<button type="button" className={BTN2_SM} disabled={busy != ""}
+                onClick={lambda (e: MouseEvent) { loadConns(); }}>Check again</button>) if (not r.connected) else None}
+        </span>;
+    }
+
+    def connRow(r: any) -> JsxElement {
+        pid = str(r.id);
+        f: any = flows[pid] if (pid in flows) else None;
+        return <div key={pid} className="flex flex-col gap-2 px-4.5 py-3 border-b border-line">
+            <div className={ROW}>
+                <span className="flex-[1_1_220px] min-w-0 flex flex-col gap-0.5">
+                    <span className="flex items-center gap-2 text-[13.5px] font-medium">
+                        {str(r.label)}
+                        {(<span className="px-1.5 py-px rounded-[5px] text-[11px] font-medium text-acc bg-acc/15">Using ChatGPT plan</span>) if ((pid == "chatgpt") and r.connected) else None}
+                    </span>
+                    <span className="text-xs text-muted leading-relaxed">{str(r.about)}</span>
+                </span>
+                <span className="flex-[1_1_200px] min-w-0 flex flex-col gap-0.5 text-xs">
+                    <span><span className={chip("ok" if r.connected else "")}>{"Connected" if r.connected else "Not connected"}</span></span>
+                    <span className="text-muted break-all">{str(r.detail or "")}</span>
+                </span>
+                {connActions(r)}
+            </div>
+            {(<div className="text-xs text-muted flex flex-wrap items-center gap-2">
+                <span>In a terminal:</span>
+                <span className="font-mono text-fg-2 px-1.5 py-px rounded bg-ink-3">{str(r.how)}</span>
+                <button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { copyText(str(r.how)); }}>Copy</button>
+            </div>) if ((not r.connected) and (str(r.kind) in ["cli", "local"]) and r.how) else None}
+            {(<Note text={str(f.detail)} tone="bad"/>) if (f and (str(f.state) == "error") and f.detail) else None}
+            {(<div className="flex flex-wrap items-center gap-2">
+                <input id={"ck-" + pid} type="password" autoComplete="off" value={connDraft} aria-label={"API key for " + str(r.label)}
+                    placeholder={"Paste your " + str(r.label) + " key"}
+                    onChange={lambda (e: ChangeEvent) { connDraft = e.target.value; }}
+                    onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { saveConnKey(pid); } elif e.key == "Escape" { connEdit = ""; } }}
+                    className={INP + " flex-[1_1_260px] font-mono"}/>
+                <button type="button" className={BTN_SM} disabled={(not connDraft.strip()) or (busy != "")}
+                    onClick={lambda (e: MouseEvent) { saveConnKey(pid); }}>{"Checking…" if (busy == ("ck:" + pid)) else "Save and test"}</button>
+                <button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { connEdit = ""; }}>Cancel</button>
+                <span className="basis-full text-xs text-muted">{"Kept in the secrets file (0600) as " + str(r.env) + ", never on the graph."}</span>
+            </div>) if (connEdit == pid) else None}
+        </div>;
+    }
+
+    def connectionsCard() -> JsxElement {
+        if not cdata { return loading(cerr, "Checking your connections…"); }
+        rows: list[any] = list(cdata.rows or []);
+        tiers: any = cdata.tiers;
+        anyConn = len([r for r in rows if r.connected]) > 0;
+        sugAll: any = cdata.suggest;
+        jc: any = cdata.suggest_for[justConnected] if (justConnected and cdata.suggest_for and (justConnected in cdata.suggest_for)) else None;
+        return <section aria-labelledby="ch" className={CARD + " overflow-hidden"}>
+            <div className="px-4.5 py-4 border-b border-line flex flex-col gap-2">
+                <h2 id="ch" className="m-0 text-[15px] font-semibold">Connections</h2>
+                <span className="text-[12.5px] text-muted leading-relaxed">How Sigil reaches a model. Connect at least one: Sigil cannot compile or chat without it. Signing in with ChatGPT, or using Claude Code or Ollama, needs no API key.</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                    {[tierLine(str(t[0]), tiers[str(t[0])]) for t in TIERS]}
+                </div>
+                {(<Note text="No model is connected yet. Sign in with ChatGPT or OpenRouter, or add a key below." tone="warn"/>) if (not anyConn) else None}
+                {(<div className="flex flex-wrap items-center gap-2">
+                    <Note text={"The tiers do not all run on a connected model. Suggested: " + tiersSummary(sugAll) + "."} tone="warn"/>
+                    <button type="button" className={BTN_SM} disabled={busy != ""}
+                        onClick={lambda (e: MouseEvent) { applyTiers(sugAll, "the suggested models"); }}>Use the suggested tiers</button>
+                </div>) if (anyConn and (not cdata.ok) and sugAll and sugAll.frontier) else None}
+                {(<div className="flex flex-wrap items-center gap-2">
+                    <Note text={provider_name(justConnected) + " is connected. Point the tiers at it? " + tiersSummary(jc)} tone="ok"/>
+                    <button type="button" className={BTN_SM} disabled={busy != ""}
+                        onClick={lambda (e: MouseEvent) { applyTiers(jc, provider_name(justConnected)); }}>Use for tiers</button>
+                </div>) if jc else None}
+            </div>
+            {for g in CONN_GROUPS {
+                <div key={str(g[0])}>
+                    <div className={GROUP}>{str(g[0])}</div>
+                    {[connRow(r) for r in rows if (str(r.id) in list(g[1]))]}
+                </div>
+            }}
+        </section>;
+    }
+
     def tierStatus(model: str, aliases: dict[str, any], local: list[any]) -> JsxElement {
         target = str(aliases[model]) if (model in aliases) else model;
         pv = _provider(target);
@@ -572,7 +847,11 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         env = pv[1];
         if not target { return <span className="text-xs text-muted">No model set</span>; }
         if name == "Claude Code" { return <span className="text-xs text-ok">✓ Claude Code sign-in, no key</span>; }
+        if name == "ChatGPT" {
+            return <span className="text-xs text-muted">Your ChatGPT plan, no key. <a href="#/settings/connections" className={LINK + " no-underline"}>Check the sign-in</a></span>;
+        }
         if name == "Ollama" {
+            if target.endswith(":cloud") or target.endswith("-cloud") { return <span className="text-xs text-muted">Ollama cloud model, through this machine's signed-in Ollama</span>; }
             if target in local { return <span className="text-xs text-ok">✓ local, pulled in Ollama</span>; }
             if local { return <span className="text-xs text-warn">local, but not pulled in this Ollama</span>; }
             return <span className="text-xs text-warn">local; no Ollama models found on this machine</span>;
@@ -874,7 +1153,8 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     }
 
     body: any = None;
-    if sec == "keys" { body = keysCard(); }
+    if sec == "connections" { body = connectionsCard(); }
+    elif sec == "keys" { body = keysCard(); }
     elif sec == "models" { body = modelsCard(); }
     elif sec == "behaviour" { body = behaviourCard(); }
     elif sec == "agent" { body = agentCard(); }

@@ -596,39 +596,6 @@ def chat_repl() {
 }
 
 # ---------------------------------------------------------------------------
-# first-run setup wizard — a few questions to configure the model tiers + persona
-# ---------------------------------------------------------------------------
-def setup_wizard() {
-    console = Console();
-    session = make_plain_session();
-    console.print();
-    console.print("[bold magenta]  ◆ Sigil setup[/bold magenta] [dim]· a few quick questions (press Enter to accept a default)[/dim]");
-    console.print();
-    steps = [
-        ["chat_model", "Which model do you TALK to in chat? (use a strong one)", "gpt-4o"],
-        ["frontier_model", "Which model builds new skills? (also strong)", "gpt-4o"],
-        ["small_model", "Which cheap/local model RUNS compiled skills?", "gpt-4o-mini"],
-        ["persona", "In a line, how should your agent describe itself? (optional)", ""]
-    ];
-    for st in steps {
-        key = st[0]; question = st[1]; dflt = st[2];
-        hint = ("  [" + dflt + "]") if dflt else "  (optional)";
-        console.print("  [cyan]" + question + "[/cyan][dim]" + hint + "[/dim]");
-        val = "";
-        try { val = str(prompt_text(session, "  › ")).strip(); }
-        except EOFError as e { console.print(); return; }
-        except KeyboardInterrupt as e { console.print(); return; }
-        if (not val) and dflt { val = dflt; }
-        if val { console.print("[green]  ✓[/green] [dim]" + str(configure(key, val)) + "[/dim]"); _commit_ui(console, "setup"); }
-        console.print();
-    }
-    s = describe_soul();
-    console.print("[bold]  You're set.[/bold] [dim]chat=" + str(s["chat_model"]) + "  frontier=" + str(s["frontier_model"]) + "  small=" + str(s["small_model"]) + "[/dim]");
-    console.print("  [dim]Try:  [/dim][cyan]sigil chat[/cyan][dim]   or   [/dim][cyan]sigil solve \"…\"[/cyan]");
-    console.print();
-}
-
-# ---------------------------------------------------------------------------
 # interactive settings editor
 # ---------------------------------------------------------------------------
 def config_menu() {

@@ -20,6 +20,7 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | [daemon](daemon.md) | Running headless: the background scheduler, one graph, start-at-login |
 | [channels](channels.md) | Connecting Discord / Telegram / WhatsApp / Slack |
 | [memory-and-skills](memory-and-skills.md) | Durable memory and the compiled-skill library |
+| [connections](connections.md) | Connecting a model: ChatGPT sign-in, Claude Code, OpenRouter, Ollama, API keys, and the setup that requires one |
 | [models](models.md) | Model tiers, aliases, fallbacks, and providers |
 | [claude-code](claude-code.md) | Running on your Claude Code CLI, and serving compiled skills to it — setup, costs, limits |
 

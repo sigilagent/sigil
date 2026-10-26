@@ -626,7 +626,9 @@ def _stream_view_on() -> bool {
     if not verbose_mode() { return False; }
     try {
         import from .sigil_claude_cc { set_stream_sink }
+        import from .sigil_chatgpt { set_stream_sink as set_chatgpt_sink }
         set_stream_sink(_gen_sink);
+        set_chatgpt_sink(_gen_sink);
         return True;
     } except Exception as e { return False; }
 }
@@ -634,8 +636,10 @@ def _stream_view_on() -> bool {
 def _stream_view_off() -> None {
     try {
         import from .sigil_claude_cc { set_stream_sink }
+        import from .sigil_chatgpt { set_stream_sink as set_chatgpt_sink }
         _gen_flush();
         set_stream_sink(None);
+        set_chatgpt_sink(None);
     } except Exception as e {}
 }
 
