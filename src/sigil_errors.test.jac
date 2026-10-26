@@ -126,3 +126,13 @@ test "a graph-store failure is not blamed on the model" {
     l = friendly_llm_error("55P03 canceling statement due to lock timeout", "gpt-5");
     assert ("graph store" in l) and ("timed out" not in l), l;
 }
+
+test "a provider Sigil owns keeps its own sentence" {
+    # sigil_chatgpt already names the fix; the generic 429 branch would say
+    # "wait a moment" instead of where the limit is managed.
+    m = friendly_llm_error("litellm.AuthenticationError: chatgpt: your ChatGPT plan's usage limit for Sigil is reached — see https://chatgpt.com/settings/usage LiteLLM Retried: 0 times", "chatgpt/default", "frontier");
+    assert m.startswith("your ChatGPT plan's usage limit for Sigil is reached"), m;
+    assert "chatgpt.com/settings/usage" in m, m;
+    assert "LiteLLM Retried" not in m, m;
+    assert "wait a moment" not in m, m;
+}

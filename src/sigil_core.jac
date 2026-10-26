@@ -21,6 +21,7 @@ import json;
 import logging;
 import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
+import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt }
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
@@ -215,6 +216,13 @@ def model_for(name: str) -> Model {
     # prose, which is all a `claude -p` reply can be. See sigil_claude_cc.
     if is_claude_cc(name) {
         install_claude_cc();
+        return Model(model_name=name, config={"native_tools": False});
+    }
+    # A `chatgpt/...` tier is a Responses request on the user's ChatGPT plan
+    # (sigil_chatgpt). Same contract as claude-cc: tools and the output schema
+    # travel as prose, which keeps every request inside what plan usage accepts.
+    if is_chatgpt(name) {
+        install_chatgpt();
         return Model(model_name=name, config={"native_tools": False});
     }
     return Model(model_name=name);

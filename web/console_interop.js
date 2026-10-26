@@ -107,6 +107,38 @@ export function nowMs() {
   return Date.now();
 }
 
+// A sign-in opens in a new tab. The tab has to be opened inside the click
+// itself: opened after the request that returns the sign-in link, a popup
+// blocker treats it as unprompted and swallows it. So open a blank one first
+// and point it at the link once it arrives.
+export function openBlank() {
+  try {
+    return window.open("", "_blank");
+  } catch (e) {
+    return null;
+  }
+}
+
+export function pointTab(w, url) {
+  if (w && !w.closed) {
+    try {
+      w.location.href = String(url);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function closeTab(w) {
+  try {
+    if (w && !w.closed) w.close();
+  } catch (e) {
+    // already gone
+  }
+}
+
 export function focusId(id) {
   setTimeout(() => {
     const el = document.getElementById(id);

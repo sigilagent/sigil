@@ -170,6 +170,11 @@ def:pub App() -> JsxElement {
         </nav>
 
         <main className="flex-[999_1_560px] min-w-0 flex flex-col">
+            {(<div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-7 py-2.5 border-b border-warn/30 bg-warn/10 text-[13px] text-warn">
+                <span className="font-medium">No model is connected.</span>
+                <span className="text-fg-2">{"Sigil cannot compile or chat until one is" + ((" (" + str(ov.connected.why) + ")") if ov.connected.why else "") + "."}</span>
+                <a href="#/settings/connections" className="ml-auto font-medium text-warn no-underline hover:underline">Connect a model →</a>
+            </div>) if (ov and ov.connected and (not ov.connected.ok) and (not ((page == "settings") and ((len(parts) < 2) or (parts[1] == "connections"))))) else None}
             {if page == "home" {
                 <HomePage ov={ov} go={go} ask={ask} refresh={refresh}/>
             } elif page == "chat" {

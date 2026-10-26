@@ -37,10 +37,14 @@ walker:pub api_console {
     can run with Root entry { report console_endpoint(self.op, self.args); }
 }
 
-# Ops answered by the server process: file work only, never the graph.
+# Ops answered by the server process: file work only, never the graph. The
+# connect_* sign-ins belong here for a second reason too: the browser comes back
+# to a loopback listener, and that listener has to outlive the request that
+# started it, which a per-request child process does not.
 glob LOCAL_OPS: list[str] = [
     "compile_start", "compile_status", "compile_answer", "compile_jobs",
-    "secret_save", "secret_delete"
+    "secret_save", "secret_delete",
+    "connect_start", "connect_poll", "connect_key", "connect_remove"
 ];
 
 def console_endpoint(op: str, args: dict[str, any]) -> any {
@@ -74,6 +78,22 @@ def _local(op: str, a: dict[str, any]) -> any {
     }
     if op == "secret_delete" {
         return secret_delete(str(a.get("name") or ""), str(a.get("env") or ""));
+    }
+    if op == "connect_start" {
+        import from .sigil_connect { connect_start }
+        return connect_start(str(a.get("provider") or ""), bool(a.get("fresh")));
+    }
+    if op == "connect_poll" {
+        import from .sigil_connect { connect_poll }
+        return connect_poll(str(a.get("id") or ""));
+    }
+    if op == "connect_key" {
+        import from .sigil_connect { connect_key }
+        return connect_key(str(a.get("provider") or ""), str(a.get("value") or ""));
+    }
+    if op == "connect_remove" {
+        import from .sigil_connect { disconnect }
+        return disconnect(str(a.get("provider") or ""));
     }
     return {"ok": False, "error": "unknown op '" + op + "'"};
 }
@@ -183,6 +203,13 @@ def console_dispatch(op: str, a: dict[str, any]) -> any {
     }
     if op == "tools" { return tools_view(); }
     if op == "models" { return models_view(); }
+    if op == "connections" { return connections_view(); }
+    if op == "connect_apply" {
+        import from .sigil_connect { apply_tiers }
+        t: dict[str, str] = {};
+        for (k, v) in dict(a.get("tiers") or {}).items() { t[str(k)] = str(v); }
+        return {"ok": True, "said": apply_tiers(t)};
+    }
     if op == "system" { return system_view(); }
     if op == "usage" { return usage(int(a.get("n") or 3000)); }
     if op == "chat_turn" {
@@ -239,6 +266,17 @@ def _midnight() -> float {
     return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1));
 }
 
+def _connected() -> dict[str, any] {
+    # Behind the shell's "no model connected" banner: the frontier and chat
+    # tiers are what compiling and chat need.
+    try {
+        import from .sigil_connect { ready_tiers }
+        rt = ready_tiers();
+        why = str(rt["tiers"]["frontier"]["why"] or rt["tiers"]["chat"]["why"]);
+        return {"ok": bool(rt["ok"]), "why": why};
+    } except Exception as e { return {"ok": True, "why": ""}; }
+}
+
 def overview() -> dict[str, any] {
     import from .sigil_core { describe_soul }
     import from .approvals { approvals_pending }
@@ -262,7 +300,8 @@ def overview() -> dict[str, any] {
         "channels": channel_list(),
         # "will a schedule fire?": the daemon or `sigil cron daemon`, either one
         "daemon": scheduler_running(),
-        "today": today
+        "today": today,
+        "connected": _connected()
     };
 }
 
@@ -665,6 +704,19 @@ def _ollama_models() -> list[str] {
     } except Exception as e { return []; }
 }
 
+def _connected_models() -> list[str] {
+    # What the connected sign-ins and keys offer, for the tier pickers. Ollama's
+    # come from _ollama_models already.
+    try {
+        import from .sigil_connect { connections }
+        out: list[str] = [];
+        for r in connections() {
+            if r["connected"] and (str(r["id"]) != "ollama") { out = out + [str(m) for m in list(r["models"])]; }
+        }
+        return out[:30];
+    } except Exception as e { return []; }
+}
+
 def _configured_tiers() -> dict[str, str] {
     # What each tier is set to on the graph. In claude mode `tiers` reports what
     # they run as instead (claude-cc/...), which is not what a save changes.
@@ -674,6 +726,23 @@ def _configured_tiers() -> dict[str, str] {
             "router": str(soul.router_model or soul.small_model), "chat": str(soul.chat_model or soul.frontier_model)};
 }
 
+def connections_view() -> dict[str, any] {
+    # Every route, whether it is live, whether each tier has one, and what the
+    # tiers could be from what is connected.
+    import from .sigil_connect { ready_tiers, suggest_tiers, tiers_for, how_to, CHATGPT_USAGE_URL }
+    rt = ready_tiers();
+    rows: list[any] = [];
+    per: dict[str, any] = {};
+    for r in list(rt["rows"]) {
+        row = dict(r);
+        row["how"] = how_to(str(r["id"]));
+        rows.append(row);
+        if r["connected"] { per[str(r["id"])] = tiers_for(str(r["id"]), list(rt["rows"])); }
+    }
+    return {"rows": rows, "tiers": rt["tiers"], "ok": rt["ok"], "suggest": suggest_tiers(list(rt["rows"])),
+            "suggest_for": per, "usage_url": CHATGPT_USAGE_URL};
+}
+
 def models_view() -> dict[str, any] {
     import from .sigil_core { models_info }
     tiers = _tier_models();
@@ -681,7 +750,7 @@ def models_view() -> dict[str, any] {
     return {"tiers": tiers, "configured": _configured_tiers(),
             "aliases": dict(mi.get("aliases") or {}), "fallbacks": dict(mi.get("fallbacks") or {}),
             "claude_mode": str(os.environ.get("SIGIL_CLAUDE") or "") == "1",
-            "local": _ollama_models()};
+            "local": _ollama_models() + _connected_models()};
 }
 
 def _project_version() -> dict[str, str] {

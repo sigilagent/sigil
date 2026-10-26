@@ -215,13 +215,16 @@ def _vb_close() -> None {
 }
 
 def _install_stream_view() -> bool {
-    # Only claude-cc can stream today — it is the provider Sigil owns. Other
-    # providers still get the stage view; making them stream means declaring the
-    # compiler's byLLM slots `stream=True`, which changes every slot's return type.
+    # Only the providers Sigil owns can stream today: claude-cc and chatgpt both
+    # hand every delta to a sink on the way past. Other providers still get the
+    # stage view; making them stream means declaring the compiler's byLLM slots
+    # `stream=True`, which changes every slot's return type.
     if _QUIET or (not verbose_mode()) { return False; }
     try {
         import from src.sigil_claude_cc { set_stream_sink }
+        import from src.sigil_chatgpt { set_stream_sink as set_chatgpt_sink }
         set_stream_sink(_stream_sink);
+        set_chatgpt_sink(_stream_sink);
         _VB["on"] = True;
         return True;
     } except Exception as e { return False; }
@@ -695,6 +698,19 @@ with entry:__main__ {
               + _who + ")" + chr(27) + "[0m", file=sys.stderr);
     }
 
+    # A model-using command with no model connected is a first run, not an
+    # error to discover on the first call: on a terminal it goes through setup,
+    # which does not finish without a connection. Piped or scripted, it warns
+    # once and goes on. `--claude` has its own check above.
+    # SIGIL_REQUIRE_CONNECTION=0 turns the gate off.
+    if (cmd in ["chat", "compile", "solve", "relearn", "eval"]) and (not _CLAUDE_MODE) {
+        import from src.sigil_setup { connection_gate }
+        if not connection_gate(_interactive()) {
+            print("xx no model is connected — run `sigil setup` (or `sigil connect <provider>`)", file=sys.stderr);
+            sys.exit(1);
+        }
+    }
+
     if (cmd == "serve") or (cmd == "observatory") {
         # `serve [port]` still runs in the foreground (Ctrl-C to stop) — the
         # subcommands below give it the daemon's lifecycle instead.
@@ -807,6 +823,35 @@ with entry:__main__ {
         if mems {
             print("  memory  :");
             for m in mems { print("    (" + str(m["kind"]) + ", used " + str(m["uses"]) + "x) " + str(m["content"])); }
+        }
+    } elif (cmd == "connect") or (cmd == "connections") or (cmd == "disconnect") {
+        # connect [<provider>] [--new] [--no-browser] [key|model] · connections · disconnect <provider>
+        import from src.sigil_setup { connect_cli, offer_tiers, print_connections, setup_wizard }
+        import from src.sigil_connect { disconnect }
+        import from src.sigil_input { make_plain_session }
+        import from rich.console { Console }
+        _con = Console();
+        _pos = [str(a) for a in argv[1:] if not str(a).startswith("--")];
+        _pid = _pos[0].lower() if _pos else "";
+        if _pid in ["claude", "claude-cc"] { _pid = "claude-code"; }
+        if _pid == "google" { _pid = "gemini"; }
+        if (cmd == "connections") or ((cmd == "connect") and (_pid in ["", "list", "status"]) and not _interactive()) {
+            print_connections(_con);
+        } elif cmd == "connect" and (_pid in ["", "list", "status"]) {
+            # A bare `connect` on a terminal is setup's first step on its own.
+            setup_wizard();
+        } elif cmd == "disconnect" {
+            if not _pid { print("usage: disconnect <provider>   (see `sigil connections`)"); }
+            else {
+                _d = disconnect(_pid);
+                print(("ok  " if _d["ok"] else "--  ") + str(_d["detail"]));
+            }
+        } else {
+            _sess = make_plain_session();
+            _ok = connect_cli(_con, _sess, _pid, "--new" in argv, "--no-browser" not in argv,
+                              _pos[1] if len(_pos) > 1 else "");
+            if _ok and _interactive() { offer_tiers(_con, _sess, _pid); }
+            if not _ok { sys.exit(1); }
         }
     } elif cmd == "configure" {
         key = _arg(argv, 1);
@@ -1677,8 +1722,12 @@ with entry:__main__ {
             else { chat_repl(); }
         } except KeyboardInterrupt { print(); }
     } elif cmd == "setup" {
-        import from src.sigil_chat { setup_wizard }
-        setup_wizard();
+        import from src.sigil_setup { setup_wizard }
+        if not _interactive() {
+            print("setup asks questions, so it needs a terminal. Connect without one:");
+            print("  sigil connect openai <key>      (or anthropic | gemini | zai | openrouter)");
+            print("  sigil connections               what is connected, and which tiers can run");
+        } elif not setup_wizard() { sys.exit(1); }
     } elif cmd == "config" {
         # `config` alone -> interactive editor; `config <key> <value>` -> set one key.
         key = _arg(argv, 1); val = _arg(argv, 2);
@@ -1702,6 +1751,15 @@ with entry:__main__ {
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
         print("  gate <file.agir> [name]             run G4 (compile oracle) + G9-TY (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
+        print("connect a model (no API key needed for the first three)");
+        print("  connect chatgpt [--new]             sign in with ChatGPT in your browser — your ChatGPT plan pays");
+        print("  connect claude-code                 your Claude subscription, through the claude CLI");
+        print("  connect openrouter                  sign in to OpenRouter in your browser — one key, many models");
+        print("  connect ollama [model]              local models on this machine (pulls one if asked)");
+        print("  connect openai|anthropic|gemini|zai [key]   paste a provider key (kept in $SIGIL_HOME/secrets.env)");
+        print("  connections                         what is connected, and whether each tier can run");
+        print("  disconnect <provider>               sign out / forget a key Sigil saved");
+        print("");
         print("claude code (no API key — uses your claude CLI)");
         print("  --claude                            global flag: run EVERY model tier on your Claude Code CLI");
         print("  --claude compile <SKILL.md> --agent   let a Claude Code session author the AG-IR against the oracle");
@@ -1720,7 +1778,7 @@ with entry:__main__ {
         print("  channel connect <name> <kind>       register a channel + its token secret, print next steps");
         print("");
         print("identity & config");
-        print("  setup                               first-run wizard (models & persona)");
+        print("  setup                               first-run wizard: connect a model (required), tiers, persona");
         print("  soul                                show identity, config, skills & memory (all graph state)");
         print("  config [<key> <value>]              interactive settings editor (or set one key)");
         print("  configure <key> <value>             set config on the graph (persona|*_model|workspace|sandbox|verbose|add_ethos|add_channel|auto_eval|eval_threshold|prompt_mode)");
