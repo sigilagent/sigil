@@ -89,3 +89,41 @@ test "a history handed back by the console always opens on a user turn" {
     assert _starts_clean([{"role": "assistant", "content": "x"}]) == [];
     assert _starts_clean([]) == [];
 }
+
+test "connect_model never takes a key in chat; it points at /connect" {
+    import os;
+    old = os.environ.get("ANTHROPIC_API_KEY");
+    if "ANTHROPIC_API_KEY" in os.environ { del os.environ["ANTHROPIC_API_KEY"]; }
+    msg = connect_model("anthropic");
+    if old is not None { os.environ["ANTHROPIC_API_KEY"] = str(old); }
+    assert "/connect anthropic" in msg, msg;
+    assert "Do not ask for the key in chat" in msg, msg;
+}
+
+test "connect_model knows a channel is not a model provider" {
+    msg = connect_model("telegram");
+    assert msg.startswith("no model provider called"), msg;
+}
+
+test "a browser sign-in from a short-lived child points at the Observatory" {
+    # An Observatory request or a channel turn exits with its reply, taking the
+    # sign-in's loopback listener with it.
+    import os;
+    import tempfile;
+    old_home = os.environ.get("SIGIL_HOME");
+    os.environ["SIGIL_HOME"] = tempfile.mkdtemp(prefix="sigil-cm-");
+    os.environ["SIGIL_API_CHILD"] = "1";
+    msg = connect_model("chatgpt");
+    del os.environ["SIGIL_API_CHILD"];
+    if old_home is None { del os.environ["SIGIL_HOME"]; } else { os.environ["SIGIL_HOME"] = str(old_home); }
+    assert "Model providers" in msg, msg;
+    assert "auth.openai.com" not in msg, msg;   # the link is never handed to the model
+}
+
+test "chat's slash commands say connect for models and channel for channels" {
+    import from .sigil_input { COMMANDS }
+    usages = [str(c[0]) for c in COMMANDS];
+    assert "/connect [provider]" in usages;
+    assert "/channel <kind>" in usages;
+    assert "/connections" in usages;
+}

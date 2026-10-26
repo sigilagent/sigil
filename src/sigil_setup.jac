@@ -154,6 +154,13 @@ def connect_cli(console: any, session: any, pid: str, fresh: bool = False, brows
         console.print("[red]  ✗[/red] " + env + " was saved, but the test failed: " + str(r5.get("detail") or r5.get("error") or ""));
         return False;
     }
+    import from .sigil_channels_setup { channel_kinds }
+    if pid in channel_kinds() {
+        # `connect` is for model providers everywhere; a messaging app is a channel.
+        console.print("  " + pid + " is a channel, not a model provider: `sigil channel connect <name> " + pid
+                      + "` (or /channel " + pid + " in chat).");
+        return False;
+    }
     console.print("  [red]no connection called '" + pid + "'[/red] — one of: " + ", ".join([str(p[0]) for p in PROVIDERS]));
     return False;
 }

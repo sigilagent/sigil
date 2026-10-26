@@ -15,7 +15,8 @@ Run one in the foreground when you want to watch it: `sigil channel run <name>`.
 
 ## Guided setup
 
-Ask in chat ("how do I connect Telegram?") — the agent uses `connect_channel` — or use the
+Ask in chat ("how do I connect Telegram?") — the agent uses `connect_channel` — or type
+`/channel telegram` in chat (`/connect` is for model providers), or use the
 CLI:
 
 ```bash
