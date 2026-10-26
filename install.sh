@@ -269,29 +269,46 @@ fi
 # ---- 6. first-run wizard -------------------------------------------------------
 # `curl … | bash` gives this script the pipe as stdin, so questions are read from
 # the terminal itself. No terminal (CI, a provisioning script): no questions.
+#
+# The terminal's own device, not /dev/tty: on macOS, kqueue cannot watch the
+# /dev/tty alias, so `sigil setup` (a prompt_toolkit prompt) reading it sees
+# end-of-input at once and quits before its first question. The device it
+# stands for (/dev/ttys003, /dev/pts/0) works everywhere.
+term_dev() {
+  local t
+  t="$(ps -o tty= -p $$ 2>/dev/null | tr -d ' ' || true)"
+  case "$t" in
+    ""|"?"|"??") echo /dev/tty ;;
+    /*) echo "$t" ;;
+    *) echo "/dev/$t" ;;
+  esac
+}
+TTYDEV="$(term_dev)"
 TTY=""
-if [ "$FRESH" = 1 ] && [ "${SIGIL_WIZARD:-1}" != 0 ] && { : </dev/tty; } 2>/dev/null; then
+if [ "$FRESH" = 1 ] && [ "${SIGIL_WIZARD:-1}" != 0 ] && { : <"$TTYDEV"; } 2>/dev/null; then
   TTY=1
 fi
 ask() {  # ask "question" Y|N  -> 0 for yes
   local a hint="[y/N]"
   [ "$2" = Y ] && hint="[Y/n]"
-  printf '%s??%s %s %s ' "$P" "$D" "$1" "$hint" >/dev/tty
-  read -r a </dev/tty || a=""
+  printf '%s??%s %s %s ' "$P" "$D" "$1" "$hint" >"$TTYDEV"
+  read -r a <"$TTYDEV" || a=""
   case "${a:-$2}" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
 if [ -n "$TTY" ]; then
   # Setup requires a connection and does not finish without one; ^C leaves it
   # for later (`sigil setup`, or the first `sigil` asks again).
-  SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil setup </dev/tty >/dev/tty 2>&1 \
+  SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil setup <"$TTYDEV" >"$TTYDEV" 2>&1 \
     || warn "setup did not finish — run \`sigil setup\` when you are ready."
 fi
 AUTOSTART="${SIGIL_AUTOSTART:-}"
 if [ -z "$AUTOSTART" ] && [ -n "$TTY" ]; then
   if ask "Start Sigil automatically when you log in?" Y; then AUTOSTART=1; else AUTOSTART=0; fi
 fi
+SERVICE=""
 if [ "$AUTOSTART" = 1 ]; then
   if out="$(SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil daemon install 2>&1)"; then
+    SERVICE=1
     info "Sigil starts at login (the scheduler and the Observatory). Undo: sigil daemon uninstall"
   else
     warn "could not add Sigil to login items:"
@@ -306,7 +323,19 @@ if [ "$FRESH" = 1 ]; then
   if [ -z "$START" ]; then
     if [ -n "$TTY" ]; then START=1; else START=0; fi
   fi
-  if [ "$START" = 1 ]; then
+  if [ -n "$SERVICE" ]; then
+    # Installing the login service started it already (launchd RunAtLoad,
+    # systemd --now). A `sigil start` now would race it: neither has written its
+    # pidfile yet, so each would start a second scheduler and Observatory.
+    info "Starting Sigil through its login service…"
+    for _ in $(seq 1 60); do pid_live daemon && break; sleep 1; done
+    if pid_live daemon; then
+      printf '    scheduler   : running (login service)\n    observatory : http://localhost:8199   (still building the web client, ~25s)\n'
+    else
+      warn "the login service has not come up yet; \`sigil daemon status\` and \`sigil daemon logs\` say why."
+    fi
+    STARTED=1
+  elif [ "$START" = 1 ]; then
     info "Starting Sigil…"
     run_sigil start 2>&1 | grep -E '^(scheduler|observatory) +:' | sed 's/^/    /' || true
     STARTED=1
