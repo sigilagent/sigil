@@ -11,7 +11,8 @@ working route under them.
 | ChatGPT | sign-in | a browser link; the user's ChatGPT plan pays (`sigil_chatgpt`) |
 | Claude Code | CLI | the `claude` CLI's own login; the Claude subscription pays (`sigil_claude_cc`) |
 | OpenRouter | sign-in | a browser link that mints a key for Sigil (OAuth PKCE) |
-| Ollama | local | a running Ollama on this machine; nothing to sign in to |
+| Ollama | local | a running Ollama here; `ollama signin` adds its `:cloud` models |
+| Ollama Cloud | key | ollama.com's hosted models over the API, no local Ollama (`ollama-cloud/<model>`) |
 | OpenAI, Anthropic, Gemini, Z.ai | key | a pasted key, kept in $SIGIL_HOME/secrets.env (0600) |
 
 Status checks never spend a model call. The one network probe is the local
@@ -39,7 +40,8 @@ glob PROVIDERS: list[any] = [
     ["chatgpt", "ChatGPT", "signin", "Your ChatGPT plan pays. Sign in with your browser; no API key."],
     ["claude-code", "Claude Code", "cli", "Your Claude subscription pays, through the claude CLI you already use."],
     ["openrouter", "OpenRouter", "signin", "One sign-in, hundreds of models. Sigil gets a key of its own."],
-    ["ollama", "Ollama", "local", "Models on this machine. Free and private; no account."],
+    ["ollama", "Ollama", "local", "Models on this machine, free and private. Signed in, it also runs Ollama's :cloud models."],
+    ["ollama-cloud", "Ollama Cloud API", "key", "Ollama's hosted models over its API, with no local Ollama."],
     ["openai", "OpenAI API", "key", "Pay-as-you-go OpenAI API key."],
     ["anthropic", "Anthropic API", "key", "Pay-as-you-go Anthropic API key."],
     ["gemini", "Google Gemini API", "key", "Pay-as-you-go Gemini API key."],
@@ -52,14 +54,15 @@ glob KEYED: dict[str, any] = {
     "anthropic": ["ANTHROPIC_API_KEY", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5", "https://console.anthropic.com/settings/keys"],
     "gemini": ["GEMINI_API_KEY", "gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash", "https://aistudio.google.com/apikey"],
     "zai": ["ZAI_API_KEY", "zai/glm-4.6", "zai/glm-4.5-air", "https://z.ai/manage-apikey/apikey-list"],
-    "openrouter": ["OPENROUTER_API_KEY", "openrouter/openrouter/auto", "openrouter/openrouter/auto", "https://openrouter.ai/keys"]
+    "openrouter": ["OPENROUTER_API_KEY", "openrouter/openrouter/auto", "openrouter/openrouter/auto", "https://openrouter.ai/keys"],
+    "ollama-cloud": ["OLLAMA_API_KEY", "ollama-cloud/glm-5.3", "ollama-cloud/gpt-oss:20b", "https://ollama.com/settings/keys"]
 };
 
 # Who answers a tier, the order setup prefers them in. Subscriptions first for
 # the frontier (compiling is rare and judgment-heavy); local and cheap first for
 # the small tier, which runs every compiled skill.
-glob FRONTIER_ORDER: list[str] = ["chatgpt", "claude-code", "anthropic", "openai", "openrouter", "gemini", "zai", "ollama"];
-glob SMALL_ORDER: list[str] = ["ollama", "chatgpt", "openai", "anthropic", "gemini", "openrouter", "zai", "claude-code"];
+glob FRONTIER_ORDER: list[str] = ["chatgpt", "claude-code", "anthropic", "openai", "openrouter", "gemini", "zai", "ollama-cloud", "ollama"];
+glob SMALL_ORDER: list[str] = ["ollama", "chatgpt", "openai", "anthropic", "gemini", "openrouter", "zai", "ollama-cloud", "claude-code"];
 
 glob CLAUDE_MODELS: list[str] = ["claude-cc/opus", "claude-cc/sonnet", "claude-cc/haiku"];
 glob OPENROUTER_AUTH: str = "https://openrouter.ai/auth";
@@ -83,6 +86,7 @@ def provider_of(model: str) -> str {
     if not m { return ""; }
     if m.startswith("chatgpt/") { return "chatgpt"; }
     if m.startswith("claude-cc/") { return "claude-code"; }
+    if m.startswith("ollama-cloud/") { return "ollama-cloud"; }
     if m.startswith("ollama") { return "ollama"; }
     if m.startswith("openrouter/") { return "openrouter"; }
     for p in ["openai/", "gpt", "o1", "o3", "o4", "chatgpt-"] { if m.startswith(p) { return "openai"; } }
@@ -120,6 +124,13 @@ def ollama_models() -> list[any] {
         }
         return out;
     } except Exception as e { return []; }
+}
+
+def is_cloud_tag(name: str) -> bool {
+    # A model the local Ollama runs on ollama.com once it is signed in: nothing
+    # to download, so "pulled" is not the test for it.
+    n = str(name or "").lower();
+    return n.endswith(":cloud") or n.endswith("-cloud");
 }
 
 def _billions(s: str) -> float {
@@ -168,7 +179,11 @@ def provider_status(pid: str) -> dict[str, any] {
         ms = ollama_models();
         r["models"] = ["ollama_chat/" + str(m["name"]) for m in ms];
         r["connected"] = len(ms) > 0;
-        if ms { r["detail"] = "running · " + str(len(ms)) + " model" + ("" if len(ms) == 1 else "s"); }
+        nc = len([m for m in ms if is_cloud_tag(str(m["name"]))]);
+        if ms {
+            r["detail"] = "running · " + str(len(ms)) + " model" + ("" if len(ms) == 1 else "s")
+                          + ((" (" + str(nc) + " cloud)") if nc else "");
+        }
         elif _reachable_ollama() { r["detail"] = "running, but no models pulled yet"; }
         elif shutil.which("ollama") { r["detail"] = "installed, not running"; }
         else { r["detail"] = "not installed"; }
@@ -212,7 +227,7 @@ def model_ready(model: str, rows: list[any]) -> dict[str, any] {
     for r in rows {
         if str(r["id"]) == pid {
             if not r["connected"] { return {"ok": False, "provider": pid, "why": provider_label(pid) + ": " + str(r["detail"])}; }
-            if (pid == "ollama") and (str(model) not in list(r["models"])) {
+            if (pid == "ollama") and (str(model) not in list(r["models"])) and (not is_cloud_tag(str(model))) {
                 return {"ok": False, "provider": pid, "why": "Ollama has not pulled " + str(model).split("/", 1)[-1]};
             }
             return {"ok": True, "provider": pid, "why": ""};
@@ -251,6 +266,11 @@ def _pick_ollama(big: bool) -> str {
     # billion parameters at least. The frontier wants the biggest one there is.
     ms = ollama_models();
     if not ms { return ""; }
+    if big {
+        # A signed-in Ollama's cloud models are far stronger than anything that
+        # fits on a laptop: they take the frontier when there is one.
+        for m in ms { if is_cloud_tag(str(m["name"])) { return "ollama_chat/" + str(m["name"]); } }
+    }
     best = "";
     best_b = -1.0;
     for m in ms {
@@ -413,6 +433,16 @@ def ollama_pull(model: str) -> dict[str, any] {
     return {"ok": p.returncode == 0, "detail": ("pulled " + model) if (p.returncode == 0) else ("`ollama pull " + model + "` failed")};
 }
 
+def ollama_signin() -> dict[str, any] {
+    # Ollama's own sign-in, in this terminal: it prints a link that connects this
+    # machine to an ollama.com account, after which `:cloud` models run here.
+    b = shutil.which("ollama");
+    if not b { return {"ok": False, "detail": "install Ollama first: https://ollama.com/download"}; }
+    try { p = subprocess.run([str(b), "signin"]); }
+    except Exception as e { return {"ok": False, "detail": "could not run `ollama signin`: " + str(e)[:160]}; }
+    return {"ok": p.returncode == 0, "detail": "signed in to ollama.com" if (p.returncode == 0) else "`ollama signin` did not finish"};
+}
+
 def disconnect(pid: str) -> dict[str, any] {
     if pid == "chatgpt" { return dict(chatgpt_sign_out()); }
     if pid in KEYED {
@@ -435,7 +465,7 @@ def how_to(pid: str) -> str {
     if pid == "chatgpt" { return "sigil connect chatgpt — opens a ChatGPT sign-in in your browser"; }
     if pid == "openrouter" { return "sigil connect openrouter — opens an OpenRouter sign-in in your browser"; }
     if pid == "claude-code" { return "install Claude Code, then `claude auth login` (or `sigil connect claude-code`)"; }
-    if pid == "ollama" { return "install Ollama (ollama.com/download), then `ollama pull qwen3:8b`"; }
+    if pid == "ollama" { return "install Ollama (ollama.com/download), then `ollama pull qwen3:8b`, or `ollama signin` for :cloud models"; }
     if pid in KEYED { return "sigil connect " + pid + " — paste a key from " + str(KEYED[pid][3]); }
     return "";
 }

@@ -49,7 +49,7 @@ glob SECTION_KEYS: list[str] = ["connections", "agent", "keys", "models", "behav
 glob CONN_GROUPS: list[any] = [
     ["Sign in with your browser", ["chatgpt", "openrouter"]],
     ["Already on this machine", ["claude-code", "ollama"]],
-    ["API keys", ["openai", "anthropic", "gemini", "zai"]]
+    ["API keys", ["openai", "anthropic", "gemini", "zai", "ollama-cloud"]]
 ];
 
 # [tier, label, config key, what the tier does]
@@ -65,6 +65,7 @@ glob TIERS: list[any] = [
 glob PROVIDERS: list[any] = [
     ["chatgpt/", "ChatGPT", ""],
     ["claude-cc/", "Claude Code", ""],
+    ["ollama-cloud/", "Ollama Cloud", "OLLAMA_API_KEY"],
     ["ollama", "Ollama", ""],
     ["openrouter/", "OpenRouter", "OPENROUTER_API_KEY"],
     ["openai/", "OpenAI", "OPENAI_API_KEY"],
@@ -849,6 +850,7 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
             return <span className="text-xs text-muted">Your ChatGPT plan, no key. <a href="#/settings/connections" className={LINK + " no-underline"}>Check the sign-in</a></span>;
         }
         if name == "Ollama" {
+            if target.endswith(":cloud") or target.endswith("-cloud") { return <span className="text-xs text-muted">Ollama cloud model, through this machine's signed-in Ollama</span>; }
             if target in local { return <span className="text-xs text-ok">✓ local, pulled in Ollama</span>; }
             if local { return <span className="text-xs text-warn">local, but not pulled in this Ollama</span>; }
             return <span className="text-xs text-warn">local; no Ollama models found on this machine</span>;

@@ -14,7 +14,7 @@ import getpass;
 import from .sigil_connect {
     PROVIDERS, KEYED, connections, provider_status, provider_label, suggest_tiers, tiers_for,
     apply_tiers, ready_tiers, model_ready, connect_chatgpt, connect_openrouter, connect_key,
-    claude_login, ollama_pull, disconnect, how_to, gate_on, CHATGPT_USAGE_URL
+    claude_login, ollama_pull, ollama_signin, is_cloud_tag, disconnect, how_to, gate_on, CHATGPT_USAGE_URL
 }
 import from .sigil_core { describe_soul, configure }
 import from .sigil_runtime { commit_now }
@@ -125,8 +125,17 @@ def connect_cli(console: any, session: any, pid: str, fresh: bool = False, brows
             console.print("[red]  ✗[/red] Ollama is installed but not running: start the Ollama app (or `ollama serve`), then run this again.");
             return False;
         }
+        if want.lower() in ["signin", "cloud"] {
+            r6: dict[str, any] = ollama_signin();
+            console.print(("[green]  ✓[/green] " if r6["ok"] else "[red]  ✗[/red] ") + str(r6["detail"])
+                          + ("  [dim]then e.g. `sigil connect ollama glm-5.3:cloud`[/dim]" if r6["ok"] else ""));
+            return bool(r6["ok"]) or bool(st2["connected"]);
+        }
+        if is_cloud_tag(want) {
+            console.print("  [dim]" + want + " runs on ollama.com through this Ollama; sign it in first if you have not (`ollama signin`).[/dim]");
+        }
         m = want if want else "qwen3:8b";
-        if not _yes(session, "  Pull " + m + " into Ollama now (a few GB)?") { return bool(st2["connected"]); }
+        if not _yes(session, "  Pull " + m + " into Ollama now" + ("" if is_cloud_tag(m) else " (a few GB)") + "?") { return bool(st2["connected"]); }
         r4: dict[str, any] = ollama_pull(m);
         console.print(("[green]  ✓[/green] " if r4["ok"] else "[red]  ✗[/red] ") + str(r4["detail"]));
         return bool(r4["ok"]);

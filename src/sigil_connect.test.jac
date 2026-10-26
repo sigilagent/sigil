@@ -13,6 +13,8 @@ test "provider_of: each prefix lands on its route" {
     assert provider_of("chatgpt/gpt-x") == "chatgpt";
     assert provider_of("claude-cc/opus") == "claude-code";
     assert provider_of("ollama_chat/qwen3:8b") == "ollama";
+    assert provider_of("ollama_chat/glm-5.3:cloud") == "ollama";        # through the signed-in local daemon
+    assert provider_of("ollama-cloud/glm-5.3") == "ollama-cloud";       # ollama.com's API directly
     assert provider_of("openrouter/openrouter/auto") == "openrouter";
     assert provider_of("gpt-5") == "openai";
     assert provider_of("chatgpt-4o-latest") == "openai";   # the API model, not the plan
@@ -104,4 +106,22 @@ test "every route has a status row and a way to connect it" {
         assert str(_row(str(p[0]))["id"]) == str(p[0]);
     }
     for k in KEYED.keys() { assert str(KEYED[k][0]).endswith("_API_KEY"), str(k); }
+}
+
+test "is_cloud_tag: Ollama's cloud suffixes" {
+    assert is_cloud_tag("ollama_chat/glm-5.3:cloud");
+    assert is_cloud_tag("gpt-oss:120b-cloud");
+    assert not is_cloud_tag("ollama_chat/qwen3:8b");
+}
+
+test "model_ready: a :cloud model through a running Ollama needs no pull" {
+    rows = [_fake("ollama", True, ["ollama_chat/qwen3:8b"])];
+    assert model_ready("ollama_chat/glm-5.3:cloud", rows)["ok"];
+    assert not model_ready("ollama_chat/glm-5.3:cloud", [_fake("ollama", False, [])])["ok"];
+}
+
+test "suggest_tiers: the Ollama Cloud API alone covers every tier" {
+    t = suggest_tiers([_fake("ollama-cloud", True, [])]);
+    assert t["frontier"].startswith("ollama-cloud/");
+    assert t["small"].startswith("ollama-cloud/");
 }

@@ -209,6 +209,9 @@ def latest_by_sig(compiled_lib: list[TaskGraph]) -> list[TaskGraph] {
 # from graph config (so the model tiers, ethos, and contract are all graph state,
 # not env or files). Mirrors how a compiled agent rebinds `llm` in run().
 # ---------------------------------------------------------------------------
+glob OLLAMA_CLOUD_PREFIX: str = "ollama-cloud/";
+glob OLLAMA_CLOUD_BASE: str = "https://ollama.com";
+
 def model_for(name: str) -> Model {
     # A `claude-cc/...` tier is answered by the local Claude Code CLI instead of a
     # provider API: register the litellm handler on first use, and declare no
@@ -224,6 +227,14 @@ def model_for(name: str) -> Model {
     if is_chatgpt(name) {
         install_chatgpt();
         return Model(model_name=name, config={"native_tools": False});
+    }
+    # `ollama-cloud/<model>` is Ollama's hosted API, with no local Ollama. The
+    # base goes on this Model alone: litellm reads OLLAMA_API_BASE for EVERY
+    # ollama call, so setting it in the environment would send the local tiers
+    # to the cloud too.
+    if name.startswith(OLLAMA_CLOUD_PREFIX) {
+        return Model(model_name="ollama_chat/" + name[len(OLLAMA_CLOUD_PREFIX):], api_base=OLLAMA_CLOUD_BASE,
+                     api_key=str(os.getenv("OLLAMA_API_KEY") or ""));
     }
     return Model(model_name=name);
 }

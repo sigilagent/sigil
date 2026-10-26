@@ -30,6 +30,8 @@ Model names are litellm strings (via byLLM), so every provider litellm supports 
 | Claude Code CLI | `claude-cc/opus` | `claude-code`: your Claude Code login, no key |
 | OpenRouter | `openrouter/openrouter/auto` | `openrouter`: browser sign-in, Sigil gets a key |
 | Ollama (local) | `ollama_chat/qwen3:8b` | `ollama`: none, local daemon |
+| Ollama cloud models | `ollama_chat/glm-5.3:cloud` | `ollama signin`: the local daemon, signed in |
+| Ollama Cloud API | `ollama-cloud/glm-5.3` | `ollama-cloud`: `OLLAMA_API_KEY`, no local Ollama |
 | OpenAI | `openai/gpt-5`, `gpt-4o-mini` | `openai`: `OPENAI_API_KEY` |
 | Anthropic | `anthropic/claude-sonnet-5-5` | `anthropic`: `ANTHROPIC_API_KEY` |
 | Google | `gemini/gemini-2.5-flash` | `gemini`: `GEMINI_API_KEY` |

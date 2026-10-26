@@ -22,7 +22,8 @@ sigil disconnect <route> # sign out, or forget a key Sigil saved
 | ChatGPT | `chatgpt` | Sign in with your browser | Your ChatGPT plan |
 | Claude Code | `claude-code` | The `claude` CLI's own sign-in | Your Claude subscription |
 | OpenRouter | `openrouter` | Sign in with your browser; Sigil gets its own key | Your OpenRouter credits |
-| Ollama | `ollama [model]` | A local Ollama; nothing to sign in to | Nobody: it runs on your machine |
+| Ollama | `ollama [model]` | A local Ollama; `ollama signin` adds its `:cloud` models | Nobody locally; your Ollama plan for `:cloud` |
+| Ollama Cloud API | `ollama-cloud` | Paste an ollama.com API key; no local Ollama needed | Your Ollama plan |
 | OpenAI, Anthropic, Gemini, Z.ai | `openai` · `anthropic` · `gemini` · `zai` | Paste an API key | That provider's API billing |
 
 The first three need no API key.
@@ -108,6 +109,36 @@ sigil connect ollama qwen3:14b   # pull a specific model
 Sigil finds Ollama at `127.0.0.1:11434` (or `$OLLAMA_HOST`) and offers every
 model you have pulled. For the small tier, setup picks a model of at least 7B
 parameters, since smaller ones struggle to follow a compiled procedure.
+
+**Ollama's cloud models, through your local Ollama.** Sign the local Ollama in to
+ollama.com, and models with a `:cloud` tag run on Ollama's servers through the
+same local API:
+
+```bash
+sigil connect ollama signin            # runs `ollama signin`, which prints a link
+sigil connect ollama glm-5.3:cloud     # make it show up in Ollama's model list
+```
+
+The tier name is the ordinary local one (`ollama_chat/glm-5.3:cloud`). A `:cloud`
+model needs no download, so Sigil does not require it to be pulled before a tier
+can use it. When one is present, setup prefers it for the frontier tier, since it
+is far stronger than anything that fits on a laptop.
+
+### Ollama Cloud API: no local Ollama
+
+```bash
+sigil connect ollama-cloud             # paste a key from ollama.com/settings/keys
+```
+
+For a machine without Ollama installed, such as a server or CI. Tier names are
+`ollama-cloud/<model>`, using the names on ollama.com's model list (`glm-5.3`,
+`gpt-oss:120b`; no `:cloud` suffix). Setup suggests `ollama-cloud/glm-5.3` for the
+frontier and `ollama-cloud/gpt-oss:20b` for the small tier. The key is kept as
+`OLLAMA_API_KEY` in the secrets file.
+
+Sigil gives the `https://ollama.com` base to these tiers only. It deliberately
+does not set `OLLAMA_API_BASE`, because litellm applies that variable to every
+Ollama call and would send your local tiers to the cloud as well.
 
 ### API keys
 
@@ -200,6 +231,7 @@ ejected program a normal provider name (`SIGIL_MODEL=openai/gpt-5`,
 | `the ChatGPT sign-in has expired` | `sigil connect chatgpt`: one click, since the registration is kept |
 | `that model is not offered to this ChatGPT account` | `sigil connections` lists the account's models |
 | `Ollama has not pulled …` | `sigil connect ollama <model>` |
+| A `:cloud` model fails with an auth error | The local Ollama is not signed in: `sigil connect ollama signin` |
 | A tier shows ✗ in `sigil connections` | The reason is on the same line. `sigil setup` re-suggests tiers from what is connected |
 
 ## Environment
@@ -209,6 +241,7 @@ ejected program a normal provider name (`SIGIL_MODEL=openai/gpt-5`,
 | `SIGIL_REQUIRE_CONNECTION` | on | `0` turns off the first-run gate |
 | `SIGIL_CHATGPT_EFFORT` | unset | reasoning effort sent with every ChatGPT call |
 | `OLLAMA_HOST` | `127.0.0.1:11434` | where Sigil looks for Ollama |
+| `OLLAMA_API_KEY` | unset | the Ollama Cloud API key (`sigil connect ollama-cloud` saves it) |
 | `SIGIL_CLAUDE_BIN` | `claude` | the Claude Code binary |
 
 ## See also

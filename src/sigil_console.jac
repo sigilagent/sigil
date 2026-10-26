@@ -316,7 +316,8 @@ glob MODEL_KEYS: list[any] = [
     ["Anthropic", "ANTHROPIC_API_KEY", ["claude-", "anthropic/"]],
     ["Google Gemini", "GOOGLE_API_KEY", ["gemini", "google/"]],
     ["Z.ai", "ZAI_API_KEY", ["zai/", "glm"]],
-    ["OpenRouter", "OPENROUTER_API_KEY", ["openrouter/"]]
+    ["OpenRouter", "OPENROUTER_API_KEY", ["openrouter/"]],
+    ["Ollama Cloud", "OLLAMA_API_KEY", ["ollama-cloud/"]]
 ];
 
 # [label, env var, what it is for] in the order `web_search` tries them.
@@ -346,6 +347,7 @@ def _tier_models() -> dict[str, str] {
 
 def _needs(model: str, prefixes: list[any]) -> bool {
     m = str(model or "").lower();
+    if m.startswith("ollama-cloud/") { return "ollama-cloud/" in [str(p) for p in prefixes]; }
     if m.startswith("claude-cc/") or m.startswith("ollama") { return False; }
     for p in prefixes { if m.startswith(str(p)) { return True; } }
     return False;
@@ -363,7 +365,8 @@ def keys_overview() -> dict[str, any] {
         row["used_by"] = [t for t in ["frontier", "small", "router", "chat"] if _needs(tiers[t], list(mk[2]))];
         models.append(row);
     }
-    local_tiers = [t for t in ["frontier", "small", "router", "chat"] if str(tiers[t]).lower().startswith("ollama")];
+    local_tiers = [t for t in ["frontier", "small", "router", "chat"]
+                   if str(tiers[t]).lower().startswith("ollama") and not str(tiers[t]).lower().startswith("ollama-cloud/")];
     cc_tiers = [t for t in ["frontier", "small", "router", "chat"] if str(tiers[t]).lower().startswith("claude-cc/")];
 
     search: list[any] = [];
