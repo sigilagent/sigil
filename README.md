@@ -59,7 +59,13 @@ macOS and Linux. Both land the same release in `~/.sigil/app`: the npm package i
 launcher whose first run performs that install, pinned to the package's version, so
 `npm update -g @sigilagent/sigil` is how an npm install moves to the next release.
 
-Then connect a model. Setup will not finish without one, and three of the routes
+The installer compiles Sigil once, so the first command starts warm. On a fresh
+install at a terminal it then connects a model (`sigil setup`), asks whether Sigil
+should start when you log in, and starts it: the scheduler plus the Observatory
+at http://localhost:8199. `sigil update` recompiles and restarts whatever was
+running.
+
+Connecting a model is required: setup will not finish without one, and three of the routes
 need no API key: sign in with ChatGPT and your ChatGPT plan pays; use the Claude
 Code CLI you already have; or run models locally with Ollama. OpenRouter is a
 browser sign-in too, and pasting an OpenAI, Anthropic, Gemini or Z.ai key works as

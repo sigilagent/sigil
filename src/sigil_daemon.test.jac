@@ -143,3 +143,23 @@ test "work the daemon fired never starts services of its own" {
     assert r["reason"] == "internal child";
     if prev { os.environ["SIGIL_CHILD"] = prev; } else { del os.environ["SIGIL_CHILD"]; }
 }
+
+test "the login service brings the Observatory up and carries PATH and jac" {
+    # A login service starts with a bare PATH: without these the jac in
+    # ~/.local/bin and the CLIs a tier drives (claude, ollama) are not found.
+    old = os.environ.get("PATH");
+    os.environ["PATH"] = "/opt/tools/bin:/usr/bin:/bin";
+    plist = _plist_body(30);
+    unit = _unit_body(30);
+    if old is None { del os.environ["PATH"]; } else { os.environ["PATH"] = str(old); }
+    assert "<key>EnvironmentVariables</key>" in plist;
+    assert "<key>SIGIL_SERVICE_SERVE</key><string>1</string>" in plist;
+    assert "<key>PATH</key><string>/opt/tools/bin:/usr/bin:/bin</string>" in plist;
+    assert ("<key>SIGIL_JAC</key><string>" + _jac_bin() + "</string>") in plist;
+    assert "Environment=\"SIGIL_SERVICE_SERVE=1\"" in unit;
+    assert "Environment=\"PATH=/opt/tools/bin:/usr/bin:/bin\"" in unit;
+}
+
+test "plist values are escaped" {
+    assert _xml("a&b<c>") == "a&amp;b&lt;c&gt;";
+}

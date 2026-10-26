@@ -109,6 +109,22 @@ To let background work run unattended, allowlist what it needs
 Both pin the working directory to the project and append to
 `$SIGIL_HOME/log/daemon.log`. `sigil daemon uninstall` unloads and removes them.
 
+The service is how Sigil comes back after a reboot, so it brings back all of it: it
+sets `SIGIL_SERVICE_SERVE=1`, and a daemon started that way also starts the
+Observatory (a deliberate `sigil serve stop` still keeps it down).
+`sigil daemon start` by hand starts the scheduler alone, as before.
+
+A login service starts with a bare `PATH`, which finds neither jac in
+`~/.local/bin` nor the CLIs a model tier or a job may drive (`claude`, `ollama`
+under nvm or Homebrew). So the unit records the `PATH` of the shell that ran
+`sigil daemon install`, the jac binary (`SIGIL_JAC`), and `SIGIL_HOME` when it is
+set. If you install a new CLI later and the background work needs it, re-run
+`sigil daemon install` from a shell that finds it.
+
+The installer offers to install the service: on a fresh install at a terminal it
+asks "Start Sigil automatically when you log in?" (`SIGIL_AUTOSTART=1` or `0`
+answers in advance).
+
 State lives under `$SIGIL_HOME` (default `~/.sigil`): `run/daemon.pid`,
 `run/daemon.json`, `log/daemon.log`.
 

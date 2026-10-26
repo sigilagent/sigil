@@ -364,7 +364,9 @@ case "${SIGIL_PATH_CHECK:-1}:$ORIG_PATH:" in
   *) warn "add the launcher to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 
-if [ -n "$STARTED" ]; then
+if [ "$FRESH" = 0 ]; then
+  printf '  Updated to %s. Your graph, skills and settings are where they were.\n\n' "$REF"
+elif [ -n "$STARTED" ]; then
   cat <<'EOF'
   Sigil is running.
     sigil                              # chat with your agent
