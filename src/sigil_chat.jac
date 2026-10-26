@@ -30,7 +30,7 @@ import from .chat_agent { chat_turn, chat_reset, set_token_sink }
 import from .cron { cron_list }
 import from .sigil_workspace { set_trace_sink, set_approver, workspace_info }
 import from .sigil_runtime { commit_now }
-import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap }
+import from .sigil_channels_setup { channels_overview, channel_setup_guide, channel_bootstrap, channel_kinds }
 import from .sigil_docs { list_docs, read_doc }
 import from .sigil_input { COMMANDS, make_session, make_plain_session, prompt_text, set_toolbar }
 import from rich.console { Console }
@@ -181,17 +181,51 @@ def _show_channels(console: any) {
         for c in configured { t.add_row(str(c["name"]), str(c["kind"]), ("on" if c["enabled"] else "off"), str(c["messages"])); }
         console.print(t);
     } else {
-        console.print("  [dim](none configured — /connect <kind> for setup steps)[/dim]");
+        console.print("  [dim](none configured — /channel <kind> for setup steps)[/dim]");
     }
     console.print();
 }
 
-def _show_connect(console: any, kind: str) {
-    if not kind { console.print("[dim]  usage: /connect <discord|telegram|whatsapp|slack>[/dim]"); return; }
+def _show_channel_guide(console: any, kind: str) {
+    if not kind { console.print("[dim]  usage: /channel <discord|telegram|whatsapp|slack>[/dim]"); return; }
     console.print();
     console.print(Panel(Text(channel_setup_guide(kind)), title="[dim]connect " + kind + "[/dim]",
                         title_align="left", border_style="grey37", padding=(0, 1)));
     console.print();
+}
+
+def connect_slash(console: any, rest: str) -> str {
+    # `/connect [provider]`: the same flow as `sigil connect`, so chat and the CLI
+    # mean one thing by "connect": a model provider. Channels are `/channel <kind>`.
+    # Returns one line saying what happened (the full-screen chat shows it after
+    # handing the terminal back).
+    import from .sigil_setup { connect_cli, offer_tiers, print_connections }
+    args = [a for a in rest.split() if a];
+    pid = str(args[0]).lower() if args else "";
+    if pid in ["claude", "claude-cc"] { pid = "claude-code"; }
+    if pid == "google" { pid = "gemini"; }
+    if pid in channel_kinds() {
+        # `/connect discord` used to be the channel guide; say where it went.
+        console.print("[dim]  channels moved to /channel " + pid + " — /connect is for model providers now[/dim]");
+        _show_channel_guide(console, pid);
+        return "";
+    }
+    if not pid {
+        console.print();
+        print_connections(console);
+        console.print("  [dim]/connect <provider> connects one: chatgpt · claude-code · openrouter · ollama · ollama-cloud · openai · anthropic · gemini · zai[/dim]");
+        console.print();
+        return "";
+    }
+    session = make_plain_session();
+    rest_args = [str(a) for a in args[1:] if not str(a).startswith("--")];
+    ok = False;
+    try {
+        ok = connect_cli(console, session, pid, "--new" in args, "--no-browser" not in args,
+                         rest_args[0] if rest_args else "");
+        if ok { offer_tiers(console, session, pid); }
+    } except KeyboardInterrupt { console.print("  [dim]cancelled[/dim]"); return "cancelled"; }
+    return (pid + " connected") if ok else (pid + " not connected");
 }
 
 def _show_docs(console: any, topic: str) {
@@ -503,7 +537,14 @@ def _handle_slash(console: any, cmd: str) -> bool {
     elif verb == "/workspace" { _show_workspace(console); }
     elif verb == "/cron" { _show_cron(console); }
     elif verb == "/channels" { _show_channels(console); }
-    elif verb == "/connect" { _show_connect(console, rest); }
+    elif verb == "/channel" { _show_channel_guide(console, rest); }
+    elif verb == "/connect" { connect_slash(console, rest); _sync_toolbar(); }
+    elif verb == "/connections" {
+        import from .sigil_setup { print_connections }
+        console.print();
+        print_connections(console);
+        console.print();
+    }
     elif verb == "/docs" { _show_docs(console, rest); }
     elif verb in ["/skills", "/library"] { _show_library(console); }
     elif verb == "/clear" { console.clear(); }

@@ -677,7 +677,8 @@ glob TOOL_GROUPS: list[any] = [
     ["Memory", ["remember_fact", "recall_memory"]],
     ["Skills", ["sigil_compile", "learn_skill", "list_skills", "use_skill"]],
     ["Channels and MCP", ["mcp_call", "send_message", "connect_channel", "setup_channel"]],
-    ["Self-config", ["cfg_set_model", "cfg_set_persona", "cfg_set_prompt_mode"]],
+    ["Self-config", ["model_connections", "connect_model", "use_model_provider",
+                     "cfg_set_model", "cfg_set_persona", "cfg_set_prompt_mode"]],
     ["Docs and sub-agents", ["doc_index", "read_docs", "spawn_subagent", "spawn_parallel"]]
 ];
 

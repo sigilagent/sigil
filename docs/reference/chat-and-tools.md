@@ -111,6 +111,11 @@ delegates one.
 
 ### Channels and external
 
+`model_connections()`, `connect_model(provider)` and `use_model_provider(provider)` for
+model providers: what is connected, starting a browser sign-in, and pointing the tiers
+at one. `connect_model` never takes an API key: a key typed into chat would reach the
+model and the transcript, so it sends you to `/connect <provider>`, which asks without
+echoing (see [connections](connections.md)).
 `connect_channel(kind)` and `setup_channel(name, kind)` for messaging setup (see
 [channels](channels.md)), `send_message(channel, peer, text)`, and
 `mcp_call(name, args_json)` for registered MCP servers.
@@ -124,7 +129,7 @@ itself.
 ## Slash commands (in the REPL)
 
 `/help` · `/soul` · `/config` · `/tools` · `/workspace` · `/sandbox <mode>` ·
-`/cron` · `/channels` · `/connect <kind>` · `/skills` · `/docs [topic]` ·
+`/cron` · `/connect [provider]` · `/connections` · `/channels` · `/channel <kind>` · `/skills` · `/docs [topic]` ·
 `/model <tier> <name>` · `/remember <fact>` · `/recall <query>` · `/copy` ·
 `/reset` · `/clear` · `/exit`.
 
