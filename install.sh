@@ -10,6 +10,11 @@
 #      installing that native `jac` binary into ~/.local/bin if yours differs
 #   3. provisions the runtime deps (PyYAML + the LLM runtime) into the project
 #   4. drops a `sigil` launcher onto your PATH  (~/.local/bin, override $SIGIL_BIN_DIR)
+#   5. compiles Sigil once, where it will run, so the first command starts warm
+#   6. on a fresh install at a terminal: connects a model (`sigil setup`) and asks
+#      whether Sigil should start when you log in
+#   7. starts Sigil (the scheduler and the Observatory); an update restarts
+#      whichever of them was already running, so they pick up the new code
 #
 # Nothing here needs root. Re-running is safe: it updates an existing install.
 #
@@ -21,6 +26,11 @@
 #   SIGIL_REF      branch / tag / commit       (default: main in the repo copy;
 #                  a release asset is rewritten to pin its own tag — see below)
 #   JAC_VERSION    the jac to install          (default: the fetched tree's pin)
+#   SIGIL_PRECOMPILE=0  skip step 5 (the first command compiles instead)
+#   SIGIL_WIZARD=0      skip step 6's questions (also skipped with no terminal)
+#   SIGIL_AUTOSTART=1|0 answer "start at login?" in advance, with or without a terminal
+#   SIGIL_START=1|0     start Sigil at the end (default: 1 at a terminal, 0 otherwise)
+#   SIGIL_STATE_HOME    Sigil's state dir, when it is not ~/.sigil (the npm launcher sets it)
 
 set -euo pipefail
 
@@ -49,6 +59,19 @@ die()  { printf '%sxx%s %s\n' "$R" "$D" "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 printf '\n%s  ◆ Sigil installer%s\n\n' "$P" "$D"
+
+# A fresh install gets the wizard; an update (`sigil update` re-runs this script)
+# gets none of it, and restarts what was running instead. Both facts have to be
+# read before step 1 replaces the tree.
+FRESH=1
+[ -f "$SIGIL_HOME/src/main.jac" ] && FRESH=0
+STATE_DIR="${SIGIL_STATE_HOME:-$HOME/.sigil}"
+pid_live() { local p; p="$(cat "$STATE_DIR/run/$1.pid" 2>/dev/null || true)"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+WAS_DAEMON=0; WAS_SERVE=0
+if [ "$FRESH" = 0 ]; then
+  if pid_live daemon; then WAS_DAEMON=1; fi
+  if pid_live observatory; then WAS_SERVE=1; fi
+fi
 
 # ---- 1. fetch Sigil source ---------------------------------------------------
 info "Fetching Sigil ($REF) → $SIGIL_HOME"
@@ -202,6 +225,134 @@ EOF
 chmod +x "$BIN_DIR/sigil"
 chmod +x "$SIGIL_HOME/sigil" 2>/dev/null || true
 
+# Run the launcher just installed. In this script SIGIL_HOME is the APP dir; to
+# Sigil itself SIGIL_HOME is the STATE dir (~/.sigil). Hand Sigil the second
+# meaning, never the first, or its graph and logs would land inside the app.
+run_sigil() {
+  if [ -n "${SIGIL_STATE_HOME:-}" ]; then
+    env SIGIL_HOME="$SIGIL_STATE_HOME" "$BIN_DIR/sigil" "$@"
+  else
+    env -u SIGIL_HOME "$BIN_DIR/sigil" "$@"
+  fi
+}
+
+# ---- 5. compile once, where it will run ---------------------------------------
+# jac compiles a program the first time it runs it, and caches the result keyed
+# to the program's absolute path, so this is the one place it can happen ahead
+# of time: the path is final now. Without it, the user's first command printed
+# a page of "Compiling server modules…" and took a minute or more.
+if [ "${SIGIL_PRECOMPILE:-1}" != 0 ]; then
+  mkdir -p "$STATE_DIR/log"
+  clog="$STATE_DIR/log/install-compile.log"
+  info "Compiling Sigil (once; a minute or two)…"
+  t0="$(date +%s)"
+  # `local help`, not `help`: the launcher answers a bare `help` itself, in bash,
+  # without ever starting jac — and starting jac on main.jac is the whole point.
+  ( SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil local help ) >"$clog" 2>&1 &
+  cpid=$!
+  if [ -t 1 ]; then
+    while kill -0 "$cpid" 2>/dev/null; do
+      printf '\r   %ss ' "$(( $(date +%s) - t0 ))"
+      sleep 1
+    done
+    printf '\r'
+  fi
+  if wait "$cpid" && grep -q "the skill compiler" "$clog"; then
+    info "Compiled in $(( $(date +%s) - t0 ))s; later runs start from the cache."
+  else
+    warn "the precompile did not finish; Sigil will compile on its first run instead."
+    warn "  log: $clog"
+    tail -5 "$clog" | sed 's/^/    /' >&2
+  fi
+fi
+
+# ---- 6. first-run wizard -------------------------------------------------------
+# `curl … | bash` gives this script the pipe as stdin, so questions are read from
+# the terminal itself. No terminal (CI, a provisioning script): no questions.
+#
+# The terminal's own device, not /dev/tty: on macOS, kqueue cannot watch the
+# /dev/tty alias, so `sigil setup` (a prompt_toolkit prompt) reading it sees
+# end-of-input at once and quits before its first question. The device it
+# stands for (/dev/ttys003, /dev/pts/0) works everywhere.
+term_dev() {
+  local t
+  t="$(ps -o tty= -p $$ 2>/dev/null | tr -d ' ' || true)"
+  case "$t" in
+    ""|"?"|"??") echo /dev/tty ;;
+    /*) echo "$t" ;;
+    *) echo "/dev/$t" ;;
+  esac
+}
+TTYDEV="$(term_dev)"
+TTY=""
+if [ "$FRESH" = 1 ] && [ "${SIGIL_WIZARD:-1}" != 0 ] && { : <"$TTYDEV"; } 2>/dev/null; then
+  TTY=1
+fi
+ask() {  # ask "question" Y|N  -> 0 for yes
+  local a hint="[y/N]"
+  [ "$2" = Y ] && hint="[Y/n]"
+  printf '%s??%s %s %s ' "$P" "$D" "$1" "$hint" >"$TTYDEV"
+  read -r a <"$TTYDEV" || a=""
+  case "${a:-$2}" in [Yy]*) return 0 ;; *) return 1 ;; esac
+}
+if [ -n "$TTY" ]; then
+  # Setup requires a connection and does not finish without one; ^C leaves it
+  # for later (`sigil setup`, or the first `sigil` asks again).
+  SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil setup <"$TTYDEV" >"$TTYDEV" 2>&1 \
+    || warn "setup did not finish — run \`sigil setup\` when you are ready."
+fi
+AUTOSTART="${SIGIL_AUTOSTART:-}"
+if [ -z "$AUTOSTART" ] && [ -n "$TTY" ]; then
+  if ask "Start Sigil automatically when you log in?" Y; then AUTOSTART=1; else AUTOSTART=0; fi
+fi
+SERVICE=""
+if [ "$AUTOSTART" = 1 ]; then
+  if out="$(SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 run_sigil daemon install 2>&1)"; then
+    SERVICE=1
+    info "Sigil starts at login (the scheduler and the Observatory). Undo: sigil daemon uninstall"
+  else
+    warn "could not add Sigil to login items:"
+    printf '%s\n' "$out" | sed 's/^/    /' >&2
+  fi
+fi
+
+# ---- 7. start it ---------------------------------------------------------------
+STARTED=""
+if [ "$FRESH" = 1 ]; then
+  START="${SIGIL_START:-}"
+  if [ -z "$START" ]; then
+    if [ -n "$TTY" ]; then START=1; else START=0; fi
+  fi
+  if [ -n "$SERVICE" ]; then
+    # Installing the login service started it already (launchd RunAtLoad,
+    # systemd --now). A `sigil start` now would race it: neither has written its
+    # pidfile yet, so each would start a second scheduler and Observatory.
+    info "Starting Sigil through its login service…"
+    for _ in $(seq 1 60); do pid_live daemon && break; sleep 1; done
+    if pid_live daemon; then
+      printf '    scheduler   : running (login service)\n    observatory : http://localhost:8199   (still building the web client, ~25s)\n'
+    else
+      warn "the login service has not come up yet; \`sigil daemon status\` and \`sigil daemon logs\` say why."
+    fi
+    STARTED=1
+  elif [ "$START" = 1 ]; then
+    info "Starting Sigil…"
+    run_sigil start 2>&1 | grep -E '^(scheduler|observatory) +:' | sed 's/^/    /' || true
+    STARTED=1
+  fi
+else
+  # An update replaced the code under whatever was running: restart exactly
+  # those, so nothing keeps serving the previous version.
+  if [ "$WAS_DAEMON" = 1 ]; then
+    info "Restarting the scheduler on the new version…"
+    run_sigil daemon restart >/dev/null 2>&1 || true
+  fi
+  if [ "$WAS_SERVE" = 1 ]; then
+    info "Restarting the Observatory on the new version…"
+    { run_sigil serve stop && run_sigil serve start; } >/dev/null 2>&1 || true
+  fi
+fi
+
 # ---- done --------------------------------------------------------------------
 printf '\n%s  ✓ Sigil installed%s\n\n' "$G" "$D"
 printf '    source     %s\n' "$SIGIL_HOME"
@@ -213,19 +364,28 @@ case "${SIGIL_PATH_CHECK:-1}:$ORIG_PATH:" in
   *) warn "add the launcher to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 
-cat <<'EOF'
-
-  Next:
-    sigil setup                        # connect a model: sign in with ChatGPT, Claude Code,
-                                       # OpenRouter, a local Ollama, or paste a key
-
-    # then just use it — runs locally, no server needed:
+if [ "$FRESH" = 0 ]; then
+  printf '  Updated to %s. Your graph, skills and settings are where they were.\n\n' "$REF"
+elif [ -n "$STARTED" ]; then
+  cat <<'EOF'
+  Sigil is running.
     sigil                              # chat with your agent
-    sigil solve "turn report.pdf into a clean CSV"
-    sigil soul | sigil tasks list
-
-    # optional — a live web dashboard to watch it work:
-    sigil serve                        # Observatory web UI + HTTP API
+    sigil compile ./SKILL.md           # compile a skill
+    http://localhost:8199              # the Observatory (sigil observatory)
 
   Docs: https://sigilagent.com   ·   https://github.com/sigilagent/sigil
 EOF
+else
+  cat <<'EOF'
+  Next:
+    sigil setup                        # connect a model: sign in with ChatGPT, Claude Code,
+                                       # OpenRouter, a local Ollama, or paste a key
+    sigil start                        # the scheduler + the Observatory (http://localhost:8199)
+    sigil daemon install               # …and start them at login
+
+    sigil                              # chat with your agent
+    sigil solve "turn report.pdf into a clean CSV"
+
+  Docs: https://sigilagent.com   ·   https://github.com/sigilagent/sigil
+EOF
+fi
