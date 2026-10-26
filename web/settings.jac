@@ -34,7 +34,7 @@ import from react { useEffect }
 
 # [section, label]; "tools" leaves for the MCP & tools page, where the policy lives.
 glob SECTIONS: list[any] = [
-    ["connections", "Connections"],
+    ["connections", "Model providers"],
     ["agent", "Agent"],
     ["keys", "Keys & secrets"],
     ["models", "Models"],
@@ -814,7 +814,7 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         jc: any = cdata.suggest_for[justConnected] if (justConnected and cdata.suggest_for and (justConnected in cdata.suggest_for)) else None;
         return <section aria-labelledby="ch" className={CARD + " overflow-hidden"}>
             <div className="px-4.5 py-4 border-b border-line flex flex-col gap-2">
-                <h2 id="ch" className="m-0 text-[15px] font-semibold">Connections</h2>
+                <h2 id="ch" className="m-0 text-[15px] font-semibold">Model providers</h2>
                 <span className="text-[12.5px] text-muted leading-relaxed">How Sigil reaches a model. Connect at least one: Sigil cannot compile or chat without it. Signing in with ChatGPT, or using Claude Code or Ollama, needs no API key.</span>
                 <div className="flex flex-wrap items-center gap-1.5">
                     {[tierLine(str(t[0]), tiers[str(t[0])]) for t in TIERS]}

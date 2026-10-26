@@ -9,7 +9,7 @@ or run the bridge). `channel_bootstrap(name, kind, token_env)` does the graph si
 one call: registers the Channel node and a SecretRef for its token, then hands back
 the guide + the exact endpoint URL to wire up. This is exposed from the CLI
 (`channel setup`/`channel connect`), from chat (the `connect_channel` tool), and from
-the REPL (`/channels`, `/connect`).
+the REPL (`/channels`, `/channel <kind>`). `connect` alone means model providers.
 """
 
 import os;

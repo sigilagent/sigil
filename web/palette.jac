@@ -19,6 +19,7 @@ glob PAGES: list[any] = [
     ["Memory", "/memory", "What Sigil remembers"],
     ["Automations", "/automations", "Schedules and hooks"],
     ["Approvals", "/approvals", "Commands waiting on you, and the allowlist"],
+    ["Model providers", "/settings/connections", "Connect ChatGPT, Claude Code, OpenRouter, Ollama or a key"],
     ["Channels", "/channels", "Where Sigil can be messaged"],
     ["MCP & tools", "/tools", "MCP servers and the tool policy"],
     ["Settings", "/settings", "Every setting, in one place"],
