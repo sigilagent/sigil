@@ -5,7 +5,7 @@ up either, or both.
 
 | Direction | Command | What it gives you |
 |---|---|---|
-| Claude Code into Sigil | `sigil --claude …` | every model tier runs on your Claude subscription, no API keys |
+| Claude Code into Sigil | `sigil connect claude-code`, or `sigil --claude …` | model tiers run on your Claude subscription, no API keys |
 | Sigil into Claude Code | `claude mcp add sigil -- sigil mcp-serve` | every compiled skill becomes a tool in your Claude Code session |
 
 ## Prerequisites
@@ -38,6 +38,11 @@ sigil docs                # prints the reference topic list — the install is g
 ```
 
 ## Direction 1 — run Sigil on your Claude subscription
+
+`sigil setup` and `sigil connect claude-code` (see [connections](connections.md))
+make this permanent: they point the frontier and chat tiers at `claude-cc/opus`
+and keep the small tier on a cheaper route. `--claude`, below, puts every tier on
+Claude Code for one run.
 
 Every model tier (compiler, executor, router, chat) is answered by a headless
 `claude -p` run against your own subscription. No `ANTHROPIC_API_KEY`, no

@@ -954,10 +954,8 @@ curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/ins
 git clone https://github.com/sigilagent/sigil.git &amp;&amp; <span class="k">cd</span> sigil
 jac install
 
-<span class="c"># 3 · configure cognition (frontier needs a provider key)</span>
-<span class="k">export</span> <span class="v">OPENAI_API_KEY</span>=sk-...
-<span class="k">export</span> <span class="v">SIGIL_FRONTIER</span>=gpt-5                 <span class="c"># default</span>
-<span class="k">export</span> <span class="v">SIGIL_SMALL</span>=ollama_chat/qwen3:32b     <span class="c"># can be local</span></code></pre>
+<span class="c"># 3 · connect a model: ChatGPT sign-in, Claude Code, OpenRouter, Ollama, or a key</span>
+jac run --no-serve src/main.jac -- setup</code></pre>
         </div>
       </div>
     </details>

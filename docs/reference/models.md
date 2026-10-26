@@ -17,21 +17,25 @@ for routing. That's the whole thesis: pay the strong model to think and to build
 let the cheap model ride them.
 
 Set one with `configure <tier>_model <name>`, `sigil models set <tier> <name>`, or
-`/model <tier> <name>` in chat.
+`/model <tier> <name>` in chat. `sigil setup` sets all four from what you have
+connected; see [connections](connections.md).
 
 ## Model names
 
 Model names are litellm strings (via byLLM), so every provider litellm supports works:
 
-| Provider | Example name | Auth |
+| Provider | Example name | Auth (`sigil connect …`) |
 |---|---|---|
-| OpenAI | `gpt-4o`, `gpt-4o-mini` | `OPENAI_API_KEY` |
-| Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
-| Google | `gemini/gemini-2.0-flash` | `GOOGLE_API_KEY` |
-| Ollama (local) | `ollama_chat/qwen3:8b` | none — local daemon |
-| Claude Code CLI | `claude-cc/opus` | none — your Claude Code login |
+| ChatGPT plan | `chatgpt/default`, `chatgpt/<model>` | `chatgpt`: browser sign-in, no key |
+| Claude Code CLI | `claude-cc/opus` | `claude-code`: your Claude Code login, no key |
+| OpenRouter | `openrouter/openrouter/auto` | `openrouter`: browser sign-in, Sigil gets a key |
+| Ollama (local) | `ollama_chat/qwen3:8b` | `ollama`: none, local daemon |
+| OpenAI | `openai/gpt-5`, `gpt-4o-mini` | `openai`: `OPENAI_API_KEY` |
+| Anthropic | `anthropic/claude-sonnet-5-5` | `anthropic`: `ANTHROPIC_API_KEY` |
+| Google | `gemini/gemini-2.5-flash` | `gemini`: `GEMINI_API_KEY` |
 
-The frontier tier needs its provider key; the small/chat tiers can be fully local.
+Every tier needs a connection behind it, and `sigil connections` shows which do.
+The small and chat tiers can be fully local.
 A weaker chat model tends to over-reach for tools — if chat behaves oddly, try a
 stronger `chat_model`.
 
@@ -41,7 +45,13 @@ config resolver switches on when it sees the top-level `[byllm]` table in `jac.t
 fails identically — regardless of tier, provider or key — that section is what to
 check; `install.sh` verifies it, and `jac install --plan` should list `litellm`.
 
-## No key at all: your Claude Code CLI
+## No key at all
+
+Three routes need no API key: sign in with ChatGPT, the Claude Code CLI, and a
+local Ollama. [connections](connections.md) covers all of them. The rest of this
+section is the Claude Code route's global switch.
+
+### Your Claude Code CLI
 
 `--claude` puts every tier on the Claude Code CLI you already have installed, using
 your own subscription instead of a provider key:

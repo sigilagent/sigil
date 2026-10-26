@@ -53,4 +53,5 @@ In chat, the agent can change its own model, persona, or prompt mode when asked
 
 `chat` (talk to it) · `frontier` (build skills) · `small` (run skills) · `router`
 (route tasks). Manage names, aliases, and fallback chains with `sigil models …` — see
-[models](models.md).
+[models](models.md). What each tier connects through, and the setup that requires
+one: [connections](connections.md).

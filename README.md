@@ -59,6 +59,18 @@ macOS and Linux. Both land the same release in `~/.sigil/app`: the npm package i
 launcher whose first run performs that install, pinned to the package's version, so
 `npm update -g @sigilagent/sigil` is how an npm install moves to the next release.
 
+Then connect a model. Setup will not finish without one, and three of the routes
+need no API key: sign in with ChatGPT and your ChatGPT plan pays; use the Claude
+Code CLI you already have; or run models locally with Ollama. OpenRouter is a
+browser sign-in too, and pasting an OpenAI, Anthropic, Gemini or Z.ai key works as
+before.
+
+```bash
+sigil setup                                  # connect a model (required), pick the tiers
+sigil connect chatgpt                        # …or connect one route directly
+sigil connections                            # what is connected, and which tiers can run
+```
+
 ```bash
 sigil compile ./SKILL.md -e agent.jac        # the compiler, end to end
 sigil solve "turn report.pdf into clean CSV" # the agent: compile on miss, reuse on hit
@@ -66,10 +78,11 @@ sigil library                                # the compiled skills, with run sta
 sigil                                        # chat: the conversational agent over the same graph
 ```
 
-Models are configured on the graph, seeded on first boot from `SIGIL_FRONTIER`
-(the compiler's model, default `gpt-5`), `SIGIL_SMALL` (the execution model,
-default `ollama_chat/qwen3:32b`, can be fully local), and `SIGIL_ROUTER`. An
-ejected runnable picks its model from `SIGIL_MODEL`.
+Models are configured on the graph: `sigil setup` points the tiers at what you
+connected, and `sigil models set <tier> <name>` changes one. A fresh graph seeds
+them from `SIGIL_FRONTIER`, `SIGIL_SMALL` and `SIGIL_ROUTER`. An ejected runnable
+picks its model from `SIGIL_MODEL`. Details:
+[`docs/reference/connections.md`](docs/reference/connections.md).
 
 ## Works with Claude Code — both directions
 

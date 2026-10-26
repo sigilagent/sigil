@@ -216,9 +216,10 @@ esac
 cat <<'EOF'
 
   Next:
-    export OPENAI_API_KEY=sk-...       # a model key (or point it at a local model)
+    sigil setup                        # connect a model: sign in with ChatGPT, Claude Code,
+                                       # OpenRouter, a local Ollama, or paste a key
 
-    # just use it — runs locally, no server needed:
+    # then just use it — runs locally, no server needed:
     sigil                              # chat with your agent
     sigil solve "turn report.pdf into a clean CSV"
     sigil soul | sigil tasks list
