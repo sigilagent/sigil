@@ -33,7 +33,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, gate_slot_prompt_bloat, autofix_carry_types }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, gate_input_provenance, gate_slot_prompt_bloat, autofix_carry_types }
 import from .repair { repair_compile_loop, pin_repair_llm }
 import from .autofix { autofix_ir }
 import from .report { finding, auto_gate, resolved_by, status_of }
