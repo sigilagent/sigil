@@ -1,5 +1,5 @@
 """Scenario — the STAGED lift() front-end end-to-end + view repair,
-MockLLM-scripted with LIVE assemble/G4. Forces SIGIL_STAGED=1: lift() now
+MockLLM-scripted with LIVE assemble/COMPILE. Forces SIGIL_STAGED=1: lift() now
 defaults to the direct front-end (see lift_direct.jac); this scenario exercises
 the staged spine/flows/assemble path and its coverage-fallback target.
 See workflow_loop.jac for why this runs under `jac run`. Exits nonzero on failure."""

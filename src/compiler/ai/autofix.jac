@@ -1,8 +1,8 @@
 """AI compiler — mechanical autofixes (fix-forward, no model).
 
-The G9 `autofix_carry_types` pattern generalized: every fix here is pure code
+The G4 `autofix_carry_types` pattern generalized: every fix here is pure code
 over the assembled IR, applied BEFORE the residual gates read it, and re-gated
-through G4 by the caller — a patch the oracle rejects is never adopted. Each
+through COMPILE by the caller — a patch the oracle rejects is never adopted. Each
 pass returns human-readable fix notes; the notes ride `LiftResult.fixes` so a
 fixed defect is reported as fixed, not as open.
 
@@ -10,7 +10,7 @@ Three passes, straight from the 33-skill batch's failure classes:
 
 - LANES: a node read with no lane. If the read names a file that exists next
   to SKILL.md (`templates/viewer.html`), the file IS the lane — inline it as a
-  knowledge entry resident on the readers (the compile-time twin of G1's
+  knowledge entry resident on the readers (the compile-time twin of G5's
   embody rule). Otherwise mint an input carry so the reference is a seedable
   lane instead of a dangling name.
 - POINTERS: a knowledge entry whose body is "See FORMS.md" when FORMS.md sits
@@ -816,7 +816,7 @@ def _fix_unguarded_reads(ir: any) -> list[any] {
     # exception instead of a branch: power-flow-data raised
     # `FileNotFoundError: ''` ten times from `check_file_size`, whose whole job
     # is an "if needed" size probe. The detector for this shape already exists
-    # (_unguarded_read_tools, gate G7); nothing acted on it. Route instead of
+    # (_unguarded_read_tools, gate G6_ENV); nothing acted on it. Route instead of
     # raise — return the declared type's empty value, which is what "absent"
     # means to every reader downstream.
     import re;
@@ -884,7 +884,7 @@ def _guard_body(body: str, name: str, neutral: str) -> str {
 }
 def autofix_ir(ir_text: str, skill_dir: str = "") -> dict[str, any] {
     # The driver: load once, run every pass, dump once. Returns the (possibly
-    # unchanged) IR text + fix notes; the CALLER re-gates through G4.
+    # unchanged) IR text + fix notes; the CALLER re-gates through COMPILE.
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return {"ir_text": ir_text, "fixes": []}; }
     if not isinstance(ir, dict) or (not ir.get("nodes")) { return {"ir_text": ir_text, "fixes": []}; }

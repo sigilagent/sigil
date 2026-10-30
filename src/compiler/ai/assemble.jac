@@ -10,7 +10,7 @@ AG-IR YAML document for the MECHANICAL half, and audits the join:
 - Cross-references: carries' producers exist, node reads/writes have a lane
   (carry / knowledge / task), residency + serves + HIL targets name real nodes.
 - Prose-pointer precheck: a tool with neither body nor command, or a knowledge
-  item with no content, is flagged here (G1 hardens this later).
+  item with no content, is flagged here (G5 hardens this later).
 
 Issues never block emission — assemble returns the IR WITH its issue list, and
 the caller (lift) decides. Honest output, never a silent success.

@@ -5,7 +5,7 @@ lock in the two properties the rearchitecture turns on:
 
   1. required_shape maps EVERY (kind, modality) to a realization shape — so
      completeness is defined for prohibitions/gates/knowledge/grounding, not just
-     the MANDATORY STEP/IO that today's G5 audits.
+     the MANDATORY STEP/IO that today's G2 audits.
   2. the closure FAILS on a dropped rule of ANY kind (a FORBIDDEN prohibition, a
      HIL gate) and on an ADDED (untraced) node — the exact holes the direct path
      ships green today.
@@ -184,7 +184,7 @@ test "check_completeness skips a non-agent step but demands the knowledge" {
 
 # --- Layer 2: completeness (nothing dropped) ------------------------------
 
-test "a dropped FORBIDDEN prohibition is caught (today's G5 ignores it)" {
+test "a dropped FORBIDDEN prohibition is caught (today's G2 ignores it)" {
     # the PDF skill's real rule: 'Never use Unicode subscript characters'
     spec = RuleSet(rules=[
         Rule(id="r_forbid", quote="Never use Unicode subscript/superscript characters",
@@ -222,7 +222,7 @@ test "a dropped HIL gate is caught; a code-owned route realizes it" {
     spec = RuleSet(rules=[
         Rule(id="r_gate", quote="confirm before deleting", kind=RuleKind.HIL, modality=Modality.MANDATORY)
     ]);
-    # a model slot that 'asks' is NOT a gate (the G6 failure) -> dropped
+    # a model slot that 'asks' is NOT a gate (the G3_HIL failure) -> dropped
     bad = ParsedIR(nodes=[PNode(id="ask", ntype="GEN_RAW", owner="model", traces_to=["r_gate"])]);
     db = check_completeness(spec, bad);
     assert len(db) == 1;

@@ -1,7 +1,7 @@
 """Scenario — the DIRECT lift() front-end (the new default): the spec loop runs,
 then ONE authoring call returns the whole AG-IR, then the shared fix-forward tail
 lowers + gates it LIVE. MockLLM-scripted (extract_spec's calls, then the authored
-IR); assemble/G4 are real. Exits nonzero on failure."""
+IR); assemble/COMPILE are real. Exits nonzero on failure."""
 
 import from jaclang.byllm.lib { MockLLM }
 import from src.compiler.ai.lift_types { Modality, RuleKind }

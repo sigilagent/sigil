@@ -4,7 +4,7 @@ The invariant under test: a synthesized tool must actually RUN its body. LIFT is
 free to emit a tool `body` either as bare statements or as a complete `def`; both
 shapes have to lower to a wrapper that returns the body's value. The complete-def
 shape is the dangerous one — nesting it inside the wrapper is valid Python, so
-`jac check` (and therefore the G4 compile oracle) stays green while every tool
+`jac check` (and therefore the COMPILE compile oracle) stays green while every tool
 call silently returns None.
 """
 

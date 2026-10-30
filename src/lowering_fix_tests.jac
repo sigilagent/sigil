@@ -365,7 +365,7 @@ test "an autonomy slot can reach the rest of the library; a plain slot is untouc
     assert "def think(task: str) -> str by llm(tools=[read_rows, *_skill_tools()], max_tokens=" in src, src[-2000:];
     assert "def wrap(notes: str) -> str by llm(max_tokens=" in src, src[-2000:];
     # SPLAT, not `+`: the helper is defined in the ::py:: prelude, so `list + Unknown`
-    # would be a type error and G4 (the compile oracle runs jac's checker) would fail.
+    # would be a type error and COMPILE (the compile oracle runs jac's checker) would fail.
     assert "] + _skill_tools()" not in src;
     assert "def _skill_tools():" in src;      # …and the helper actually ships
 }

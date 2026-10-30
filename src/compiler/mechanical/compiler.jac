@@ -667,7 +667,7 @@ def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     # yields a type float() accepts, and _as_num is total — it returns a real
     # number or the carry's own float default — so the round-trip always parses.
     # Latent since the arm was written: mesh-analysis was the first skill with a
-    # float carry, and it failed G4 on this line alone.
+    # float carry, and it failed COMPILE on this line alone.
     if tt == "float" { return f"        self.{_safe(str(tgt))} = float(str(_as_num({expr}, self.{_safe(str(tgt))}, False)));"; }
     return f"        {expr};  # -> {tgt} ({tt}); carry keeps default";
 }
@@ -1106,7 +1106,7 @@ def _looks_shell(body: str) -> bool {
 # contract asks for), or a COMPLETE `def` — LIFT emits the latter whenever the
 # skill's snippet is itself a function. Indenting a complete def into the wrapper
 # nests it and never calls it, so the tool silently returns None. `jac check`
-# still passes (a nested def is valid Python), so G4 cannot catch it. Normalize
+# still passes (a nested def is valid Python), so COMPILE cannot catch it. Normalize
 # the second shape by appending an explicit delegating call: the wrapper's params
 # are forwarded to the inner def by NAME, anything unmatched passes None (same
 # contract as the wrapper's own `=None` defaults).
@@ -1823,7 +1823,7 @@ def _emit_slots(ir: any) -> str {
                 # which is a different program than the IR asked for.
                 # SPLAT, not `+`: the helper lives in the module's ::py:: prelude,
                 # so its return type is Unknown to the checker and `list + Unknown`
-                # is a type error — which G4, the compile oracle, would fail on.
+                # is a type error — which COMPILE, the compile oracle, would fail on.
                 tools = f"(tools=[{names}, *_skill_tools()])";
             }
         }
@@ -2365,7 +2365,7 @@ def _emit_walker(ir: any) -> list[any] {
                 # phantom element ("" or '"},{"'), which every downstream count check
                 # then reads as a real item. Strip contentless entries at the source.
                 # list()-wrapped: the helper's ::py:: return is Unknown, which a
-                # TYPED list carry (G9-unified) rejects at jac check.
+                # TYPED list carry (G4-unified) rejects at jac check.
                 if str(tt).startswith("list") { val = f"list(_clean_strlist({call}))"; }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.

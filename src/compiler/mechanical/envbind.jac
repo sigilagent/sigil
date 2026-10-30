@@ -23,7 +23,7 @@ Three exports:
                            source injected into every lowered module ("" when
                            the manifest is empty)
 
-The compile-time probe feeds gate G7 (ai/gates.jac); the emitted preflight
+The compile-time probe feeds gate G6_ENV (ai/gates.jac); the emitted preflight
 re-probes at `run()` entry on the EXECUTION host — SkillRT's install-time /
 run-time split. Imports resolve in the hermetic rt-closure interpreter, so a
 missing module cannot be fixed from OUTSIDE the artifact (#149: the agent's

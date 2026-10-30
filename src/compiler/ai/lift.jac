@@ -1,25 +1,27 @@
 """AI compiler — the public LIFT entrypoint.
 
 SKILL.md text -> frozen Spec -> WorkFlow spine -> {IO, Context, Knowledge, HIL}
-views (SPAWN fan-out) -> assembled AG-IR -> fix-forward gate battery ->
+views (PARALLEL fan-out) -> assembled AG-IR -> fix-forward gate battery ->
 compiled module + report.
 
-The gates DIAGNOSE; they do not veto. A lift FAILS only when no runnable
-module exists (G4 rejects the IR after the whole repair ladder). Everything
-else follows the fix-forward ladder, in order of preference:
+The gates follow the paper's validation-and-repair loop (arXiv 2607.27309
+§3.3): defects are repaired where possible, and a lift FAILS when the module
+does not lower (COMPILE) or when error findings remain after the repair budget
+(report.status_of; SIGIL_GATE_FAIL_ON_ERROR=0 restores diagnose-only). The
+ladder, in order of preference:
 
   1. mechanical autofix (autofix.jac + autofix_carry_types — pure code,
-     re-gated through G4; a patch the oracle rejects is never adopted),
+     re-gated through COMPILE; a patch the oracle rejects is never adopted),
   2. scoped model repair (view repair one pass; the bounded repair_ir loop),
-  3. degrade with a note (a hollow code gate re-owned to a model slot),
+  3. degrade with a note (a hollow COMPUTE made a GENERATE),
   4. report the residual as a typed finding (report.jac: severity + the fix).
 
 Gates in play: the spec loop's own grounding/coverage/modality audits, the
-spine validator, the assemble join (reflexive 5d + cross-refs), G1 standalone
-(embody-don't-point, builtin-aware), G4 the compile oracle, G5 STRUCT-COV
-(per-mandate realization on the COMPILED module), G7-ENV (install-time facts —
-advisory by default, SIGIL_G7_HARD=1 to harden), G8-PAR (false parallelism =
-error; opportunities ride par_report), G9-TY (type unification; fixable
+spine validator, the assemble join (reflexive 5d + cross-refs), G5 standalone
+(embody-don't-point, builtin-aware), COMPILE the compile oracle, G2 STRUCT-COV
+(per-mandate realization on the COMPILED module), G6_ENV (install-time facts —
+advisory by default, SIGIL_G6_ENV_HARD=1 to harden), G6_PAR (false parallelism =
+error; opportunities ride par_report), G4 (type unification; fixable
 mismatches patched mechanically). `status` carries the four-state outcome
 (failed | degraded | fixed | clean); `ok` keeps its historical meaning —
 runnable AND nothing left to report. Nothing is ever swallowed: residuals ride
@@ -33,7 +35,7 @@ import from .spec_loop { extract_spec, pin_lift_llm, strip_frontmatter }
 import from .workflow { workflow_spine, pin_workflow_llm }
 import from .flows { gather_views, spine_digest, pin_flows_llm }
 import from .assemble { assemble }
-import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, gate_input_provenance, gate_slot_prompt_bloat, autofix_carry_types }
+import from .gates { compile_gate, gate_standalone, gate_artifact_boundary, gate_hil_gates, gate_struct_cov, gate_env_binding, gate_concurrency, gate_type_unification, gate_input_provenance, gate_slot_prompt_bloat, autofix_carry_types, gate_constraints }
 import from .repair { repair_compile_loop, pin_repair_llm }
 import from .autofix { autofix_ir }
 import from .report { finding, auto_gate, resolved_by, status_of }
@@ -65,12 +67,12 @@ def _emit(ev: dict[str, any]) -> None {
 
 # ---------------------------------------------------------------------------
 # The shared fix-forward tail — both front-ends (direct + staged) produce an
-# ir_text + a WorkflowView + a G1 issue list, then run this identical ladder:
+# ir_text + a WorkflowView + a G5 issue list, then run this identical ladder:
 # compile-repair -> mechanical autofix (re-gated) -> residual gates -> findings.
 # ---------------------------------------------------------------------------
 def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir: str,
               repairs: list[any], spec_issues: list[any], spine_issues: list[any], asm_issues: list[any]) -> LiftResult {
-    # COMPILE repair — the G4 oracle drives the scoped repair_ir loop, bounded.
+    # COMPILE repair — the COMPILE oracle drives the scoped repair_ir loop, bounded.
     _t4 = time.time();
     _emit({"stage": "gates", "state": "start"});
     ro = repair_compile_loop(ir_in, name);
@@ -81,8 +83,8 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
     ir_text = ro.ir_text;
 
     # MECHANICAL FIX-FORWARD on the compiled IR — the autofix chain (lanes /
-    # pointers / hollow re-own, then G9 carry-type unification), each patch
-    # re-gated through G4: the oracle stays the authority, a chain it rejects
+    # pointers / hollow re-own, then G4 carry-type unification), each patch
+    # re-gated through COMPILE: the oracle stays the authority, a chain it rejects
     # falls back to the narrower candidate, then to the original.
     fixes: list = [];
     if g4.ok {
@@ -92,7 +94,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
         base: str = str(af["ir_text"]);
         af_fixes: list[str] = [str(f0) for f0 in list(af["fixes"])];
         fx = autofix_carry_types(base);
-        ty_fixes: list[str] = ["G9 autofix: " + str(f9) for f9 in list(fx["fixes"])];
+        ty_fixes: list[str] = ["G4 autofix: " + str(f9) for f9 in list(fx["fixes"])];
         cand_irs: list[str] = [];
         cand_fixes: list[list[str]] = [];
         if ty_fixes { cand_irs.append(str(fx["ir_text"])); cand_fixes.append(af_fixes + ty_fixes); }
@@ -106,7 +108,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
                 for fn0 in cand_fixes[ci] { fixes.append(fn0); }
                 break;
             } else {
-                repairs.append("autofix candidate (" + str(len(cand_fixes[ci])) + " fix(es)) failed the G4 re-gate — narrowed");
+                repairs.append("autofix candidate (" + str(len(cand_fixes[ci])) + " fix(es)) failed the COMPILE re-gate — narrowed");
             }
             ci += 1;
         }
@@ -116,11 +118,12 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
     # RESIDUAL GATES on the final IR/module — findings, not vetoes.
     findings: list[any] = [];
     if g4.ok {
-        for i9 in gate_type_unification(ir_text) { findings.append(finding("G9", str(i9))); }
-        for i14 in gate_input_provenance(ir_text) { findings.append(finding("G14", str(i14))); }
-        for i13 in gate_slot_prompt_bloat(g4.module_src) { findings.append(finding("G13", str(i13))); }
+        for i9 in gate_type_unification(ir_text) { findings.append(finding("G4", str(i9))); }
+        for i14 in gate_input_provenance(ir_text) { findings.append(finding("G4_INPUT", str(i14))); }
+        for gc in gate_constraints(ir_text) { findings.append(finding(str(gc[0]), str(gc[1]))); }
+        for i13 in gate_slot_prompt_bloat(g4.module_src) { findings.append(finding("G5_BLOAT", str(i13))); }
         sc = gate_struct_cov(sr.spec, wf, g4.module_src);
-        for i2 in sc.issues { findings.append(finding(auto_gate(str(i2), "G5"), str(i2))); }
+        for i2 in sc.issues { findings.append(finding(auto_gate(str(i2), "G2"), str(i2))); }
     }
 
     env_report: list = [];
@@ -129,12 +132,12 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
         _t5 = time.time();
         _emit({"stage": "bind", "state": "start"});
         g7 = gate_env_binding(ir_text);
-        for i3 in g7 { env_report.append(str(i3)); findings.append(finding("G7", str(i3))); }
+        for i3 in g7 { env_report.append(str(i3)); findings.append(finding("G6_ENV", str(i3))); }
         g8 = gate_concurrency(ir_text);
         g8_issues = list(g8["issues"]);
         g8_opps = list(g8["opportunities"]);
         g8_dlp = list(g8["dlp"]);
-        for i4 in g8_issues { findings.append(finding("G8", str(i4))); }
+        for i4 in g8_issues { findings.append(finding("G6_PAR", str(i4))); }
         for o4 in g8_opps { par_report.append(str(o4)); }
         for d4 in g8_dlp { par_report.append(str(d4)); }
         _emit({"stage": "bind", "state": "done", "secs": time.time() - _t5,
@@ -148,7 +151,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
         if not resolved_by(str(s2), fixes) { findings.append(finding("assemble", str(s2))); }
     }
     for s3 in g1 {
-        if not resolved_by(str(s3), fixes) { findings.append(finding(auto_gate(str(s3), "G1"), str(s3))); }
+        if not resolved_by(str(s3), fixes) { findings.append(finding(auto_gate(str(s3), "G5"), str(s3))); }
     }
 
     status = status_of(g4.ok, findings, fixes, repairs);
@@ -169,7 +172,7 @@ def _coverage_miss(lr: LiftResult) -> bool {
     # is the fallback trigger: a direct authoring that dropped an obligation is
     # exactly what the staged pipeline's coverage critics exist to catch.
     for f in lr.findings {
-        if str(f.get("gate")) == "G5" {
+        if str(f.get("gate")) == "G2" {
             m = str(f.get("message"));
             if ("NO realization" in m) or ("structural gap" in m) or ("realized HOLLOW" in m) { return True; }
         }
@@ -218,7 +221,7 @@ def _lift_staged(skill: str, name: str, sr: any, spec_issues: list[any], paralle
     _emit({"stage": "assemble", "state": "done", "secs": time.time() - _t3,
            "issues": len(asm.issues) + len(g1)});
 
-    # VIEW repair — route assemble/G1/G3 issues back to the owning flows, one pass:
+    # VIEW repair — route assemble/G5/G2_ARTIFACT issues back to the owning flows, one pass:
     # each flow re-emits its own view with the exact issues to fix in its ctx.
     if asm.issues or g1 {
         all_issues = asm.issues + g1;

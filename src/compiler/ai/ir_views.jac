@@ -66,11 +66,11 @@ obj LiftResult {
     has assemble_issues: list[str] = [];
     has gate_issues: list[str] = [];
     has repairs: list[str] = [];
-    has env_report: list[str] = [];    # G7-ENV findings (also in gate_issues unless advisory)
-    has par_report: list[str] = [];    # G8-PAR opportunities + DLP candidates (advisory)
+    has env_report: list[str] = [];    # G6_ENV findings (also in gate_issues unless advisory)
+    has par_report: list[str] = [];    # G6_PAR opportunities + DLP candidates (advisory)
     # fix-forward contract (report.jac): a lift FAILS only when no runnable
     # module exists — everything else compiles, persists, and reports.
-    #   failed    no runnable module (G4 rejected after the whole repair ladder)
+    #   failed    no runnable module (COMPILE rejected after the whole repair ladder)
     #   degraded  runnable, with residual warn/error findings riding the report
     #   fixed     runnable and clean, but only because fixes/repairs landed
     #   clean     runnable, nothing found, nothing needed

@@ -4,7 +4,7 @@ Per the verify/repair-loop findings (pipeline B.9.1): never one overloaded
 repair sem — a repair slot written for one error class produces confident no-op
 repairs when fed another. Two classes land here:
 
-- COMPILE repair (`repair_ir`): the G4 oracle rejected the assembled IR — a
+- COMPILE repair (`repair_ir`): the COMPILE oracle rejected the assembled IR — a
   tight MUTATE over (ir_text, diagnostic) that fixes ONLY what the error
   requires. The loop re-gates after every attempt and is bounded.
 - VIEW repair happens in lift(): assemble/gate issues route BACK to the owning

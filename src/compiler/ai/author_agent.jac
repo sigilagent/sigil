@@ -5,8 +5,8 @@ AG-IR through byLLM slots, one narrow judgment at a time, because that is how yo
 keep an unfaithful skill from slipping through. This module keeps the part that
 carries the guarantee and replaces the part that does not.
 
-    LIFT:   spec loop -> spine -> flows -> assemble -> G1 · G4 · G5
-    AGENT:  spec loop -> [ a Claude Code session writes agent.ir ] -> G1 · G4 · G5
+    LIFT:   spec loop -> spine -> flows -> assemble -> G5 · COMPILE · G2
+    AGENT:  spec loop -> [ a Claude Code session writes agent.ir ] -> G5 · COMPILE · G2
             ^^^^^^^^^                                                ^^^^^^^^^^^^
             kept: grounding                                          kept: the gates
 
@@ -59,7 +59,7 @@ def _as_list(v: any) -> list[str] {
 
 def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
     # Rebuild the slice of LIFT's views the gates actually read:
-    #   G5 wants node id / owner / traces_to;  G1 wants tool body|command and
+    #   G2 wants node id / owner / traces_to;  G5 wants tool body|command and
     #   knowledge content. Everything else stays default — this is a parse, not
     #   a second opinion about the IR.
     # The shared reader, so the views see the document the compiler lowers —
@@ -111,7 +111,7 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
 
 def _rules_md(spec: RuleSet) -> str {
     # The frozen rule set as the agent's anchor. Ids matter most: they are what a
-    # node's `traces_to` names, and what G5 audits against.
+    # node's `traces_to` names, and what G2 audits against.
     lines: list[str] = [
         "# Frozen rule set for '" + spec.skill_name + "'",
         "",
@@ -164,7 +164,7 @@ def _brief(name: str, must: list[str]) -> str {
         + "than ~6 mandates. Give each independently-checkable mandate its own "
         + "node, and prefer an owner=code gate for mechanical ones (exact values, "
         + "required-element checklists, format rules) — the gate rejects a "
-        + "mega-slot (G12-DET).\n\n"
+        + "mega-slot (G2_OVERLOAD).\n\n"
         + "These MANDATORY rules must each appear in some node's `traces_to`, or "
         + "the coverage gate rejects the IR:\n    "
         + (", ".join(must) if must else "(none)") + "\n\n"
@@ -282,7 +282,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t2,
            "g4": g4.ok, "repairs": len(ro.attempts)});
 
-    findings: list[any] = [finding(auto_gate(str(g), "G1"), str(g)) for g in gate_issues]
+    findings: list[any] = [finding(auto_gate(str(g), "G5"), str(g)) for g in gate_issues]
                    + [finding("spec", str(s)) for s in spec_issues];
     status = status_of(g4.ok, findings, [], notes);
     ok = g4.ok and (not spec_issues) and (not gate_issues);

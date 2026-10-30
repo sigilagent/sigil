@@ -59,7 +59,7 @@ glob SPEC: RuleSet = RuleSet(skill_name="demo", rules=[
     Rule(id="r9", quote="You may add a summary.", kind=RuleKind.STEP, modality=Modality.DISCRETIONARY)
 ]);
 
-test "_views_from_ir reads nodes, owners and the rule traces G5 audits" {
+test "_views_from_ir reads nodes, owners and the rule traces G2 audits" {
     (wf, vb) = _views_from_ir(IR);
     ids = [n.id for n in wf.nodes];
     assert ids == ["read_input", "decide", "done"];
@@ -72,7 +72,7 @@ test "_views_from_ir reads nodes, owners and the rule traces G5 audits" {
     assert byid["read_input"].reads == ["task"];
 }
 
-test "_views_from_ir reads the tools and knowledge G1 audits" {
+test "_views_from_ir reads the tools and knowledge G5 audits" {
     (wf, vb) = _views_from_ir(IR);
     tools = {t.name: t for t in vb.kn.tools};
     assert "def read_file" in tools["read_file"].body;
@@ -84,12 +84,12 @@ test "_views_from_ir reads the tools and knowledge G1 audits" {
 }
 
 test "the parsed views drive the REAL gates, not a private copy of them" {
-    # G1 must flag save_it: it has neither body nor command.
+    # G5 must flag save_it: it has neither body nor command.
     (wf, vb) = _views_from_ir(IR);
     issues = gate_standalone(vb);
     assert len(issues) == 1;
     assert "save_it" in issues[0];
-    # G5 must flag r2: it is traced, but only to a node with no lowered ability.
+    # G2 must flag r2: it is traced, but only to a node with no lowered ability.
     sc = gate_struct_cov(SPEC, wf, "can n_read_input with X entry { }");
     assert "r1" in sc.gated;          # owner=code + lowered ability
     assert "r2" in sc.missing;        # traced to `decide`, which never lowered

@@ -1275,7 +1275,7 @@ with entry:__main__ {
         }
     } elif cmd == "compile" {
         # compile <SKILL.md> [-e|--eject [out.jac]] — the gated AI lift: spec
-        # loop -> spine -> flows -> assemble -> G1/G4/G5 gates + repair. Sets
+        # loop -> spine -> flows -> assemble -> G5/COMPILE/G2 gates + repair. Sets
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
@@ -1485,7 +1485,7 @@ with entry:__main__ {
         import from src.sigil_mcp_serve { serve_stdio }
         sys.exit(serve_stdio(library, run_task, solve_task, tool_allowed));
     } elif cmd == "gate" {
-        # gate <file.agir> [name] — run G4 (the compile oracle) + G9-TY (typed-
+        # gate <file.agir> [name] — run COMPILE (the compile oracle) + G4 (typed-
         # dataflow unification) over one AG-IR and exit nonzero if either fails.
         # This is the compiler's own ground truth exposed as a command, so
         # anything outside the process (a repair agent, a CI step, a human
@@ -1506,7 +1506,7 @@ with entry:__main__ {
             }
             g9 = gate_type_unification(ir_src);
             if g9 {
-                print("gate: FAILED  (G4 ok, G9-TY found " + str(len(g9)) + " issue(s))");
+                print("gate: FAILED  (COMPILE ok, G4 found " + str(len(g9)) + " issue(s))");
                 for i9 in g9 { print("  - " + str(i9)); }
                 sys.exit(1);
             }
@@ -1516,7 +1516,7 @@ with entry:__main__ {
             (_wfdet, _vbdet) = _views_from_ir(ir_src);
             _det = det_overloaded(_wfdet);
             if _det {
-                print("gate: FAILED  (G12-DET: mega-slot lumping, "
+                print("gate: FAILED  (G2_OVERLOAD: mega-slot lumping, "
                       + str(len(_det)) + " node(s))");
                 for _d in _det { print("  - " + str(_d)); }
                 sys.exit(1);
@@ -1771,7 +1771,7 @@ with entry:__main__ {
         print("  eval <sig> [probe]                  grounded-eval a skill — run it and judge the artifact");
         print("  relearn <sig> [hint]                recompile a skill fresh through the main compiler (task-born skills re-author via frontier)");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
-        print("  gate <file.agir> [name]             run G4 (compile oracle) + G9-TY (type unification) on one AG-IR (exits nonzero if either fails)");
+        print("  gate <file.agir> [name]             run COMPILE (compile oracle) + G4 (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
         print("connect a model (no API key needed for the first three)");
         print("  connect chatgpt [--new]             sign in with ChatGPT in your browser — your ChatGPT plan pays");

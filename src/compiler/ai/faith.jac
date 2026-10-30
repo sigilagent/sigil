@@ -20,7 +20,7 @@ the raise (an agent that silently drops/adds an obligation is a compliance failu
 wearing a green check), while COHERENCE issues (won't compile, type mismatch,
 hollow node) DEGRADE under fix-forward as before. `classify()` encodes that axis.
 
-Why this is stronger than today's G5: G5 audits only MANDATORY STEP/IO and trusts
+Why this is stronger than today's G2: G2 audits only MANDATORY STEP/IO and trusts
 whatever `traces_to` the model wrote. Here EVERY rule kind has a required shape
 (§9 of the authoring guide, made mechanical), and `traces_to` is enforced as a
 closure — a node that traces to nothing is an unverifiable (added) behavior, not
@@ -92,7 +92,7 @@ def required_shape(kind: RuleKind, modality: Modality, binds: str = "agent") -> 
 # ---------------------------------------------------------------------------
 # The parsed IR — a fuller reconstruction than the gates' _views_from_ir.
 #
-# _views_from_ir deliberately parses only what G1/G5 read ("a parse, not a second
+# _views_from_ir deliberately parses only what G5/G2 read ("a parse, not a second
 # opinion"). The faithfulness closure needs MORE: edges, tool bindings, knowledge
 # provenance, carries — everything that decides whether each rule kind is realized.
 # Still pure structure, no judgment.
@@ -385,7 +385,7 @@ def _is_embodied_act(pir: ParsedIR, n: PNode) -> bool {
 }
 
 def _realizes_write(pir: ParsedIR, rid: str) -> bool {
-    # the G3 chain, over ParsedIR: a traced node that is an embodied ACT, or writes
+    # the G2_ARTIFACT chain, over ParsedIR: a traced node that is an embodied ACT, or writes
     # a carry an embodied ACT downstream consumes.
     owners = _traced_nodes(pir, rid);
     for n in owners {
@@ -588,7 +588,7 @@ def check_cohesion(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
 def faithfulness_report(spec: RuleSet, ir_text: str) -> FaithReport {
     pir = parse_ir(ir_text);
     if not pir.ok {
-        # No parseable IR at all is a coherence failure (G4 territory), not a
+        # No parseable IR at all is a coherence failure (COMPILE territory), not a
         # faithfulness verdict — report it honestly rather than as "all dropped".
         fr = FaithReport(ok=False, rules_total=len(spec.rules), parsed=False);
         fr.dropped = [FaithFinding(axis="coherence", severity="error", rule="", shape="",

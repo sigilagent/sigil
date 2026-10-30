@@ -21,18 +21,18 @@ structure faithfully — not to improve the skill, and not to summarize it.
 Your draft is not accepted because it looks right. It is accepted because it clears
 three gates, and each one maps to a rule you must follow while drafting.
 
-**G4 — it must compile.** `sigil gate agent.ir <name>` lowers your IR and
+**COMPILE — it must compile.** `sigil gate agent.ir <name>` lowers your IR and
 type-checks the result. Run it after every edit. It exits nonzero while the IR is
 broken and prints the exact diagnostic.
 
-**G1 — every tool and knowledge item must be embodied.** A tool with no `body:` and
+**G5 — every tool and knowledge item must be embodied.** A tool with no `body:` and
 no `command:` is a prose-pointer, and it is rejected. Knowledge must carry its
 content **verbatim**, never "see the section above" or "follow the format in
 FORMS.md". The test: if `SKILL.md` were deleted, would the IR still lower to a
 working agent? If the answer depends on prose that only lives in the skill, embody
 that prose in the IR.
 
-**G5 — every mandatory rule must be realized by a node.** Each rule in the frozen
+**G2 — every mandatory rule must be realized by a node.** Each rule in the frozen
 set has an id (`r1`, `r2`, …). Each node carries `traces_to: [r3, r7]` naming the
 rules it realizes. A mandatory STEP or IO rule with no node tracing to it is a
 structural gap and fails. Worse than missing is *monolithic*: several rules folded

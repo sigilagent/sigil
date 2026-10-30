@@ -2,7 +2,7 @@
 
 Same contract as `author_direct.author_direct` — `(skill, spec, name, gaps) ->
 {"ir_text", "notes"}` — so it drops into `raise2.raise_from_spec` unchanged and
-inherits the whole downstream ladder (faithfulness closure, autofix rungs, G4,
+inherits the whole downstream ladder (faithfulness closure, autofix rungs, COMPILE,
 persist, eject).
 
 What differs is where completeness comes from. `author_direct` asks one model

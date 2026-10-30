@@ -92,7 +92,7 @@ test "a human gate is a barrier" {
     assert not [s for s in c["stages"] if len(s) >= 2];
 }
 
-test "SPAWN branches sharing moving data is a hard G8 issue" {
+test "SPAWN branches sharing moving data is a hard G6_PAR issue" {
     ir = {
         "nodes": [
             _n("s", ntype="SPAWN"),

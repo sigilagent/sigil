@@ -1,4 +1,4 @@
-"""AI compiler — the gate battery. This module seeds it with G4, the compile
+"""AI compiler — the gate battery. This module seeds it with COMPILE, the compile
 oracle: round-trip a candidate AG-IR through the MECHANICAL half
 (transpile_ir) and the jac type-checker. This is the property a manual lift
 never has — a deterministic ground truth on every iteration. Later gates
@@ -43,7 +43,7 @@ def _jac_bin() -> str {
 }
 
 # ---------------------------------------------------------------------------
-# G1 — the standalone gate (delete-SKILL.md), mechanical
+# G5 — the standalone gate (delete-SKILL.md), mechanical
 # ---------------------------------------------------------------------------
 
 glob _POINTER_SMELLS: list[any] = ["see ", "refer to ", "as described in ", "per the skill"];
@@ -59,20 +59,20 @@ def gate_standalone(vb: ViewBundle) -> list[str] {
             # mechanical half splices the standard embodiment at lower time
             # (toolib.jac); flagging it reported the ladder's own rung as a gap.
             if builtin(td.name) { continue; }
-            issues.append("G1: tool '" + td.name + "' is a prose-pointer (no body, no command) — embody it");
+            issues.append("G5: tool '" + td.name + "' is a prose-pointer (no body, no command) — embody it");
         }
     }
     for ki in vb.kn.knowledge {
         c = ki.content.strip();
         if not c {
-            issues.append("G1: knowledge '" + ki.key + "' has no content — embody it");
+            issues.append("G5: knowledge '" + ki.key + "' has no content — embody it");
             continue;
         }
         low = c.casefold();
         if len(c) < 80 {
             for sm in _POINTER_SMELLS {
                 if low.startswith(str(sm)) {
-                    issues.append("G1: knowledge '" + ki.key + "' looks like a pointer ('" + c[:40] + "...') — embody the referenced content verbatim");
+                    issues.append("G5: knowledge '" + ki.key + "' looks like a pointer ('" + c[:40] + "...') — embody the referenced content verbatim");
                     break;
                 }
             }
@@ -82,7 +82,7 @@ def gate_standalone(vb: ViewBundle) -> list[str] {
 }
 
 # ---------------------------------------------------------------------------
-# G3-hard — the artifact boundary (A.6 as a HARD gate)
+# G2_ARTIFACT-hard — the artifact boundary (A.6 as a HARD gate)
 # ---------------------------------------------------------------------------
 
 def _is_embodied_act(n: AgirNode, vb: ViewBundle) -> bool {
@@ -127,7 +127,7 @@ def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> l
         }
         if not satisfied {
             hint = (" (nodes: " + ", ".join([n.id for n in owners]) + ")") if owners else " (no node realizes it)";
-            issues.append("G3: IO mandate '" + r.id + "' has no embodied artifact write" + hint
+            issues.append("G2_ARTIFACT: IO mandate '" + r.id + "' has no embodied artifact write" + hint
                           + " — add an ACT node served by a write-tool (body/command) or reading the content carry");
         }
     }
@@ -135,7 +135,7 @@ def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> l
 }
 
 # ---------------------------------------------------------------------------
-# G5 — STRUCT-COV / no-monolith, static on the COMPILED module
+# G2 — STRUCT-COV / no-monolith, static on the COMPILED module
 # ---------------------------------------------------------------------------
 
 # The markers the mechanical half emits when a code-owned node had nothing to
@@ -158,7 +158,7 @@ def _lowered_hollow(node_id: str, module_src: str) -> bool {
     return False;
 }
 
-# G12-DET (determinization). One AG-IR node lowers to exactly ONE `by llm` slot
+# G2_OVERLOAD (determinization). One AG-IR node lowers to exactly ONE `by llm` slot
 # (compiler.jac emits a single `def <slot>(...) -> <ret> by llm`), so a node
 # citing N mandates asks one prompt to satisfy all N. Nothing in that slot's
 # output can be attributed back to an individual mandate, so every one of them
@@ -174,12 +174,12 @@ glob DET_MAX_MANDATES: int = 6;
 
 def det_overloaded(wf: WorkflowView) -> list[str] {
     out: list[str] = [];
-    if not gate_enabled("G12") { return out; }
+    if not gate_enabled("G2_OVERLOAD") { return out; }
     for n in wf.nodes {
         if n.owner != Owner.MODEL { continue; }
         k = len(n.traces_to);
         if k > DET_MAX_MANDATES {
-            out.append("G12: node '" + str(n.id) + "' folds " + str(k)
+            out.append("G2_OVERLOAD: node '" + str(n.id) + "' folds " + str(k)
                 + " mandates into ONE owner=model slot (max " + str(DET_MAX_MANDATES)
                 + "). DECOMPOSE: give each independently-checkable mandate its own"
                 + " node; prefer an owner=code gate for mechanical ones (exact"
@@ -189,7 +189,7 @@ def det_overloaded(wf: WorkflowView) -> list[str] {
     return out;
 }
 
-# G13 (slot-prompt bloat). A slot prompt should carry the mandate and the slot's
+# G5_BLOAT (slot-prompt bloat). A slot prompt should carry the mandate and the slot's
 # typed inputs -- not the document the mandate came from. Measured on the
 # compliance suite: shortening bloated skill documents into ordered procedures was
 # where an independent prose optimizer got its gains (dora 26k->15k chars, +18.8
@@ -207,14 +207,14 @@ glob SLOT_PROMPT_CAP: int = 6000;
 
 def gate_slot_prompt_bloat(module_src: str) -> list[str] {
     out: list[str] = [];
-    if not gate_enabled("G13") { return out; }
+    if not gate_enabled("G5_BLOAT") { return out; }
     # Block-literal sems (`sem x =\n"""..."""`) carry the resident knowledge; the
     # quoted one-liners are short by construction but measured the same way.
     pairs: list[any] = list(re.findall(r'(?s)sem ([A-Za-z_0-9]+) =\s*"""(.*?)"""', str(module_src)));
     for pr in pairs {
         nm = str(pr[0]); body = str(pr[1]);
         if len(body) > SLOT_PROMPT_CAP {
-            out.append("G13: slot '" + nm + "' carries a " + str(len(body))
+            out.append("G5_BLOAT: slot '" + nm + "' carries a " + str(len(body))
                 + "-character prompt (cap " + str(SLOT_PROMPT_CAP) + ") — that is the"
                 + " surrounding document, not the mandate. Scope the knowledge"
                 + " resident on this node to what the slot actually reads.");
@@ -245,7 +245,7 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
         owners: list[AgirNode] = list(node_by_rule.get(r.id, []));
         if not owners {
             sc.missing.append(r.id);
-            sc.issues.append("G5: MANDATORY rule '" + r.id + "' has NO realization in the graph");
+            sc.issues.append("G2: MANDATORY rule '" + r.id + "' has NO realization in the graph");
             continue;
         }
         best = "";
@@ -272,25 +272,25 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
         elif best == "slotted" { sc.slotted.append(r.id); }
         elif best == "monolithic" {
             sc.monolithic.append(r.id);
-            sc.issues.append("G5: rule '" + r.id + "' realized MONOLITHICALLY (node '" + owners[0].id + "' has no dedicated slot) — split it or add a code gate");
+            sc.issues.append("G2: rule '" + r.id + "' realized MONOLITHICALLY (node '" + owners[0].id + "' has no dedicated slot) — split it or add a code gate");
         } elif hollow_on {
             sc.missing.append(r.id);
-            sc.issues.append("G5: rule '" + r.id + "' realized HOLLOW — code node(s) [" + ", ".join(hollow_on)
+            sc.issues.append("G2: rule '" + r.id + "' realized HOLLOW — code node(s) [" + ", ".join(hollow_on)
                 + "] lowered to a marker comment, so the station is visited but does nothing."
                 + " Bind a tool (body or command) to it, or re-own the rule to MODEL.");
         } else {
             sc.missing.append(r.id);
-            sc.issues.append("G5: rule '" + r.id + "' traced to node(s) that never lowered to an ability — structural gap");
+            sc.issues.append("G2: rule '" + r.id + "' traced to node(s) that never lowered to an ability — structural gap");
         }
     }
-    # G12-DET: slot load is a property of the graph, not of this rule loop —
+    # G2_OVERLOAD: slot load is a property of the graph, not of this rule loop —
     # see det_overloaded for why it is counted per node.
     for _d in det_overloaded(wf) { sc.issues.append(_d); }
     return sc;
 }
 
 # ---------------------------------------------------------------------------
-# G6-HIL — human-feedback gates are owner=code (slotted != gated)
+# G3_HIL — human-feedback gates are owner=code (slotted != gated)
 # ---------------------------------------------------------------------------
 
 def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
@@ -312,7 +312,7 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
         feeds = [rd for rd in n.reads if rd in hil_carries];
         if not feeds { continue; }
         if n.owner != Owner.CODE {
-            issues.append("G6: route '" + n.id + "' consumes human feedback ('" + ", ".join(feeds)
+            issues.append("G3_HIL: route '" + n.id + "' consumes human feedback ('" + ", ".join(feeds)
                           + "') but is model-owned — make it owner=code with explicit guards (e.g. contains 'approved')");
         }
     }
@@ -320,7 +320,7 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
 }
 
 # ---------------------------------------------------------------------------
-# G7-ENV — environment binding (SkillRT AOT pass 2, install-time probe)
+# G6_ENV — environment binding (SkillRT AOT pass 2, install-time probe)
 # ---------------------------------------------------------------------------
 
 def gate_env_binding(ir_text: str) -> list[str] {
@@ -335,12 +335,12 @@ def gate_env_binding(ir_text: str) -> list[str] {
     mf = extract_manifest(ir);
     pr = probe_manifest(mf);
     for m in list(pr["missing_py"]) {
-        issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(m[2])]) + "] import '" + str(m[0])
+        issues.append("G6_ENV: tool(s) [" + ", ".join([str(t) for t in list(m[2])]) + "] import '" + str(m[0])
             + "' — not importable in this runtime. Bind it (jac -m pip install " + str(m[1])
             + " — plain pip targets a different interpreter) or ship the module with the agent bundle.");
     }
     for b in list(pr["missing_bin"]) {
-        issues.append("G7: tool(s) [" + ", ".join([str(t) for t in list(b[1])]) + "] shell out to '" + str(b[0])
+        issues.append("G6_ENV: tool(s) [" + ", ".join([str(t) for t in list(b[1])]) + "] shell out to '" + str(b[0])
             + "' — not on PATH. Install it or embody a python fallback.");
     }
     # process-IO provenance: a tool that reads sys.argv/sys.stdin/input() takes
@@ -350,7 +350,7 @@ def gate_env_binding(ir_text: str) -> list[str] {
     # reach a compiled tool through its params; re-author the body.
     pio = mf.get("proc_io") or {};
     for kv in pio.items() {
-        issues.append("G7: tool '" + str(kv[0]) + "' reads process IO (" + str(kv[1])
+        issues.append("G6_ENV: tool '" + str(kv[0]) + "' reads process IO (" + str(kv[1])
             + ") — a compiled tool receives inputs via its params, not argv/stdin. Re-author the body.");
     }
     # input provenance, same family: a missing external artifact must reach the
@@ -359,14 +359,14 @@ def gate_env_binding(ir_text: str) -> list[str] {
     # a fabricated deck path was opened unguarded).
     fab = mf.get("fabricated_path") or {};
     for kv2 in fab.items() {
-        issues.append("G7: tool '" + str(kv2[0]) + "' invents a default input path ('"
+        issues.append("G6_ENV: tool '" + str(kv2[0]) + "' invents a default input path ('"
             + str(kv2[1]) + "') when its lookup fails — that turns 'no input' into 'wrong input', "
             + "which the graph cannot tell from success. Return an empty/None sentinel and let a "
             + "BRANCH test it.");
     }
     ung = mf.get("unguarded_read") or {};
     for kv3 in ung.items() {
-        issues.append("G7: tool '" + str(kv3[0]) + "' opens an external artifact ("
+        issues.append("G6_ENV: tool '" + str(kv3[0]) + "' opens an external artifact ("
             + str(kv3[1]) + ") with no existence check or try — a missing file raises and takes "
             + "the walker down before any slot runs. Guard the read and report absence so a BRANCH "
             + "can handle it.");
@@ -375,7 +375,7 @@ def gate_env_binding(ir_text: str) -> list[str] {
 }
 
 # ---------------------------------------------------------------------------
-# G14-IN — input provenance: the location of an external artifact is an INPUT
+# G4_INPUT — input provenance: the location of an external artifact is an INPUT
 # ---------------------------------------------------------------------------
 
 def gate_input_provenance(ir_text: str) -> list[str] {
@@ -408,7 +408,7 @@ def gate_input_provenance(ir_text: str) -> list[str] {
             missing.append(str(n));
         }
         if missing {
-            issues.append("G14: tool '" + str(tn) + "' mines "
+            issues.append("G4_INPUT: tool '" + str(tn) + "' mines "
                 + ", ".join([("'" + str(m) + "'") for m in missing])
                 + " out of the task prose, and the walker declares no input for "
                 + ("them" if len(missing) > 1 else "it") + " — the caller cannot name the file, "
@@ -422,7 +422,7 @@ def gate_input_provenance(ir_text: str) -> list[str] {
 }
 
 # ---------------------------------------------------------------------------
-# G8-PAR — concurrency extraction (SkillRT AOT pass 3, mechanical on the
+# G6_PAR — concurrency extraction (SkillRT AOT pass 3, mechanical on the
 # typed dataflow). False parallelism is a hard issue; missed parallelism is
 # an opportunity the caller records (advisory — never blocks a compile).
 # ---------------------------------------------------------------------------
@@ -437,14 +437,14 @@ def gate_concurrency(ir_text: str) -> dict[str, any] {
 }
 
 # ---------------------------------------------------------------------------
-# G9-TY — typed-dataflow unification (mechanical on the FINAL IR).
+# G4 — typed-dataflow unification (mechanical on the FINAL IR).
 #
 # The carry table declares one type per lane; the producing slot's return
 # schema and every consuming tool's contract both derive from it. Nothing
 # audited that triangle: a fresh compile shipped a model slot returning `str`
 # into a tool body demanding `list` — green through every gate, TypeError at
 # runtime. Worse, an untyped carry lowers the walker field to `any`, so the
-# G4 jac-check is structurally BLIND to the mismatch. The demand a tool body
+# COMPILE jac-check is structurally BLIND to the mismatch. The demand a tool body
 # states is ground truth (its code is frozen); the carry type must match it.
 #
 # Evidence read per tool param, mirroring the _bind_args join (name first,
@@ -456,7 +456,7 @@ def gate_concurrency(ir_text: str) -> dict[str, any] {
 #
 # autofix_carry_types applies the unification MECHANICALLY (no model): adopt
 # the consumer's demand into walker.carries.<c>.type and let the caller
-# re-gate through G4 — the oracle stays the authority on the patched IR.
+# re-gate through COMPILE — the oracle stays the authority on the patched IR.
 # ---------------------------------------------------------------------------
 
 glob _TY_SCALARS: list[any] = ["str", "int", "float", "bool"];
@@ -665,7 +665,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
         }
         if len(classes) > 1 {
             spans = "; ".join(["tool '" + str(d[0]) + "' param '" + str(d[1]) + "' wants '" + str(d[2]) + "'" for d in dm]);
-            issues.append("G9: carry '" + str(cname) + "' has CONFLICTING consumer contracts (" + spans
+            issues.append("G4: carry '" + str(cname) + "' has CONFLICTING consumer contracts (" + spans
                 + ") — the tools themselves disagree; align the tool bodies before typing the carry");
             continue;
         }
@@ -675,13 +675,13 @@ def gate_type_unification(ir_text: str) -> list[str] {
                 if len(str(d[2])) > len(want) { want = str(d[2]); }
             }
             if dcls and (dcls != classes[0]) {
-                issues.append("G9: carry '" + str(cname) + "' is declared '" + declared + "' but tool '"
+                issues.append("G4: carry '" + str(cname) + "' is declared '" + declared + "' but tool '"
                     + str(dm[0][0]) + "' requires '" + want + "' for param '" + str(dm[0][1])
                     + "' — the walker crashes at this boundary at runtime. Set walker.carries."
                     + str(cname) + ".type: " + want + " (autofix adopts the consumer's type; the producing"
                     + " slot's return schema then enforces the shape at generation)");
             } elif (not declared.strip()) or (_ty_base(declared) == "any") {
-                issues.append("G9: carry '" + str(cname) + "' is untyped ('" + (declared if declared else "missing")
+                issues.append("G4: carry '" + str(cname) + "' is untyped ('" + (declared if declared else "missing")
                     + "') but tool '" + str(dm[0][0]) + "' requires '" + want
                     + "' — untyped lowers the walker field to `any`, so jac check cannot see the mismatch."
                     + " Set walker.carries." + str(cname) + ".type: " + want);
@@ -696,7 +696,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
                 if (str(nd2.get("owner", "")) == "code") and _g9_tool_for(ir, nd2) { code_readers.append(str(nd2.get("id"))); }
             }
             if code_readers {
-                issues.append("G9: carry '" + str(cname) + "' crosses model->code untyped — slot '"
+                issues.append("G4: carry '" + str(cname) + "' crosses model->code untyped — slot '"
                     + str(model_prod[0].get("id")) + "' returns whatever shape the model chose and code node(s) ["
                     + ", ".join(code_readers) + "] consume it blind. Declare walker.carries." + str(cname) + ".type");
             }
@@ -721,7 +721,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
             cdef = carries[rc] if isinstance(carries[rc], dict) else {};
             if str(cdef.get("role", "")) == "input" { continue; }
             if not list(producers.get(rc, [])) {
-                issues.append("G9: ACT '" + str(nd3.get("id")) + "' writes its artifact from carry '" + rc
+                issues.append("G4: ACT '" + str(nd3.get("id")) + "' writes its artifact from carry '" + rc
                     + "' which NO node produces — at runtime the carry holds its seed/default, so the"
                     + " deliverable is disconnected from the pipeline. Wire a producer or mark the carry role: input");
             }
@@ -736,7 +736,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
     # reported success. Graphs carrying unreachable nodes averaged AMC2 52
     # against 62 for fully reachable ones.
     nlist: list[any] = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict) and n.get("id")];
-    if nlist and gate_enabled("G9_REACH") {
+    if nlist and gate_enabled("G4_REACH") {
         ids: list[str] = [str(n.get("id")) for n in nlist];
         adj: dict[str, any] = {};
         for e in list(ir.get("edges") or []) {
@@ -759,7 +759,7 @@ def gate_type_unification(ir_text: str) -> list[str] {
             shown: str = ", ".join([str(x) for x in unreached[:6]]);
             if len(unreached) > 6 { shown = shown + ", ..."; }
             n_un: int = len(unreached); n_all: int = len(ids);
-            issues.append("G9: " + str(n_un) + " of " + str(n_all)
+            issues.append("G4: " + str(n_un) + " of " + str(n_all)
                 + " nodes are unreachable from entry '" + entry_id + "' (" + shown + ") — no edge path"
                 + " reaches them, so they are authored and lowered but never execute. Wire them into"
                 + " the edge chain, or remove them and the obligations they claim");
@@ -769,10 +769,10 @@ def gate_type_unification(ir_text: str) -> list[str] {
 }
 
 def autofix_carry_types(ir_text: str) -> dict[str, any] {
-    # The mechanical half of G9: adopt an agreeing consumer demand into
+    # The mechanical half of G4: adopt an agreeing consumer demand into
     # walker.carries.<c>.type. Pure code, no model. Returns the (possibly
     # unchanged) IR text + human-readable fix notes; the CALLER re-gates
-    # through G4 — a patch the oracle rejects is never adopted silently.
+    # through COMPILE — a patch the oracle rejects is never adopted silently.
     fixes: list = [];
     ir: any = {};
     try { ir = _load_ir(ir_text); } except Exception { return {"ir_text": ir_text, "fixes": []}; }
@@ -807,7 +807,7 @@ def autofix_carry_types(ir_text: str) -> dict[str, any] {
 }
 
 # ---------------------------------------------------------------------------
-# G4 — the compile oracle
+# COMPILE — the compile oracle
 # ---------------------------------------------------------------------------
 
 def _diagnostic(out: str, budget: int = 2400) -> str {
@@ -834,7 +834,7 @@ def _diagnostic(out: str, budget: int = 2400) -> str {
 }
 
 def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict {
-    # G4: the AG-IR must lower mechanically and type-check with zero errors.
+    # COMPILE: the AG-IR must lower mechanically and type-check with zero errors.
     osp = "";
     try {
         osp = str(transpile_ir(ir_text, name));
@@ -871,7 +871,7 @@ def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict 
 
 
 # ---------------------------------------------------------------------------
-# G10 — TRACE FAN-OUT.  A completeness check asks "does every rule have a
+# G1_TRACE — TRACE FAN-OUT.  A completeness check asks "does every rule have a
 # realization?", which one generic element can satisfy for dozens of unrelated
 # mandates at once: soc2's `append_file` tool alone claimed 37, and docx
 # collapsed from 98 nodes (max claim 2) to 14 (max claim 50) while its runtime
@@ -915,7 +915,7 @@ def gate_trace_inflation(spec: RuleSet, ir_text: str) -> list[str] {
         if not isinstance(n, dict) { continue; }
         got = [t for t in _claims(n.get("traces_to")) if t in action];
         if len(got) > cap {
-            issues.append("G10: node '" + str(n.get("id", "?")) + "' claims " + str(len(got))
+            issues.append("G1_TRACE: node '" + str(n.get("id", "?")) + "' claims " + str(len(got))
                 + " distinct procedural rules (" + ", ".join(got[:4]) + ", ...) — one element cannot"
                 + " perform them all; decompose it so each procedure has its own realization");
         }
@@ -926,7 +926,7 @@ def gate_trace_inflation(spec: RuleSet, ir_text: str) -> list[str] {
             if not isinstance(td, dict) { continue; }
             got = [t for t in _claims(td.get("traces_to")) if t in action];
             if len(got) > cap {
-                issues.append("G10: tool '" + str(tname) + "' claims " + str(len(got))
+                issues.append("G1_TRACE: tool '" + str(tname) + "' claims " + str(len(got))
                     + " distinct procedural rules (" + ", ".join(got[:4]) + ", ...) — a generic tool"
                     + " standing in for many procedures is coverage without performance");
             }
@@ -937,7 +937,7 @@ def gate_trace_inflation(spec: RuleSet, ir_text: str) -> list[str] {
 
 
 # ---------------------------------------------------------------------------
-# G11 — ARTIFACT EMBODIMENT.  When a rule's verbatim quote names a bundle file
+# G2_EMBODY — ARTIFACT EMBODIMENT.  When a rule's verbatim quote names a bundle file
 # ("Run `scripts/completeness_checker.py`", "Use `references/common_saas_controls.md`"),
 # the realization must actually touch THAT file. Nothing in the faithfulness
 # closure relates rule text to the element claiming it, so soc2 compiled to a
@@ -972,7 +972,7 @@ def gate_artifact_embodiment(spec: RuleSet, ir_text: str) -> list[str] {
                 if (r.id in k.traces_to) and (len(k.content.strip()) > 40) { seen = True; }
             }
             if not seen {
-                issues.append("G11: rule '" + r.id + "' names the bundle artifact '" + str(art)
+                issues.append("G2_EMBODY: rule '" + r.id + "' names the bundle artifact '" + str(art)
                     + "' but no realization touches it — bind a tool that runs/reads that exact"
                     + " file (or embody its content verbatim in a knowledge item traced to '"
                     + r.id + "'): " + str(r.quote)[:90]);
@@ -980,4 +980,133 @@ def gate_artifact_embodiment(spec: RuleSet, ir_text: str) -> list[str] {
         }
     }
     return issues;
+}
+
+# ---------------------------------------------------------------------------
+# G2_FLOW / G2_ORDER — represented constraints. The paper's AG-IR "represents
+# constraints on relationships among instructions" (arXiv 2607.27309 §3.1-3.2):
+# "never place PHI in logs" is realized by excluding every represented path
+# that supplies a PHI-carrying value to a logging ACT, and an ordering mandate
+# by making the later step unreachable except through the earlier one. A
+# prohibition folded into a slot's prose is advice; these are checked on the
+# program itself.
+#
+#   constraints:
+#     - id: no_phi_in_logs
+#       kind: forbid_flow        # values derived from `from` never reach `to`
+#       from: [phi_record]       # carries (the sources)
+#       to: [write_log]          # instruction ids (the sinks)
+#       through: [redact_phi]    # optional: instructions whose writes are clean
+#     - id: baa_before_send
+#       kind: require_before     # every path from the entry to `after`
+#       before: check_baa        # passes through `before`
+#       after: transmit
+#
+# The data plane is derived (spec §5.1): an instruction that reads a derived
+# value makes everything it writes derived, unless it is listed in `through`.
+# Conservative on purpose — a value that MIGHT carry the prohibited content is
+# treated as carrying it, because the alternative is a green check over a leak.
+# ---------------------------------------------------------------------------
+
+def _cslist(v: any) -> list[str] {
+    if isinstance(v, list) { return [str(x) for x in v if str(x).strip()]; }
+    if (v is None) or (not str(v).strip()) { return []; }
+    return [str(v)];
+}
+
+def gate_constraints(ir_text: str) -> list[any] {
+    # -> [[gate_id, message], ...]
+    out: list[any] = [];
+    try { ir = _load_ir(ir_text); } except Exception { return out; }
+    cons = ir.get("constraints");
+    if not isinstance(cons, list) { return out; }
+    nodes: list[any] = [n for n in (ir.get("nodes") or []) if isinstance(n, dict)];
+    by_id: dict[str, any] = {};
+    for n in nodes { by_id[str(n.get("id"))] = n; }
+    wk = ir.get("walker") if isinstance(ir.get("walker"), dict) else {};
+    cv = wk.get("carries");
+    carry_names: list[str] = [str(k) for k in cv] if isinstance(cv, dict) else [];
+    if isinstance(cv, list) {
+        for e in cv {
+            if isinstance(e, dict) {
+                ks = list(e);
+                if (len(ks) == 1) and isinstance(e[ks[0]], dict) { carry_names.append(str(ks[0])); }
+                elif e.get("name") { carry_names.append(str(e.get("name"))); }
+            }
+        }
+    }
+    succ: dict[str, list[str]] = {};
+    for e in (ir.get("edges") or []) {
+        if not isinstance(e, dict) { continue; }
+        f = str(e.get("from")); t = str(e.get("to"));
+        if f not in succ { succ[f] = []; }
+        succ[f].append(t);
+    }
+    entry_id = str(nodes[0].get("id")) if nodes else "";
+    for (ci, c) in enumerate(cons) {
+        if not isinstance(c, dict) { continue; }
+        cid = str(c.get("id") or ("#" + str(ci + 1)));
+        kind = str(c.get("kind") or "").strip().lower();
+        if kind == "forbid_flow" {
+            if not gate_enabled("G2_FLOW") { continue; }
+            srcs = _cslist(c.get("from"));
+            sinks = _cslist(c.get("to"));
+            through = _cslist(c.get("through"));
+            bad_refs = [s for s in srcs if s not in carry_names] + [s for s in sinks + through if s not in by_id];
+            if (not srcs) or (not sinks) or bad_refs {
+                out.append(["G2_FLOW", "G2_FLOW: constraint '" + cid + "' cannot be checked — it needs `from` carries and `to` instructions that exist"
+                            + ((" (unknown: " + ", ".join(bad_refs) + ")") if bad_refs else "") + "."]);
+                continue;
+            }
+            tainted: list[str] = list(srcs);
+            grew = True;
+            while grew {
+                grew = False;
+                for n in nodes {
+                    if str(n.get("id")) in through { continue; }
+                    if [r for r in _cslist(n.get("reads")) if r in tainted] {
+                        for w in _cslist(n.get("writes")) {
+                            if w not in tainted { tainted.append(w); grew = True; }
+                        }
+                    }
+                }
+            }
+            for sk in sinks {
+                hit = [r for r in _cslist(by_id[sk].get("reads")) if r in tainted];
+                if hit {
+                    out.append(["G2_FLOW", "G2_FLOW: constraint '" + cid + "' — instruction '" + sk + "' reads ["
+                                + ", ".join(hit) + "], derived from [" + ", ".join(srcs)
+                                + "]: the represented program reaches the prohibited flow. Remove the read, or route the value through an instruction listed in `through` that removes the prohibited content."]);
+                }
+            }
+        } elif kind == "require_before" {
+            if not gate_enabled("G2_ORDER") { continue; }
+            before = str(c.get("before") or "").strip();
+            after = str(c.get("after") or "").strip();
+            if (before not in by_id) or (after not in by_id) {
+                out.append(["G2_ORDER", "G2_ORDER: constraint '" + cid + "' cannot be checked — `before` and `after` must name existing instructions."]);
+                continue;
+            }
+            # reach `after` from the entry with `before` removed
+            seen: list[str] = [];
+            stack: list[str] = [entry_id] if (entry_id and (entry_id != before)) else [];
+            while stack {
+                cur = stack.pop();
+                if cur in seen { continue; }
+                seen.append(cur);
+                for nx in succ.get(cur, []) {
+                    if (nx != before) and (nx not in seen) { stack.append(nx); }
+                }
+            }
+            if after in seen {
+                out.append(["G2_ORDER", "G2_ORDER: constraint '" + cid + "' — '" + after
+                            + "' is reachable from the entry without passing through '" + before
+                            + "'. Make every path to '" + after + "' run '" + before + "' first."]);
+            }
+        } else {
+            out.append(["G2", "G2: constraint '" + cid + "' has kind '" + kind
+                        + "' — the AG-IR constraint kinds are forbid_flow and require_before."]);
+        }
+    }
+    return out;
 }
