@@ -105,13 +105,38 @@ def _body_imports(body: str) -> list[any] {
         except Exception { return []; }
     }
     mods: list = [];
-    for nd in ast.walk(tree) {
-        if isinstance(nd, ast.Import) {
-            for al in nd.names { mods.append(_top_module(al.name)); }
-        } elif isinstance(nd, ast.ImportFrom) {
-            # a relative import can never resolve inside a lowered module —
-            # surface its target name so the gate names the missing ship
-            if nd.module { mods.append(_top_module(nd.module)); }
+    # A code-EMITTING tool carries its product in a multi-line string literal and
+    # exec()s it later, so the product's imports are invisible to a scan of the
+    # body's own statements: drone-planning-control emitted a planner doing
+    # `from scipy.interpolate import CubicSpline`, scipy never reached the
+    # manifest, the preflight never bound it, and the exec died with
+    # ModuleNotFoundError INSIDE the artifact's interpreter — while the task
+    # image had scipy installed all along. Parse every multi-line string constant
+    # that is itself valid Python and take its imports too.
+    trees: list[any] = [tree];
+    for nd0 in ast.walk(tree) {
+        if isinstance(nd0, ast.Constant) and isinstance(nd0.value, str) and ("\n" in nd0.value) and ("import " in nd0.value) {
+            _cands: list[any] = [str(nd0.value), textwrap.dedent(str(nd0.value))];
+            # the wrapped parse above indents the body, which also indents the
+            # interior of a multi-line literal while its FIRST line stays flush —
+            # textwrap.dedent then finds no common prefix. Re-dedent lines 2+.
+            _ls = str(nd0.value).splitlines();
+            if len(_ls) > 1 { _cands.append(_ls[0] + "\n" + textwrap.dedent("\n".join(_ls[1:]))); }
+            for _c in _cands {
+                try { trees.append(ast.parse(_c)); break; }
+                except Exception { trees = trees; }
+            }
+        }
+    }
+    for tr in trees {
+        for nd in ast.walk(tr) {
+            if isinstance(nd, ast.Import) {
+                for al in nd.names { mods.append(_top_module(al.name)); }
+            } elif isinstance(nd, ast.ImportFrom) {
+                # a relative import can never resolve inside a lowered module —
+                # surface its target name so the gate names the missing ship
+                if nd.module { mods.append(_top_module(nd.module)); }
+            }
         }
     }
     out: list = [];
@@ -177,7 +202,8 @@ def extract_manifest(ir: any) -> dict[str, any] {
     stdlib = _stdlib_names();
     tools = ir.get("tools") if isinstance(ir, dict) else None;
     if not isinstance(tools, dict) {
-        return {"py": {}, "bin": {}, "proc_io": {}, "unguarded_read": {}, "fabricated_path": {}};
+        return {"py": {}, "bin": {}, "proc_io": {}, "unguarded_read": {},
+                "fabricated_path": {}, "task_scraped_paths": {}};
     }
     for kv in tools.items() {
         tname = str(kv[0]);
@@ -209,7 +235,8 @@ def extract_manifest(ir: any) -> dict[str, any] {
     }
     return {"py": py, "bin": bins, "proc_io": _proc_io_tools(tools),
             "unguarded_read": _unguarded_read_tools(tools),
-            "fabricated_path": _fabricated_path_tools(tools)};
+            "fabricated_path": _fabricated_path_tools(tools),
+            "task_scraped_paths": scraped_path_inputs(tools)};
 }
 
 # Tool bodies that read PROCESS-level IO instead of their params. A skill's
@@ -242,10 +269,17 @@ def _proc_io_tools(tools: dict[str, any]) -> dict[str, any] {
 # reports "absent" so the graph can route; it does not guess a filename.
 def _unguarded_read_tools(tools: dict[str, any]) -> dict[str, any] {
     import re;
-    # opener(...) calls whose argument is a NAME (a param/carry), not a literal
+    # opener(...) calls whose argument is an EXPRESSION over a param/carry, not a
+    # literal the tool just wrote. Restricting the capture to a bare name missed
+    # the commonest emitted shape — `Document(spec.get("template_path"))`, a path
+    # threaded through the SENSE tool's return dict — so the read that actually
+    # took the walker down was never flagged (caught live: offer-letter-generator,
+    # PackageNotFoundError before the first slot in every cell). Leading `[A-Za-z_]`
+    # keeps literals out: `open("out.html", "w")` is a write, not an external read.
     opener = re.compile(
         r"(?<![\w.])(?:open|Presentation|Document|load_workbook|Image\.open"
-        r"|pd\.read_\w+|json\.load|yaml\.safe_load)\s*\(\s*([A-Za-z_]\w*)\s*[,)]");
+        r"|pd\.read_\w+|json\.load|yaml\.safe_load)\s*\(\s*"
+        r"([A-Za-z_][\w.]*(?:\s*\([^()]*\))?(?:\s*\[[^\]]*\])?)");
     # any of these makes the read defensive enough to route or recover
     guard = re.compile(
         r"os\.path\.(?:exists|isfile)|(?<![\w.])Path\([^)]*\)\.exists\(\)"
@@ -273,6 +307,14 @@ def _fabricated_path_tools(tools: dict[str, any]) -> dict[str, any] {
     fab = re.compile(
         r"(?:else|or|=)\s*[\"\']([\w./-]+\.(?:pptx|potx|docx|xlsx|pdf|csv|json|ya?ml"
         r"|html?|md|txt|png|jpe?g|zip))[\"\']");
+    # …and the same fabrication one level in: `template_path = <lookup> else
+    # "template.docx"` inside a tool whose NAME and SIG say nothing about paths
+    # (`load_template_data(task) -> dict`). Gating the whole check on "path" in
+    # the name or signature is what let that shape through — the invented literal
+    # is a defect wherever it is assigned, so the assignment target decides.
+    fab_assign = re.compile(
+        r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]*=.*?(?:else|or)[ \t]*[\"\']([\w./-]+\.(?:pptx|potx|docx|xlsx|pdf|csv|json|ya?ml"
+        r"|html?|md|txt|png|jpe?g|zip))[\"\']");
     hits: dict[str, any] = {};
     for kv in tools.items() {
         t = kv[1];
@@ -280,12 +322,291 @@ def _fabricated_path_tools(tools: dict[str, any]) -> dict[str, any] {
         sig = str(t.get("sig") or "");
         body = str(t.get("body") or "");
         if not body.strip() { continue; }
-        # only tools whose job is to produce a path downstream
-        if ("path" not in sig.lower()) and ("path" not in str(kv[0]).lower()) { continue; }
-        m = fab.search(body);
-        if m { hits[str(kv[0])] = str(m.group(1)); }
+        # tools whose job is to produce a path downstream: by signature/name…
+        if ("path" in sig.lower()) or ("path" in str(kv[0]).lower()) {
+            m = fab.search(body);
+            if m { hits[str(kv[0])] = str(m.group(1)); continue; }
+        }
+        # …or by what the body assigns
+        m2 = fab_assign.search(body);
+        if m2 and _pathish_name(str(m2.group(1))) { hits[str(kv[0])] = str(m2.group(2)); }
     }
     return hits;
+}
+
+# ---------------------------------------------------------------------------
+# INPUT PROVENANCE — the location of an external artifact is an INPUT.
+# ---------------------------------------------------------------------------
+# A tool that mines its file paths out of the task prose gives the caller no way
+# to NAME them: whichever path the sentence happens to mention first becomes the
+# one that is opened. Live proof (offer-letter-generator): `template_path =
+# docxs[0] if docxs else "template.docx"` over an agent sentence that named only
+# the OUTPUT opened the output as the template, so every cell failed while the
+# delivery layer worked perfectly. The scrape is a fine FALLBACK; it is not an
+# input surface. These names belong on the walker as role:input carries, where
+# the lowering already turns them into `--flags`, MCP schema properties and
+# `_EJ_PARAM_KEYS` entries.
+glob _PATHISH_SFX: list[any] = ["_path", "_file", "_dir", "_filename", "_dest", "_target", "_out"];
+
+def _pathish_name(name: str) -> bool {
+    nl = str(name).lower();
+    for sfx in _PATHISH_SFX {
+        if nl.endswith(sfx) { return True; }
+    }
+    return nl in ["path", "filename", "infile", "outfile"];
+}
+
+def _scrape_vars(body: str) -> list[any] {
+    # names bound from a regex over the tool's own text argument
+    import re;
+    out: list = [];
+    for m in re.finditer(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*re\.(?:findall|search|match|finditer)\b", body) {
+        out.append(str(m.group(1)));
+    }
+    return out;
+}
+
+def scraped_path_inputs(tools: any) -> dict[str, any] {
+    # tool -> [pathish names it derives from the task prose]
+    import re;
+    hits: dict[str, any] = {};
+    if not isinstance(tools, dict) { return hits; }
+    for kv in tools.items() {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        body = str(t.get("body") or "");
+        sig = str(t.get("sig") or "").lower();
+        if not body.strip() { continue; }
+        if "task" not in sig { continue; }
+        sv = _scrape_vars(body);
+        if not sv { continue; }
+        names: list = [];
+        for m in re.finditer(r"(?m)^[ \t]*([a-z_]\w*)[ \t]*=[ \t]*([^=\n].*)$", body) {
+            n = str(m.group(1));
+            rhs = str(m.group(2));
+            if (n in names) or (not _pathish_name(n)) { continue; }
+            derived = False;
+            for v in sv {
+                if re.search(r"\b" + re.escape(str(v)) + r"\b", rhs) { derived = True; }
+            }
+            if (not derived) and re.search(r"[\"\'][\w./-]+\.[A-Za-z0-9]{1,5}[\"\']", rhs) { derived = True; }
+            if derived { names.append(n); }
+        }
+        if names { hits[str(kv[0])] = names; }
+    }
+    return hits;
+}
+
+# The FILE TYPE a derived path was guessing at. The guess itself is what the
+# lift wrote — `network_path = m.group(0) if m else "network.json"`, or a regex
+# over `\.json` — so the extension sits right there in the body and is then
+# thrown away when the name is lifted to an input. It is the one fact that tells
+# a caller WHICH neighbouring file to hand over: energy-ac bound `network_path`
+# to the maths write-up while network.json sat in the same directory, because
+# the parameter advertised a name and nothing else. Assignments to the name
+# first; any filename literal in the body as the fallback.
+glob _OPENER_EXTS: list[list[str]] = [
+    [r"(?<![\w.])load_workbook\s*\(|pd\.read_excel\s*\(", ".xlsx"],
+    [r"(?<![\w.])Presentation\s*\(", ".pptx"],
+    [r"(?<![\w.])Document\s*\(", ".docx"],
+    [r"(?<![\w.])(?:PdfReader|PdfFileReader|pdfplumber\.open|fitz\.open)\s*\(", ".pdf"],
+    [r"(?<![\w.])pd\.read_csv\s*\(|csv\.(?:DictReader|reader)\s*\(", ".csv"],
+    [r"(?<![\w.])yaml\.(?:safe_load|load)\s*\(", ".yaml"],
+    [r"(?<![\w.])json\.load\s*\(", ".json"]
+];
+
+def path_ext_hint(body: str, name: str) -> list[any] {
+    import re;
+    b = str(body);
+    if not b.strip() { return []; }
+    rhs_all: list = [];
+    for m in re.finditer(r"(?m)^[ \t]*" + re.escape(str(name)) + r"[ \t]*=[ \t]*([^=\n].*)$", b) {
+        rhs_all.append(str(m.group(1)));
+    }
+    for rhs in [str(x) for x in rhs_all] + ([b] if not rhs_all else []) {
+        exts: list = [];
+        # a literal default ("network.json")…
+        for lm in re.finditer(r"[\"\'][\w./-]*\.([A-Za-z0-9]{1,5})[\"\']", rhs) {
+            e = "." + str(lm.group(1)).lower();
+            if e not in exts { exts.append(e); }
+        }
+        # …and an escaped-dot alternation in a scrape pattern (`\.(json|csv)`)
+        for rm in re.finditer(r"\\\.\(?([A-Za-z0-9|]{1,24})\)?", rhs) {
+            for piece in str(rm.group(1)).split("|") {
+                e2 = "." + str(piece).lower();
+                if piece and (e2 not in exts) { exts.append(e2); }
+            }
+        }
+        if exts { return exts[:3]; }
+    }
+    # No literal to read: the OPENER still names the type. `json.load(open(path))`
+    # says .json as plainly as the filename would, and this is the commonest
+    # shape by far — a tool that takes `path` as a parameter has no filename in
+    # it at all, which is exactly the case that left `network_path` and
+    # `size_path` advertising the identical description.
+    for pair in _OPENER_EXTS {
+        if re.search(str(pair[0]), b) { return [str(pair[1])]; }
+    }
+    return [];
+}
+
+
+# ---------------------------------------------------------------------------
+# IN-PROCESS PYTHON: a tool that shells out with `sys.executable` escapes the
+# environment the preflight bound.
+# ---------------------------------------------------------------------------
+# Under jac, `sys.executable` IS the jac binary, and the child's module search
+# path is the runtime closure. That closure does not include the artifact-local
+# `.jac/pydeps` the preflight installs into, and jac does not honour PYTHONPATH,
+# so the child cannot be fixed from outside either. Live proof
+# (court-form-filling): 12 of 12 calls returned `No module named 'pypdf'` with
+# pypdf sitting in the manifest, installed, and importable in the PARENT — the
+# artifact bound its environment correctly and then handed the work to a process
+# that could not see it, so every cell scored 0/5 with the delivery layer and
+# the argument binding both perfect.
+#
+# The fix is to stop leaving the interpreter: run the script HERE, where the
+# dependency already imports, and hand back something shaped like CompletedProcess
+# so the tool body around it is unchanged.
+def exec_subprocess_tools(tools: any) -> list[any] {
+    import re;
+    out: list = [];
+    if not isinstance(tools, dict) { return out; }
+    pat = re.compile(r"[A-Za-z_]\w*\.(?:run|call|check_call|check_output|Popen)\s*\(\s*\[\s*[A-Za-z_]\w*\.executable\b");
+    for kv in tools.items() {
+        t = kv[1];
+        if not isinstance(t, dict) { continue; }
+        if pat.search(str(t.get("body") or "")) { out.append(str(kv[0])); }
+    }
+    return out;
+}
+
+def runpy_src() -> str {
+    lines: list[any] = [
+        "::py::",
+        "class _SigilProc:",
+        "    # the CompletedProcess surface the rewritten tool bodies already use",
+        "    def __init__(self, returncode, stdout, stderr):",
+        "        self.returncode = returncode",
+        "        self.stdout = stdout",
+        "        self.stderr = stderr",
+        "        self.args = None",
+        "    def check_returncode(self):",
+        "        if self.returncode:",
+        "            raise RuntimeError(self.stderr or (\"exit %d\" % self.returncode))",
+        "",
+        "def _sigil_image_python():",
+        "    # the system python on PATH, unless it IS this (jac) interpreter",
+        "    import os, shutil, sys",
+        "    for _n in (\"python3\", \"python\"):",
+        "        _p = shutil.which(_n)",
+        "        if not _p:",
+        "            continue",
+        "        try:",
+        "            _rp = os.path.realpath(_p)",
+        "            if _rp == os.path.realpath(sys.executable) or os.path.basename(_rp) == \"jac\":",
+        "                continue",
+        "        except Exception:",
+        "            pass",
+        "        return _p",
+        "    return \"\"",
+        "",
+        "def _sigil_run_py(argv, capture_output=False, text=True, timeout=None,",
+        "                  cwd=None, env=None, input=None, check=False, **_kw):",
+        "    # Run a python script in THIS interpreter instead of spawning one.",
+        "    # `sys.executable` is the jac binary and its child cannot see the",
+        "    # artifact-local .jac/pydeps the preflight bound (jac ignores",
+        "    # PYTHONPATH), so a shelled-out script fails on a dependency the",
+        "    # artifact has already installed. stdout/stderr are captured either",
+        "    # way; `env` cannot be applied to an in-process run and is ignored.",
+        "    import io, os, sys",
+        "    args = [str(a) for a in (argv or [])]",
+        "    if args and (args[0] == sys.executable or",
+        "                 os.path.basename(args[0]) in (\"jac\", \"python\", \"python3\")):",
+        "        args = args[1:]",
+        "    mod = None",
+        "    if len(args) >= 2 and args[0] == \"-m\":",
+        "        mod = args[1]",
+        "        args = args[1:]",
+        "    if not args:",
+        "        return _SigilProc(1, \"\", \"sigil: empty python command\")",
+        "    # PREFER the image interpreter. In a task container the libraries a",
+        "    # generated script needs (pyscipopt, pandas, GaMMA, ...) live in the IMAGE",
+        "    # python, not in jac's embedded one: exam-block-sequencing's PySCIPOpt",
+        "    # script ran in-process and produced nothing (5/9 -> heuristic fallback).",
+        "    # The artifact's own .jac/pydeps ride along on PYTHONPATH (a real python",
+        "    # honours it); if the image python lacks a module the preflight bound,",
+        "    # fall through to the in-process run below. SIGIL_RUNPY_INPROC=1 opts out.",
+        "    _img = \"\" if os.environ.get(\"SIGIL_RUNPY_INPROC\") == \"1\" else _sigil_image_python()",
+        "    if _img:",
+        "        import subprocess as _subp",
+        "        _envp = dict(os.environ if env is None else env)",
+        "        try:",
+        "            _here = os.path.dirname(os.path.abspath(__file__))",
+        "        except Exception:",
+        "            _here = os.getcwd()",
+        "        _pd = os.path.join(_here, \".jac\", \"pydeps\")",
+        "        if os.path.isdir(_pd):",
+        "            _envp[\"PYTHONPATH\"] = _pd + ((os.pathsep + _envp[\"PYTHONPATH\"]) if _envp.get(\"PYTHONPATH\") else \"\")",
+        "        _cmd = ([_img, \"-m\"] + list(args)) if mod else ([_img] + list(args))",
+        "        try:",
+        "            _r = _subp.run(_cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=_envp, input=input)",
+        "            if _r.returncode == 0 or \"ModuleNotFoundError\" not in str(_r.stderr or \"\"):",
+        "                _p = _SigilProc(_r.returncode, _r.stdout or \"\", _r.stderr or \"\")",
+        "                if check and _r.returncode:",
+        "                    _p.check_returncode()",
+        "                return _p",
+        "        except _subp.TimeoutExpired as _te:",
+        "            return _SigilProc(124, str(getattr(_te, \"stdout\", \"\") or \"\"), \"sigil: timed out after %s s\" % timeout)",
+        "        except Exception:",
+        "            pass",
+        "    out, err = io.StringIO(), io.StringIO()",
+        "    _argv, _out, _err = list(sys.argv), sys.stdout, sys.stderr",
+        "    _cwd = os.getcwd()",
+        "    rc = 0",
+        "    try:",
+        "        if cwd:",
+        "            os.chdir(cwd)",
+        "        sys.argv = list(args)",
+        "        sys.stdout, sys.stderr = out, err",
+        "        if mod:",
+        "            import runpy",
+        "            runpy.run_module(mod, run_name=\"__main__\", alter_sys=True)",
+        "        else:",
+        "            # compile+exec, NOT runpy: under the jac runtime run_path goes",
+        "            # through jac's import machinery and fails with",
+        "            # ModuleNotFoundError naming the SCRIPT (observed: 'No module",
+        "            # named extract_form_field_info'), while the identical call",
+        "            # under system python runs the file fine.",
+        "            _sp = os.path.abspath(args[0])",
+        "            with open(_sp, \"rb\") as _fh:",
+        "                _code = compile(_fh.read(), _sp, \"exec\")",
+        "            _g = {\"__name__\": \"__main__\", \"__file__\": _sp,",
+        "                  \"__builtins__\": __builtins__, \"__package__\": None,",
+        "                  \"__spec__\": None, \"__doc__\": None}",
+        "            _sd = os.path.dirname(_sp)",
+        "            if _sd and _sd not in sys.path:",
+        "                sys.path.insert(0, _sd)",
+        "            exec(_code, _g)",
+        "    except SystemExit as _e:",
+        "        _c = _e.code",
+        "        rc = 0 if _c is None else (_c if isinstance(_c, int) else 1)",
+        "    except BaseException as _e:",
+        "        rc = 1",
+        "        err.write(\"%s: %s\\n\" % (type(_e).__name__, _e))",
+        "    finally:",
+        "        sys.argv, sys.stdout, sys.stderr = _argv, _out, _err",
+        "        try:",
+        "            os.chdir(_cwd)",
+        "        except Exception:",
+        "            pass",
+        "    p = _SigilProc(rc, out.getvalue(), err.getvalue())",
+        "    if check and rc:",
+        "        p.check_returncode()",
+        "    return p",
+        "::py::"
+    ];
+    return "\n".join(lines);
 }
 
 def probe_manifest(manifest: dict[str, any]) -> dict[str, any] {

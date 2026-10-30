@@ -699,3 +699,38 @@ test "a fully wired graph raises no reachability finding" {
         "  - {from: review_errors, to: done}");
     assert not [i for i in gate_type_unification(ir) if "unreachable" in i], str(gate_type_unification(ir));
 }
+
+test "G14 flags a file location the caller cannot name, and clears once lifted" {
+    # the live fault: a compiled skill is called by a program, but this artifact's
+    # only way in was a sentence — the SENSE tool regex-mined its paths, so word
+    # order decided which file was opened (offer-letter-generator opened its own
+    # output as the template and scored 0 in every cell).
+    body = ("def load_template_data(task: str) -> dict:\n"
+            "    import re\n"
+            "    docxs = re.findall(r'[^\\s]+\\.docx\\b', task or \"\")\n"
+            "    template_path = docxs[0] if docxs else \"template.docx\"\n"
+            "    return {\"template_path\": template_path}\n");
+    ir = str(yaml.safe_dump({
+        "walker": {"name": "T", "carries": {"task": {"type": "str", "role": "input"}}},
+        "tools": {"load_template_data": {"sig": "(task) -> dict", "surface": "SENSE", "body": body}},
+        "nodes": [{"id": "load_inputs", "type": "SENSE", "owner": "code",
+                   "tool": "load_template_data", "reads": ["task"], "writes": []}],
+        "edges": []
+    }, sort_keys=False));
+    issues = gate_input_provenance(ir);
+    assert len(issues) == 1;
+    assert "template_path" in str(issues[0]);
+    assert "cannot name" in str(issues[0]);
+
+    # declaring the input is the fix — the same scrape is then just the fallback
+    lifted = str(yaml.safe_dump({
+        "walker": {"name": "T", "carries": {"task": {"type": "str", "role": "input"},
+                                            "template_path": {"type": "path", "role": "input"}}},
+        "tools": {"load_template_data": {"sig": "(task, template_path) -> dict",
+                                         "surface": "SENSE", "body": body}},
+        "nodes": [{"id": "load_inputs", "type": "SENSE", "owner": "code",
+                   "tool": "load_template_data", "reads": ["task", "template_path"], "writes": []}],
+        "edges": []
+    }, sort_keys=False));
+    assert gate_input_provenance(lifted) == [];
+}

@@ -117,6 +117,7 @@ def _finalize(sr: any, ir_in: str, wf: any, g1: list[any], name: str, skill_dir:
     findings: list[any] = [];
     if g4.ok {
         for i9 in gate_type_unification(ir_text) { findings.append(finding("G9", str(i9))); }
+        for i14 in gate_input_provenance(ir_text) { findings.append(finding("G14", str(i14))); }
         for i13 in gate_slot_prompt_bloat(g4.module_src) { findings.append(finding("G13", str(i13))); }
         sc = gate_struct_cov(sr.spec, wf, g4.module_src);
         for i2 in sc.issues { findings.append(finding(auto_gate(str(i2), "G5"), str(i2))); }

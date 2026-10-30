@@ -128,6 +128,13 @@ def load_agir(text: str) -> dict[str, any] {
     }
     if not isinstance(ir, dict) { ir = {}; }
     if "_frontmatter" not in ir { ir["_frontmatter"] = fm; }
+    # `when:` is `guard:` (LIFT emits both); every consumer keys on `guard`
+    edges = ir.get("edges");
+    if isinstance(edges, list) {
+        for e in edges {
+            if isinstance(e, dict) and (not e.get("guard")) and e.get("when") { e["guard"] = e.get("when"); }
+        }
+    }
     return ir;
 }
 

@@ -21,7 +21,7 @@ CLI / test harness:
 import os;
 import re;
 import from .toolib { builtin, builtin_names, builtin_catalogue }
-import from .envbind { extract_manifest, preflight_src }
+import from .envbind { extract_manifest, preflight_src, runpy_src, exec_subprocess_tools }
 import from ...sigil_agir_yaml { load_agir }
 import glob as _glob;
 import textwrap;
@@ -95,6 +95,30 @@ def _slot_budget(ret: str, types: any) -> int {
 glob PATH_PARAMS: list[any] = ["path", "out", "dest", "outfile", "filename", "file",
     "out_path", "output_path", "outpath", "target", "target_path", "dest_path"];
 
+# Exact names were never enough: a skill names its locations in its own domain
+# terms — `input_media`/`output_media` (ffmpeg), `image_paths` (object-counter),
+# `wav_path`, `script_path`. None matched, so no input carry was minted and the
+# artifact shipped _EJ_PARAM_KEYS = [] with the filename mined from the task
+# sentence. Match the SHAPE of the name as well as the name, and keep content
+# params out of it — binding content to a path param is the misbinding that
+# wrote a 0-byte file named after its own contents.
+glob _PATH_SUFFIXES: list[any] = ["_path", "_paths", "_file", "_files", "_dir",
+    "_folder", "_media", "_image", "_images", "_doc", "_workbook"];
+
+def is_path_param(name: any) -> bool {
+    n = str(name or "").lower();
+    if not n { return False; }
+    if n in CONTENT_PARAMS { return False; }
+    if n in PATH_PARAMS { return True; }
+    for suf in _PATH_SUFFIXES {
+        if n.endswith(suf) { return True; }
+    }
+    if n.startswith("input_") or n.startswith("output_") or n.startswith("dest_") {
+        return True;
+    }
+    return False;
+}
+
 # Tool params that carry the CONTENT being written. A write tool's content param
 # must bind to the node's content carry BY ROLE — the blind positional fallback
 # bound reads[0] (the content) to `path` and left `content` None, so every
@@ -116,6 +140,11 @@ def _pathish_carry(name: any) -> bool {
 # runnable body that were lowered to the scoped GEN-RAW author-run envelope instead
 # of a silent `pass`. Reset per _transpile; reported by _main (loud, not silent).
 glob _FALLBACKS: list = [];
+
+# Carries written by one node and READ by another: scratch files on the way to
+# the deliverable, never the deliverable itself. Reset per transpile, like
+# _FALLBACKS, and consulted by _bind_args before it mines a name out of the task.
+glob _INTERMEDIATES: list[any] = [];
 
 # Jac/Python reserved words that must not be emitted as bare identifiers.
 glob RESERVED: list[any] = [
@@ -430,7 +459,23 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
     parts: list[any] = [head];
     # Surface each delivered carry's CONTENT (via _artifact_text), not its file path —
     # delivery ops return the path of what the script wrote; the caller wants the answer.
-    for d in deliv[:4] { parts.append(str(d) + "={_artifact_text(self." + _safe(str(d)) + ")}"); }
+    # ...and the run's own ASSESSMENT text: the review/validation/notes carries a pipeline
+    # produces near its end. A report that lists only file paths hid the substance —
+    # citation-management's validation JSON and review notes said which records failed to
+    # resolve, but the caller saw "report_file=" and nothing else. Latest-produced first, 3 max.
+    _notes: list = [];
+    for kv2 in _items(carries) {
+        c2 = kv2[1];
+        nm2 = str(kv2[0]);
+        if not isinstance(c2, dict) { continue; }
+        if nm2 in deliv or nm2 == "task" or nm2 == "report" { continue; }
+        if str(_jac_type(c2.get("type"), types)[0]) != "str" { continue; }
+        if not re.search(r"(review|notes|analysis|findings|assessment|diagnos|report_json|verdict|explanation|rationale|critique|_report|report_|_check|check_|criteria|constants|completeness|compliance|delivery|deliverab)", nm2.lower()) { continue; }
+        if not c2.get("produced_by") { continue; }
+        _notes.append(nm2);
+    }
+    for nn2 in list(reversed(_notes))[:3] { parts.append(str(nn2) + "={str(self." + _safe(str(nn2)) + ")[:3000]}"); }
+    for d in deliv[:4] { parts.append(str(d) + "={_artifact_text(self." + _safe(str(d)) + ", 1200)}"); }
     if (not enumc) and (not deliv) {
         # NEVER a bare constant (standard 3T): serialize the produced carries so
         # the report carries evidence of what the run actually made. Empty-handed
@@ -471,7 +516,27 @@ def _terminal_report(name: any, ir: any, carries: any, types: any) -> str {
         sinks: list[any] = [p for p in prod if str(p[2]) not in reads_all];
         pick: list[any] = sorted(sinks if sinks else prod);
         parts2: list[any] = [str(name)];
-        for d2 in [str(p[2]) for p in pick][:5] { parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:300]}"); }
+        # the run's ASSESSMENT text first (review/validation/notes carries, latest 3, 1200
+        # chars) — citation-management's report was five empty *_file sinks while its
+        # validation JSON and review notes (which records failed to resolve) went unread
+        _picked: list[any] = [str(p[2]) for p in pick][:5];
+        _notes2: list = [];
+        for kv3 in _items(carries) {
+            c3 = kv3[1];
+            nm3 = str(kv3[0]);
+            if not isinstance(c3, dict) { continue; }
+            if (nm3 == "task") or (nm3 == "report") or (nm3 in _picked) { continue; }
+            if str(_jac_type(c3.get("type"), types)[0]) != "str" { continue; }
+            if not re.search(r"(review|notes|analysis|findings|assessment|diagnos|report_json|verdict|explanation|rationale|critique|_report|report_|_check|check_|criteria|constants|completeness|compliance|delivery|deliverab)", nm3.lower()) { continue; }
+            if not c3.get("produced_by") { continue; }
+            _notes2.append(nm3);
+        }
+        for nn3 in list(reversed(_notes2))[:3] { parts2.append(str(nn3) + "={str(self." + _safe(str(nn3)) + ")[:3000]}"); }
+        for d2 in _picked {
+            # a sink that IS an assessment carry gets the assessment budget, not a 300-char stub
+            _cap = 3000 if re.search(r"(review|notes|analysis|findings|assessment|diagnos|report_json|verdict|explanation|rationale|critique|_report|report_|_check|check_|criteria|constants|completeness|compliance|delivery|deliverab)", str(d2).lower()) else 300;
+            parts2.append(str(d2) + "={str(self." + _safe(str(d2)) + ")[:" + str(_cap) + "]}");
+        }
         return "f\"" + _j(" | ", parts2) + "\"";
     }
     return "f\"" + _j(" ", parts) + "\"";
@@ -547,6 +612,23 @@ def _slot_assign(tgt: any, call: str, carries: any, types: any, code_owned: any)
 # Standard write-assignment for a code-tool dispatch whose ::py:: return is Unknown:
 # str carry -> str-wrap, list carry -> list(), any -> direct, typed obj/enum -> run
 # but keep default (a mechanical py return can't be assigned to a typed obj).
+# A MODEL node that writes SEVERAL carries returns a typed OBJECT with one field per
+# carry — never a single str. The str-slot lowering handed the model's whole reply
+# ("fill two fields: state_code, nws_url" -> a JSON blob) to the first carry and left
+# the rest empty via _unwrap(str, key, i>0) == "" (nws-flood-thresholds: http_get got a
+# non-URL, the table came out header-only; 46 of 209 artifacts, 34 tasks).
+def _multi_writes(n: any, carries: any, types: any) -> list[any] {
+    if str(n.get("type", "")) not in GEN_TYPES { return []; }
+    if n.get("output") and (n.get("output") in types) { return []; }
+    ws = [str(w) for w in _list(n.get("writes")) if str(w) in list(carries)];
+    if len(ws) < 2 { return []; }
+    return ws;
+}
+
+def _multi_out_type(nid: any, types: any) -> str {
+    return _arch(nid, types) + "Out";
+}
+
 def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     if (not tgt) or (tgt not in list(carries)) { return "        " + expr + ";"; }
     tt = str(_jac_type(carries[tgt].get("type"), types)[0]);
@@ -620,10 +702,182 @@ def _llm_trace_in(slot: str, creads: list[any]) -> str {
     return "        _tui_llm_in(" + _q(str(slot)) + ", [" + rl + "]);";
 }
 
+def _is_input_carry(name: any, carries: any) -> bool {
+    c = carries.get(str(name)) if isinstance(carries, dict) else None;
+    return isinstance(c, dict) and (str(c.get("role")) == "input") and (not c.get("produced_by"));
+}
+
+# EDIT MODE. A GEN-EDIT step REVISES a document it already holds; lowered as a
+# whole-text slot, its output scales with the document instead of the change —
+# restclient-migration's rewrite_calls re-emitted an entire Java class and hit its
+# 2500-token cap. Returns the carry it revises (the edit source), or "" when the
+# step is not a single-output text revision. The source is the output itself for
+# an in-place repair (fix_errors: script -> script); otherwise the ONE text input
+# (not the task, not a path) that shares a meaningful name token with the output
+# or with the step itself: source_java -> migrated_java (java), pom_xml ->
+# edited_pom (pom), adapter_source for refactor_adapter_class (adapter). Generic
+# words never count, and anything but exactly one match keeps the whole-text
+# lowering — a GEN-EDIT that condenses findings into a summary is not a revision.
+glob _EDIT_STOP: list[any] = ["md", "txt", "text", "data", "file", "path", "dir", "out", "output", "result", "results",
+    "new", "old", "updated", "edited", "migrated", "refactored", "fixed", "revised", "draft", "final",
+    "current", "source", "src", "input", "in", "the", "a", "of", "to"];
+
+def _edit_tokens(name: any) -> list[any] {
+    toks: list = [];
+    for t in str(name).lower().split("_") {
+        tt = t[:-1] if (len(t) > 3 and t.endswith("s")) else t;
+        if tt and (tt not in _EDIT_STOP) and (tt not in toks) { toks.append(tt); }
+    }
+    return toks;
+}
+
+def _edit_source(n: any, carries: any, types: any, creads: list[any]) -> str {
+    if not isinstance(n, dict) { return ""; }
+    if str(n.get("type") or "") != "GEN-EDIT" { return ""; }
+    if str(n.get("owner") or "") != "model" { return ""; }
+    ws: list[any] = [str(w) for w in _list(n.get("writes"))];
+    if len(ws) != 1 { return ""; }
+    w = ws[0];
+    cw = carries.get(w) if isinstance(carries, dict) else None;
+    if not isinstance(cw, dict) { return ""; }
+    if str(_jac_type(cw.get("type"), types)[0]) != "str" { return ""; }
+    cr: list[any] = [str(r) for r in _list(creads)];
+    if w in cr { return w; }
+    anchor: list[any] = _edit_tokens(w) + _edit_tokens(n.get("id"));
+    matches: list[any] = [];
+    for r in cr {
+        if (r == "task") or (r == w) or _pathish_carry(r) { continue; }
+        cr_m = carries.get(r) if isinstance(carries, dict) else None;
+        if not isinstance(cr_m, dict) { continue; }
+        if str(_jac_type(cr_m.get("type"), types)[0]) != "str" { continue; }
+        if any([(t in anchor) for t in _edit_tokens(r)]) { matches.append(r); }
+    }
+    return matches[0] if len(matches) == 1 else "";
+}
+
+# Edit mode only pays when the document is large and the change small: a
+# SEARCH/REPLACE block repeats the old text AND the new one. Measured on SkillsBench
+# (glm-5.2): pom.xml (the one large source) went 692 -> 326 output tokens, while two
+# small Java classes went 577 -> 1069 (edits longer than the file) and 397 ->
+# 876 + 410 (edits failed to apply, then the fallback rewrite ran too). Below this
+# size the step uses the whole-text slot directly.
+glob EDIT_MODE_MIN_CHARS: int = 6000;
+
+# The edit-mode instruction appended to a GEN-EDIT slot's own prompt.
+def _edit_mode_sem(src: str) -> str {
+    return (" EDIT MODE: `" + str(src) + "` is the current text. Do NOT return the whole text."
+        + " Return ONLY the changes, as one or more blocks, each exactly:\n"
+        + "<<<<<<< SEARCH\n<lines copied exactly from `" + str(src) + "`>\n=======\n<the replacement lines>\n>>>>>>> REPLACE\n"
+        + "Each SEARCH must match `" + str(src) + "` exactly, including indentation, and occur in it exactly once;"
+        + " keep each block small. If nothing needs to change, answer exactly: NO CHANGES");
+}
+
+# A model step that only FILLS fields from the request sentence — GEN-FILL /
+# GEN-ENUM reading nothing but `task`, writing plain-str values — re-derives
+# values the caller very often already holds. The travel skills asked the model
+# to pull "Cleveland" back out of "Find pet-friendly accommodations in
+# Cleveland": 15 of the 21 slot calls in one SkillsBench cell were such
+# extractions, each a full model round-trip for a string the caller had typed.
+# Returns the step's writes when it is such an extractor, else [].
+# Deliberately narrow: GEN-RAW (drafting content) is never bypassable, a
+# non-str value cannot tell "supplied 0/False" from "not supplied", and paths,
+# documents and collection specs keep their own input rules (inputs / SEED FILES).
+def _extractor_writes(n: any, carries: any, types: any) -> list[any] {
+    import re;
+    if not isinstance(n, dict) { return []; }
+    if str(n.get("owner") or "") != "model" { return []; }
+    if str(n.get("type") or "") not in ["GEN-FILL", "GEN-ENUM"] { return []; }
+    if [str(r) for r in _list(n.get("reads"))] != ["task"] { return []; }
+    ws: list[any] = [str(w) for w in _list(n.get("writes"))];
+    if not ws { return []; }
+    _doc_ext = ["bib", "csv", "json", "md", "txt", "html", "yaml", "yml", "xml", "py", "tex", "rst", "tsv"];
+    for w in ws {
+        c = carries.get(w) if isinstance(carries, dict) else None;
+        if not isinstance(c, dict) { return []; }
+        if str(c.get("role")) == "input" { return []; }
+        if str(_jac_type(c.get("type"), types)[0]) != "str" { return []; }
+        if _pathish_carry(w) { return []; }
+        wl = str(w).lower();
+        if any([(_tk in _doc_ext) for _tk in re.split(r"[^a-z0-9]+", wl) if _tk]) { return []; }
+        if wl.endswith("_spec") or wl.endswith("_ids") or wl.endswith("_list") or wl.endswith("_request") or wl.endswith("_params") { return []; }
+    }
+    return ws;
+}
+
+# A carry another node READS is an intermediate — the build script on the way to
+# the workbook, the field values on the way to the filled form — so its filename
+# must be derived, never mined from the task. Mining it handed `script_file` the
+# name `gdp_modified.xlsx` (the only filename the task mentioned), so the xlsx
+# skill wrote its own Python source over the deliverable and every downstream
+# check died in `load_workbook`. `_consumed_downstream` in autofix.jac guards the
+# caller-supplied-path twin of this; this is the lowering-time half.
+# A carry whose CONTENT is generated code is a script on the way to the
+# deliverable, whatever the graph says about who reads it. xlsx's `repair_file`
+# is written by write_file from `repair_code` and then read by nobody — the IR
+# never wires up a node to run it — so the reads-based rule below cannot see it
+# is scratch, and _outname handed it the only filename the task mentioned.
+glob _CODE_CARRY_SUFFIXES: list[any] = ["_code", "_script", "_source", "_src", "_py"];
+
+def _writes_generated_code(nd: any, carries: any) -> bool {
+    for r in list(nd.get("reads") or []) {
+        rn = str(r).lower();
+        for suf in _CODE_CARRY_SUFFIXES {
+            if rn.endswith(suf) { return True; }
+        }
+    }
+    return False;
+}
+
+def _intermediate_carries(ir: any) -> list[any] {
+    nodes: list[any] = [n for n in list(ir.get("nodes") or []) if isinstance(n, dict)];
+    out: list = [];
+    cs = ir.get("walker").get("carries") if isinstance(ir.get("walker"), dict) else {};
+    for nd0 in nodes {
+        if not _writes_generated_code(nd0, cs) { continue; }
+        for w0 in list(nd0.get("writes") or []) {
+            if str(w0) not in out { out.append(str(w0)); }
+        }
+    }
+    for nd in nodes {
+        nid = str(nd.get("id"));
+        for w in list(nd.get("writes") or []) {
+            wn = str(w);
+            if wn in out { continue; }
+            for nd2 in nodes {
+                if str(nd2.get("id")) == nid { continue; }
+                # A TERMINAL node reads the deliverable to REPORT it — that is not
+                # consumption, and treating it as such made the deliverable itself
+                # look like scratch (caught by compiler.test: `exported` is read by
+                # `done`, and the export lost the filename the task asked for).
+                if str(nd2.get("type", "")).upper().startswith("TERMINAL") { continue; }
+                if wn in [str(r) for r in list(nd2.get("reads") or [])] {
+                    out.append(wn);
+                    break;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+# A carry whose NAME says it is the destination (`output_path`, `out_file`,
+# `dest_path`, `target_path`...) is an input the caller hands the write, never a
+# source: the MCP schema documents it as "where to WRITE the deliverable". The
+# declared-input skip below exists for the opposite case (docx's `template_file`),
+# so it must not swallow these (caught live: react's write_report read
+# [report_md, output_path] and still lowered to `_outname(self.task, ...)`, so
+# `--output_path=` was accepted, echoed as bound, and ignored).
+def _out_path_name(name: any) -> bool {
+    n = str(name).lower();
+    if re.match(r"^(out|output|dest|destination|target)(_?(path|file|dir|name|location))?$", n) { return True; }
+    return bool(re.search(r"(_out|_output|_dest|_destination|_target)(_?(path|file|dir|name|location))$", n));
+}
+
 def _bind_args(params: any, reads: any, carries: any, types: any, write_target: str = "") -> str {
     rl: list[any] = list(_list(reads));
     ck = list(carries);
     out: list = [];
+    used: list = [];
     i = 0;
     for p in _list(params) {
         pl = str(p).lower();
@@ -639,15 +893,26 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
                 if (str(r) in ck) and (not _pathish_carry(r)) { b = "self." + _safe(str(r)); break; }
             }
         }
-        if (b == "None") and (pl in PATH_PARAMS) {
+        if (b == "None") and is_path_param(pl) {
             for r in rl {
+                # never the carry a SOURCE param of this same call already took, and
+                # never a declared input when this call WRITES: the destination would
+                # then be the file the tool is reading, so the artifact overwrites its
+                # own input in place and the deliverable is never created (caught
+                # live: offer-letter/docx bound `path` to `template_file` and produced
+                # no output file at all, 0/4 while the tool reported success).
+                if str(r) in used { continue; }
+                # an output-named input IS the destination of a deliverable write; an
+                # intermediate keeps its derived name (never the caller's deliverable path)
+                _dest_in = _out_path_name(str(r)) and (str(write_target) not in _INTERMEDIATES);
+                if write_target and _is_input_carry(str(r), carries) and (not _dest_in) { continue; }
                 if (str(r) in ck) and _pathish_carry(r) { b = "self." + _safe(str(r)); break; }
             }
         }
         # positional fallback — but never hand a NON-pathish read (content) to a
         # path param; that is exactly the misbinding the role pass exists to stop
         if (b == "None") and (i < len(rl)) and (rl[i] in ck)
-           and (not ((pl in PATH_PARAMS) and (not _pathish_carry(rl[i])))) {
+           and (not (is_path_param(pl) and (not _pathish_carry(rl[i])))) {
             b = "self." + _safe(str(rl[i]));
         }
         # An ACT tool that takes a DESTINATION has no carry to bind it to: the IR
@@ -655,18 +920,66 @@ def _bind_args(params: any, reads: any, carries: any, types: any, write_target: 
         # tool a null path, which raises inside the generated module. Resolve it
         # the way the no-tool ACT fallback below already does — the filename the
         # task asks for, else a deterministic name off the carry being written.
-        if (b == "None") and write_target and ("task" in ck) and (pl in PATH_PARAMS) {
-            b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
+        if (b == "None") and write_target and ("task" in ck) and is_path_param(pl) {
+            if str(write_target) in _INTERMEDIATES {
+                # scratch on the way to the deliverable: a fixed derived name, so
+                # it can never collide with the file the task actually asks for
+                b = _q(_safe(str(write_target)) + ".out");
+            } else {
+                b = "_outname(self.task, " + _q(_safe(str(write_target)) + ".out") + ")";
+            }
         }
         # The SENSE twin — the read side of the same hole (caught live: the
         # first node lowered to _read_input_csv(None) and the tool's own guard
         # killed the run). The input filename lives only in the task string;
         # _inname prefers read-verb filenames, so "clean data.csv and save as
         # out.csv" binds data.csv here while the ACT rung above binds out.csv.
-        if (b == "None") and (not write_target) and ("task" in ck) and (pl in PATH_PARAMS) {
+        if (b == "None") and (not write_target) and ("task" in ck) and is_path_param(pl) {
             b = "_inname(self.task)";
         }
+        # A CALLER-SUPPLIED location wins over both prose rungs above. `_inname` /
+        # `_outname` mine the filename out of the task sentence, which is the only
+        # way in when the walker declares no input for it — and that is precisely
+        # how a compiled skill ends up opening whatever file the phrasing happened
+        # to mention first. When the bound carry IS a declared input, the flag the
+        # caller passed (`--input_path=…`, the MCP schema property) decides, and
+        # the prose extraction stays as the fallback for an unnamed call.
+        if is_path_param(pl) and str(b).startswith("self.") {
+            _cn = str(b)[5:];
+            _cm = carries.get(_cn) if isinstance(carries, dict) else None;
+            if isinstance(_cm, dict) and (str(_cm.get("role")) == "input") and _pathish_carry(_cn) {
+                # A carry this node READS is a SOURCE, even on a call that writes.
+                # Widening is_path_param to match `*_file` made the destination
+                # fallback fire on `template_file` too, so docx's template got the
+                # deliverable's name — the exact misbinding compiler.test guards.
+                _is_src = (str(_cn) in [str(x) for x in list(reads or [])]) and (not _out_path_name(_cn));
+                # the CONTENT being written is CODE (repair_code, build_script, planner_src):
+                # its destination is a script file with a derived name, never the caller's
+                # path input — xlsx wrote its build script INTO the workbook it was handed
+                # (`(self.path or "script_file.out")`, path being a READ of that node too:
+                # the in-place workbook is the input AND the deliverable, the script is neither)
+                _codeish = False;
+                for _rr in list(reads or []) {
+                    if re.search(r"(_code|_script|_src|_program|_py|_js|_code_final)$", str(_rr)) or (str(_rr) in ["script", "code", "program", "source"]) { _codeish = True; }
+                }
+                if write_target and _codeish {
+                    b = _q(_safe(str(write_target)) + ".py");
+                } elif write_target and (not _is_src) {
+                    _fbn = _q(_safe(str(write_target)) + ".out");
+                    # same rule on the caller-supplied rung: an intermediate falls
+                    # back to its derived name, never to a filename in the task
+                    if str(write_target) in _INTERMEDIATES {
+                        b = "(" + b + " or " + _fbn + ")";
+                    } else {
+                        b = "(" + b + " or _outname(self.task, " + _fbn + "))";
+                    }
+                } else {
+                    b = "(" + b + " or _inname(self.task))";
+                }
+            }
+        }
         out.append(b);
+        if str(b).startswith("self.") { used.append(str(b)[5:]); }
         i += 1;
     }
     return _j(", ", out);
@@ -859,6 +1172,18 @@ def _strip_main_guard(body: str) -> str {
         i += 1;
     }
     return "\n".join(out).rstrip();
+}
+
+def _rewrite_exec_subprocess(body: str) -> str {
+    # Point a `subprocess.run([sys.executable, ...])` at the in-process runner.
+    # Only the CALLEE changes; every argument, keyword and the result's
+    # .returncode/.stdout/.stderr surface stay exactly as the tool wrote them,
+    # so this is invisible to the body around it. See envbind.runpy_src for why
+    # the spawned interpreter cannot see the artifact's own dependencies.
+    import re;
+    return str(re.sub(
+        r"\b[A-Za-z_]\w*\.run\((?=\s*\[\s*[A-Za-z_]\w*\.executable\b)",
+        "_sigil_run_py(", str(body)));
 }
 
 # Indent a Python tool body to nest it inside its `__impl` wrapper WITHOUT touching
@@ -1082,7 +1407,7 @@ def _emit_tools(ir: any) -> str {
         # instead of a node name with opaque work behind it.
         fnm = _toolfn_prefix(name);
         out.append("def " + fnm + "__impl(" + sig_params + "):");
-        for fl in _body_lines(body, params) { out.append(fl); }
+        for fl in _body_lines(_rewrite_exec_subprocess(body), params) { out.append(fl); }
         pairs = _j(", ", [("(" + _q(str(p)) + ", " + _safe(str(p)) + ")") for p in params]);
         fwd = _j(", ", [_safe(str(p)) for p in params]);
         out.append("");
@@ -1463,6 +1788,25 @@ def _emit_slots(ir: any) -> str {
             ret = hint if hint else ret.replace("any", "str");
         }
         ret = _schematizable(ret);
+        _mw = _multi_writes(n, carries, types);
+        if _mw {
+            _oname = _multi_out_type(n["id"], types);
+            _fields: list = [];
+            for _w in _mw {
+                _jt = _jac_type(carries[_w].get("type"), types);
+                _pt = str(_jt[0]);
+                _dv = str(_jt[1]);
+                if "any" in _pt { _pt = "str"; _dv = "\"\""; }
+                _pt = _schematizable(_pt);
+                if _pt.startswith("dict") { _dv = "{}"; }
+                if _pt.startswith("list") { _dv = "[]"; }
+                _fields.append(f"    has {_safe(_w)}: {_pt} = {_dv};");
+            }
+            out.append(f"obj {_oname} {{");
+            for _fl in _fields { out.append(_fl); }
+            out.append("}");
+            ret = _oname;
+        }
         tools = "";
         au = _dict(n.get("autonomy"));
         if isinstance(au, dict) and au.get("tools") {
@@ -1520,6 +1864,15 @@ def _emit_slots(ir: any) -> str {
             if seed { out.append(f"sem {slot} =\n{_block_lit(semtext)};"); }
             else { out.append(f"sem {slot} = {_q(semtext)};"); }
         }
+        # EDIT MODE companion (see _edit_source): same inputs, returns only the
+        # changed spans as SEARCH/REPLACE blocks; the node applies them and falls
+        # back to the whole-text slot above when any block fails to apply.
+        # _block_lit, not _q: the block format needs its newlines.
+        _esrc = _edit_source(n, carries, types, creads);
+        if _esrc and (ret == "str") {
+            out.append(f"def {slot}_edits({psig}) -> str by llm{_llmopts};");
+            out.append(f"sem {slot}_edits =\n{_block_lit(semtext + _edit_mode_sem(_esrc))};");
+        }
     }
     # error escape hatch: a repair slot any script-running node falls back to when
     # the authored script crashes at runtime (see _exec_repair_lines).
@@ -1532,6 +1885,24 @@ def _emit_slots(ir: any) -> str {
 
 # Use the guard's OWN field name (the IR guard names the routing field, e.g.
 # `mode in {...}`) so we route on the carry that actually exists.
+# A join's arrival term for a source that lives under a ROUTE: the label is the
+# edge's guard, or `__default__:<route>` for the route's unguarded (else) edge,
+# which holds exactly when none of the route's guarded edges does.
+def _join_cond(lab: str, route_conds: dict[str, any], m2e: any, carries: any, types: any) -> str {
+    if lab.startswith("__default__:") {
+        sib = _list(route_conds.get(lab[len("__default__:"):], []));
+        if not sib { return ""; }
+        alts: list = [];
+        for g in sib {
+            c = _guard_to_cond(g, m2e, carries, types);
+            if c { alts.append("(" + str(c) + ")"); }
+        }
+        if not alts { return ""; }
+        return "not (" + _j(" or ", alts) + ")";
+    }
+    return str(_guard_to_cond(lab, m2e, carries, types));
+}
+
 def _guard_to_cond(guard: any, member_to_enum: any, carries: any = None, types: any = None) -> str {
     g = str(guard).strip();
     m: any = re.match(r"(\w+)\s+in\s+\{(.+)\}", g);
@@ -1797,6 +2168,123 @@ def _emit_walker(ir: any) -> list[any] {
         if (base in types) and types[base].get("kind") == "enum" { route_field = str(kv3[0]); break; }
     }
 
+    # DAG JOINS: a node with several MANDATORY in-edges (no route alternative among
+    # them, no loop through it) executes ONCE, on its LAST arrival. jac's visit queue
+    # reaches it once per incoming path, and every early visit ran the node on inputs
+    # the other branch had not produced yet, then re-visited everything downstream —
+    # citation-management (42 nodes, 48 edges) made 122 visits and every report came
+    # out empty. A TERMINAL join likewise disengaged on its FIRST arrival, dropping
+    # the still-queued branch. 28 of 209 SkillsBench artifacts carry such joins.
+    _ntype_of: dict[str, any] = {};
+    for _jn in _list(ir.get("nodes")) {
+        if isinstance(_jn, dict) { _ntype_of[str(_jn.get("id"))] = str(_jn.get("type") or "").upper(); }
+    }
+    _succ: dict[str, any] = {};
+    for _je in edges {
+        if not isinstance(_je, dict) { continue; }
+        _succ.setdefault(str(_je.get("from")), []).append(str(_je.get("to")));
+    }
+    # Guard CONTEXT of every node: the guard labels on each path from the entry.
+    # A join whose in-edges come from ALTERNATIVE branches (both arms of a ROUTE
+    # merging at the TERMINAL) must NOT wait for every in-edge: only the arm that
+    # ran ever arrives (caught live: citation-management's validation arm reached
+    # `done` once, the gate wanted 4, the tool reported "INCOMPLETE ... no
+    # deliverable" over a written report). The expected arrival count is therefore
+    # emitted as a RUNTIME expression: one term per in-edge, `1` when the source
+    # is unconditional, `(1 if <its guards> else 0)` when it lives under a route.
+    _entry_id: str = "";
+    for _jn0 in _list(ir.get("nodes")) {
+        if isinstance(_jn0, dict) { _entry_id = str(_jn0.get("id")); break; }
+    }
+    _elabel: dict[tuple[str, str], str] = {};        # (from, to) -> guard label, "" when unconditional
+    _route_conds: dict[str, any] = {};   # route id -> guard labels of its guarded out-edges
+    for _je2 in edges {
+        if not isinstance(_je2, dict) { continue; }
+        _g2 = _je2.get("guard") if (_je2.get("guard") is not None) else _je2.get("when");
+        _gl = str(_g2 or "").strip();
+        _fr = str(_je2.get("from"));
+        _to = str(_je2.get("to"));
+        if _gl and (_gl.lower() not in GUARD_SENTINELS) {
+            _elabel[(_fr, _to)] = _gl;
+            if _ntype_of.get(_fr, "") == "ROUTE" { _route_conds.setdefault(_fr, []).append(_gl); }
+        } elif _ntype_of.get(_fr, "") == "ROUTE" {
+            _elabel[(_fr, _to)] = "__default__:" + _fr;
+        } else { _elabel[(_fr, _to)] = ""; }
+    }
+    _ctx: dict[str, any] = {};   # node -> distinct guard-label sets seen on paths from the entry
+    _stk: list[any] = [[_entry_id, []]];
+    _walked = 0;
+    while _stk {
+        _cur = _stk.pop();
+        _cx = str(_cur[0]);
+        _cg = sorted(set(_cur[1]));
+        _seenl = _ctx.setdefault(_cx, []);
+        if _cg in _seenl { continue; }
+        _seenl.append(_cg);
+        _walked += 1;
+        if _walked > 20000 { break; }
+        for _nx in _succ.get(_cx, []) {
+            _lab = str(_elabel.get((_cx, str(_nx)), ""));
+            _stk.append([str(_nx), list(_cg) + ([_lab] if _lab else [])]);
+        }
+    }
+    join_indeg: dict[str, any] = {};   # join id -> arrival-count EXPRESSION (a literal when static)
+    for _jn2 in _list(ir.get("nodes")) {
+        if not isinstance(_jn2, dict) { continue; }
+        _jid = str(_jn2.get("id"));
+        _ins = [_e for _e in edges if isinstance(_e, dict) and str(_e.get("to")) == _jid];
+        if len(_ins) < 2 { continue; }
+        _ok = True;
+        _terms: list[any] = [];   # per reachable in-edge: the guard labels its arrival depends on
+        for _ie in _ins {
+            _fr2 = str(_ie.get("from"));
+            _lab2 = str(_elabel.get((_fr2, _jid), ""));
+            _mod = str(_ie.get("modality") or "mandatory");
+            if _fr2 == _jid { _ok = False; break; }
+            if (_mod != "mandatory") and (not _lab2) { _ok = False; break; }   # optional and unconditioned: unknowable
+            _sets = _ctx.get(_fr2);
+            if not _sets { continue; }   # unreachable from the entry: never arrives
+            _common: any = set(_sets[0]);
+            for _st in _sets[1:] { _common = _common & set(_st); }
+            _terms.append([sorted(_common), _lab2]);   # [context labels, the in-edge's own guard]
+        }
+        if (not _ok) or (len(_terms) < 2) { continue; }
+        # no cycle through the join: it must not be reachable from itself
+        _seen: list[any] = [];
+        _stack: list[any] = list(_succ.get(_jid, []));
+        _cyc = False;
+        while _stack {
+            _x = _stack.pop();
+            if _x == _jid { _cyc = True; break; }
+            if _x in _seen { continue; }
+            _seen.append(_x);
+            for _y in _succ.get(_x, []) { _stack.append(_y); }
+        }
+        if _cyc { continue; }
+        _parts: list = [];
+        _dyn = False;
+        for _t2 in _terms {
+            _conds: list = [];
+            for _lab3 in _list(_t2[0]) {
+                # an upstream guard that does not translate is treated as unconditional
+                # (the pre-context behaviour: the static count never looked upstream)
+                _c = _join_cond(str(_lab3), _route_conds, member_to_enum, carries, types);
+                if _c { _conds.append("(" + _c + ")"); }
+            }
+            _own = str(_t2[1]);
+            if _own {
+                _c2 = _join_cond(_own, _route_conds, member_to_enum, carries, types);
+                if _c2 { _conds.append("(" + _c2 + ")"); }
+                elif not _own.startswith("__default__:") { _ok = False; break; }   # an in-edge guard we cannot express: no gate (as before)
+            }
+            if _conds { _parts.append("(1 if (" + _j(" and ", _conds) + ") else 0)"); _dyn = True; }
+            else { _parts.append("1"); }
+        }
+        if not _ok { continue; }
+        if not _dyn { join_indeg[_jid] = str(len(_parts)); continue; }
+        join_indeg[_jid] = "max(1, " + _j(" + ", _parts) + ")";
+    }
+
     spawn_sibs: list[any] = [];   # [[sibling_walker_name, worker_slot_name], …] emitted after the main walker
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
@@ -1808,6 +2296,10 @@ def _emit_walker(ir: any) -> list[any] {
         reads = _list(n.get("reads"));
         out_edges = [e for e in edges if e.get("from") == nid];
         out.append(f"    can n_{_safe(nid)} with {arch} entry {{");
+        if str(nid) in join_indeg {
+            # early arrivals leave without running the body or visiting onward
+            out.append(f"        if not _join_arrive({_q(str(nid))}, {join_indeg[str(nid)]}) {{ return; }}");
+        }
         out.append(f"        _progress({_q(nid)});");   # live: mark current node
 
         if ntype == "TERMINAL" {
@@ -1828,10 +2320,30 @@ def _emit_walker(ir: any) -> list[any] {
             call_args = _slot_args(creads, carries, types);
             call = f"{_slot_name(nid, carries)}({call_args})";
             tgt = writes[0] if writes else None;
-            if tgt and (tgt in ckeys) {
+            mw = _multi_writes(n, carries, types);
+            if mw {
+                body.append(_llm_trace_in(_slot_name(nid, carries), creads));
+                body.append(f"        _rw = {call};");
+                body.append("        _tui_llm_out(str(_rw));");
+                for _w in mw {
+                    _wt = str(_jac_type(carries[_w].get("type"), types)[0]);
+                    if (str(_w) in list(code_owned)) and (_wt != "str") { continue; }
+                    _fx = f"_field(_rw, {_q(str(_w))})";
+                    if _wt == "str" { _fx = f"_strip_fences({_fx})"; }
+                    body.append(_assign_carry(str(_w), _fx, carries, types));
+                }
+            } elif tgt and (tgt in ckeys) {
                 tt = _jac_type(carries[tgt].get("type"), types)[0];
                 val = call;
-                if (ntype == "GEN-RAW") and (tt == "str") { val = f"str(_strip_fences({call}))"; }
+                # EVERY model slot that produces text can wrap it in a markdown
+                # fence, not just the raw ones. xlsx's `fix_errors` is a GEN-EDIT
+                # returning the corrected build script; unfenced only for GEN-RAW,
+                # its ```python line 1 was written to _sigil_build_model_fixed.py
+                # and executed, so 16 of 18 calls came back "REBUILD FAILED:
+                # invalid syntax (<unknown>, line 1)" and the cell scored 0/8.
+                # _strip_fences only fires when the WHOLE output is one fenced
+                # block, so a document containing fenced examples is untouched.
+                if tt == "str" { val = f"str(_strip_fences({call}))"; }
                 # A list-returning slot is where byLLM's JSON leakage shows up as a
                 # phantom element ("" or '"},{"'), which every downstream count check
                 # then reads as a real item. Strip contentless entries at the source.
@@ -1848,7 +2360,22 @@ def _emit_walker(ir: any) -> list[any] {
                     body.append(f"        {call};  # advisory only: '{tgt}' is code-produced — model text must not clobber the object");
                     body.append("        _tui_llm_out(\"(advisory)\");");
                 } else {
-                    body.append(f"        self.{_safe(tgt)} = {val};");
+                    # EDIT MODE (see _edit_source): ask for the changed spans only,
+                    # apply them in code, and fall back to the whole-text slot when
+                    # any block fails to apply — the revision is never partial.
+                    _esrc2 = _edit_source(n, carries, types, creads) if tt == "str" else "";
+                    if _esrc2 {
+                        # SIZE GATE (see EDIT_MODE_MIN_CHARS): edits only when the
+                        # document is big enough for them to be cheaper than a rewrite
+                        _es = _safe(_esrc2);
+                        body.append(f"        if len(str(self.{_es})) >= {EDIT_MODE_MIN_CHARS} {{");
+                        body.append(f"            _ed = str({_slot_name(nid, carries)}_edits({call_args}));");
+                        body.append(f"            _ap = str(_apply_edits(str(self.{_es}), _ed));");
+                        body.append(f"            if _ap {{ self.{_safe(tgt)} = _ap; }} else {{ self.{_safe(tgt)} = {val}; }}");
+                        body.append(f"        }} else {{ self.{_safe(tgt)} = {val}; }}");
+                    } else {
+                        body.append(f"        self.{_safe(tgt)} = {val};");
+                    }
                     if tt == "str" {
                         # an EMPTY text answer is retried once without thinking: glm-5.2 under
                         # reasoning_effort=low returned "" for a whole solver script (exam-block:
@@ -2085,10 +2612,18 @@ def _emit_walker(ir: any) -> list[any] {
             # lower to a comment-only no-op (standard gap #1) — the superpowers
             # sweep showed deliverables dying in carries exactly here.
             if (not expr) {
+                # the caller's destination (an output-named input this node reads) wins,
+                # the task-mined filename stays the fallback - same rule as _bind_args
+                _dest5 = "";
+                for rd5 in reads {
+                    if (rd5 in ckeys) and _is_input_carry(str(rd5), carries) and _out_path_name(str(rd5)) and (str(wt5) not in _INTERMEDIATES) { _dest5 = "self." + _safe(str(rd5)); break; }
+                }
                 for rc in reads {
-                    if (rc in ckeys) and (rc != "artifact") and (not expr) {
+                    if (rc in ckeys) and (rc != "artifact") and (not expr) and (str(rc) != str(_dest5)[5:]) {
                         if str(_jac_type(carries[rc].get("type"), types)[0]) == "str" {
-                            expr = f"_write_artifact(str(self.{_safe(str(rc))}), _outname(self.task, {_q(_safe(str(rc)) + '.out')}))";
+                            _on5 = "_outname(self.task, " + _q(_safe(str(rc)) + ".out") + ")";
+                            if _dest5 { _on5 = "(" + _dest5 + " or " + _on5 + ")"; }
+                            expr = f"_write_artifact(str(self.{_safe(str(rc))}), {_on5})";
                         }
                     }
                 }
@@ -2204,6 +2739,18 @@ def _emit_walker(ir: any) -> list[any] {
         for b in body {
             if ("visit" in b) or ("disengage" in b) { has_flow = True; }
         }
+        # EXTRACTOR GUARD (pairs with EXTRACTOR VALUES at spawn): when the caller
+        # supplied every value this task-only extraction step produces, skip the
+        # model call. Only a flow-free body is wrapped, so the walk continues
+        # exactly as authored whether or not the step ran.
+        _xg = _extractor_writes(n, carries, types) if ntype in GEN_TYPES else [];
+        if _xg and body and (not has_flow) {
+            _xcond = " and ".join(["str(self." + _safe(str(_w2)) + ").strip()" for _w2 in _xg]);
+            _gbody: list[any] = ["        if not (" + _xcond + ") {"];
+            for _bl in body { _gbody.append("    " + str(_bl).replace("\n", "\n    ")); }
+            _gbody.append("        }");
+            body = _gbody;
+        }
         # Nodes that didn't emit their own flow (everything but ROUTE/TERMINAL) get
         # guard-aware OSP flow: guarded edges -> conditional visits, total else, and
         # no unconditional self-loop.
@@ -2293,6 +2840,22 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         _entry_reads: list[any] = [str(r) for r in _list((_ir_nodes[0] if _ir_nodes else {}).get("reads"))];
         extra_in: list = [];
         pkeys: list = [];
+        # …and what each one MEANS. The MCP schema described every input as
+        # "Exact value for input 'x'", so the model matched on the name alone and
+        # fed `network_path` the maths write-up while network.json sat beside it
+        # (energy-ac, 32 calls, 0/24). The carry's own doc is the description.
+        pdocs: dict[str, any] = {};
+        # how many caller inputs name a FILE — decides whether a prose-extracted
+        # filename is an unambiguous fallback or a coin flip between two of them
+        _n_path_inputs: int = 0;
+        for _kv0 in _items(wcar) {
+            _k0 = str(_kv0[0]);
+            _m0 = _kv0[1];
+            if (_k0 == "task") or (not isinstance(_m0, dict)) { continue; }
+            if str(_m0.get("role")) != "input" { continue; }
+            if _m0.get("produced_by") { continue; }
+            if _pathish_carry(_k0) { _n_path_inputs += 1; }
+        }
         for kv in _items(wcar) {
             k = str(kv[0]);
             meta = kv[1];
@@ -2316,12 +2879,36 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             # the lossy NL round-trip for callers that already hold the values.
             sk = _safe(k);
             pkeys.append(sk);
+            _pd = str(meta.get("doc") or "").strip();
+            if _pd { pdocs[sk] = _pd[:240]; }
             # The task-text fallback (#85) is ONLY for the raw-`str` input the entry
             # node reads — the subject of the invocation. A `path`-typed input is
             # never the task prose (it lowered `target_dir` = the whole sentence,
             # observed live, migrate_residue), and a non-entry input is not either.
-            if (str(meta.get("type") or "").strip() == "str") and (k in _entry_reads) {
-                extra_in.append(f"{sk}=str(params.get('{sk}', task))");
+            # …and for an input that names a FILE, the fallback is the filename the
+            # task mentions, never the sentence itself. The type is the author's
+            # word and a lift that types `data_file` as `str` still means a path:
+            # handing it the whole prompt made the artifact call open() on it —
+            # "[Errno 36] File name too long" before the first slot (caught live:
+            # offer-letter-generator/docx). `_inname` extracts the filename, but
+            # only when there is exactly ONE such input to extract for: with two
+            # (a template AND its data) it would hand both the same file, turning
+            # "no input" into "wrong input", which the graph cannot tell from
+            # success. Two locations must be named by the caller — which is what
+            # the flags and the MCP schema are for.
+            if (str(meta.get("type") or "").strip() == "str") and (k in _entry_reads)
+               and (not _pathish_carry(k)) {
+                # absent -> the task-named file whose extension matches the param
+                # (draft_bib <- test.bib), else the task text (see _task_file_for)
+                extra_in.append(str(sk) + "=str(_text_or_file(params.get('" + str(sk) + "', (_task_file_for('" + str(sk) + "', task) or task))))");
+            } elif _pathish_carry(k) and (_jt == "str") and (_n_path_inputs == 1) {
+                extra_in.append(f"{sk}=str(params.get('{sk}', _inname(task)))");
+            } elif (_jt == "str") and (not _pathish_carry(k)) and (not is_path_param(str(k))) {
+                # a CONTENT input (anything not path-shaped: draft_bib, codebook_text,
+                # csv_data) handed a PATH reads the file — callers do that as often
+                # as they paste text (citation-check: draft_bib="/root/test.bib" ->
+                # the parser saw one line of path and found 0 entries)
+                extra_in.append(f"{sk}=str(_text_or_file(params.get('{sk}', '')))");
             } elif _jt == "str" {
                 extra_in.append(f"{sk}=str(params.get('{sk}', ''))");
             } else {
@@ -2342,16 +2929,108 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
                 extra_in.append(f"{sk}={_cast}({_wrap})");
             }
         }
-        # Record the task-named input and every file the task names that already
-        # exists, so no write target can ever resolve onto one of them (the
-        # runtime write guard redirects such a write to <path>.out).
+        # EXTRACTOR VALUES (see _extractor_writes). Each plain value a
+        # task-only GEN-FILL/GEN-ENUM step produces becomes an OPTIONAL flag, so
+        # a caller that already holds it (a city, a route) passes it instead of
+        # paying a model round-trip to re-read it out of its own sentence. The
+        # step is skipped (guard at emission) only when EVERY value it produces
+        # was supplied. Unsupplied binds "" — never the task text — so the
+        # extraction runs exactly as authored and nothing is fabricated.
+        for _xn in _ir_nodes {
+            _xw = _extractor_writes(_xn, wcar, types);
+            if not _xw { continue; }
+            for _w in _xw {
+                _sw = _safe(_w);
+                if _sw in pkeys { continue; }
+                pkeys.append(_sw);
+                _wm = wcar.get(_w) if isinstance(wcar, dict) else None;
+                _wd = str((_wm.get("doc") if isinstance(_wm, dict) else "") or "").strip();
+                pdocs[_sw] = ((_wd + " - " if _wd else "") + "OPTIONAL: pass the value itself when you already know it. If every value step '" + str(_xn.get("id")) + "' extracts (" + ", ".join(_xw) + ") is supplied, that model call is skipped; otherwise it is read from the task.")[:240];
+                extra_in.append(f"{_sw}=str(params.get('{_sw}', ''))");
+            }
+        }
+        # SEED FILES for model-extracted collections. A model slot that reads
+        # only `task` and writes a list/dict carry (station_ids, tickers, ...)
+        # sees exactly what the caller typed into the task string. When the task
+        # points at a FILE ("stations are in /root/data/x.txt") the caller has no
+        # input to hand that file over, so the extractor invents or truncates —
+        # observed live: flood-risk-analysis, usgs-data-download advertised
+        # ['output_path'] only and never saw michigan_stations.txt. Mint an
+        # OPTIONAL `<carry>_path` input per such carry; when the caller supplies
+        # it, the file's text rides into the task the extractor reads.
+        _seed_pairs: list[any] = [];
+        for kv in _items(wcar) {
+            k = str(kv[0]);
+            meta = kv[1];
+            if (k == "task") or (not isinstance(meta, dict)) { continue; }
+            _pb = meta.get("produced_by");
+            if not _pb { continue; }
+            _ty = str(meta.get("type") or "");
+            _pn = None;
+            for _nd in _ir_nodes { if str(_nd.get("id")) == str(_pb) { _pn = _nd; } }
+            if not isinstance(_pn, dict) { continue; }
+            if [str(r) for r in _list(_pn.get("reads"))] != ["task"] { continue; }
+            # a model slot extracting a collection, OR a code parser (regex over the
+            # task) producing a spec/ids/list carry — usgs-data-download's parse_task
+            # scraped station ids from the task string while they lived in
+            # /root/data/michigan_stations.txt (flood-risk-analysis: download_ok=False)
+            _is_coll = (_ty == "list") or (_ty == "dict") or _ty.startswith("list[") or _ty.startswith("dict[");
+            _kl = str(k).lower();
+            _is_spec = (_ty == "str") and (_kl.endswith("_spec") or _kl.endswith("_ids") or _kl.endswith("_list") or _kl.endswith("_request") or _kl.endswith("_params"));
+            # a str carry a MODEL drafts from the task whose name carries a document
+            # extension (draft_bib, source_csv, spec_md): when the task names such a
+            # file, the "draft" must be that file — citation-check's validator never
+            # opened /root/test.bib; it validated entries the model made up from the prose
+            _doc_ext = ["bib", "csv", "json", "md", "txt", "html", "yaml", "yml", "xml", "py", "tex", "rst", "tsv"];
+            _is_doc = (_ty == "str") and any([(_tk in _doc_ext) for _tk in re.split(r"[^a-z0-9]+", _kl) if _tk]);
+            if str(_pn.get("owner", "")) == "code" {
+                if not (_is_coll or _is_spec) { continue; }
+            } elif not (_is_coll or _is_doc) { continue; }
+            sp = _safe(k) + "_path";
+            if sp in pkeys { continue; }
+            pkeys.append(sp);
+            pdocs[sp] = ("OPTIONAL file to READ when the task points at a file for '" + k + "' instead of listing the values inline; its contents are handed to the extractor together with the task. Pass the exact path the task names.")[:240];
+            _seed_pairs.append([k, sp]);
+        }
+        # Record every INPUT path this run was handed (caller params + the
+        # task-named input) so no write target can ever resolve onto one of them.
+        # BEFORE the seeds: the registry scrapes the RAW task, and the seed default
+        # below (_task_input_file) is defined as "the one registered input the task names".
+        _path_keys = [str(_pk) for _pk in pkeys if is_path_param(str(_pk)) and not str(_pk).startswith("output") and not str(_pk).startswith("dest")];
+        if _path_keys {
+            out.append(f"    for _ipk in {_path_keys} {{ _note_input_path(params.get(_ipk, '')); }}");
+        }
         out.append("    _note_input_path(_inname(task));");
         out.append("    _note_task_files(task, params.get('output_path', ''));");
+        if _seed_pairs {
+            out.append("    # seed files: splice each supplied <carry>_path file into the task text;");
+            out.append("    # default = the file the carry name points at, else the ONE input document the task names");
+            out.append("    _seed_txt: str = \"\";");
+            for _spair in _seed_pairs {
+                # py-block returns are <Unknown> to jac's checker: wrap in str()
+                # or `str + Unknown` is E1055 and the assignment is E1001
+                out.append("    _sv_" + str(_spair[1]) + ": str = str(_seed_file_text(params.get('" + str(_spair[1]) + "', '') or _task_file_path_for('" + str(_spair[0]) + "', task)) or _seed_file_text(_task_input_file(task, params.get('output_path', '')), 8000));");
+                out.append(f"    if _sv_{_spair[1]} {{ _seed_txt = str(_seed_txt + \"\\n\\n[{_spair[0]} - contents of \" + str(params.get('{_spair[1]}', '') or _task_file_path_for('{_spair[0]}', task) or _task_input_file(task, params.get('output_path', ''))) + \"]\\n\" + _sv_{_spair[1]}); }}");
+            }
+            out.append("    if _seed_txt { task = str(task) + _seed_txt; }");
+        }
         # deliverable-format contract (after the input registry, so a .json the
         # task only READS does not trigger it; names no file, so the scrapes hold)
         out.append("    task = str(_note_task_text(_format_contract(task)));");
+        out.append("    _join_reset();");
         sargs = _j(", ", ["task=task"] + extra_in);
         out.insert(0, f"glob _EJ_PARAM_KEYS: list[any] = {pkeys};");
+        out.insert(1, f"glob _EJ_PARAM_DOCS: dict[str, any] = {pdocs};");
+        # what this program IMPLEMENTS, for the tool contract: the LIFT's own
+        # description of the compiled agent plus its step ids. A skill that covers
+        # several procedures (pdf: extract/merge/split/forms) compiles to ONE; the
+        # SKILL.md blurb ("comprehensive PDF toolkit") then over-claims and the caller
+        # sends an extraction request to a form filler (flink-query 2/3).
+        _fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
+        _purpose = " ".join(str(ir.get("description") or _fm.get("description") or "").split())[:400];
+        _steps = [str(_sn.get("id")) for _sn in _list(ir.get("nodes")) if isinstance(_sn, dict) and str(_sn.get("type") or "").upper() not in ("ROUTE", "TERMINAL") and str(_sn.get("id") or "") not in ("done", "end", "terminal")][:24];
+        out.insert(2, f"glob _EJ_PURPOSE: str = {_q(_purpose)};");
+        out.insert(3, f"glob _EJ_STEPS: list[any] = {_steps};");
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
         out.append("    if not agent.report {");
         out.append("        # loud, not silent: an empty report means the walker stopped at a");
@@ -2410,12 +3089,29 @@ def _widen_repair_reads(ir: any) -> None {
     }
 }
 
+def _alias_when_guards(ir: any) -> None {
+    # LIFT writes an edge condition as `when:` at least as often as `guard:`
+    # (6 of the 8 conditional edges across 202 SkillsBench IRs). Every reader
+    # here — _emit_flow, G-REACH, the autofixes — keys on `guard`, so a `when`
+    # edge lowered as UNCONDITIONAL: the pdf skill's route_fillability visited
+    # only its last target and every fillable form went down the flat-form
+    # branch (0 of 155 fields filled, court-form-filling). One name, one key.
+    for e in _list(ir.get("edges")) {
+        if isinstance(e, dict) and (not e.get("guard")) and e.get("when") {
+            e["guard"] = e.get("when");
+        }
+    }
+}
+
 def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     ir = _load_ir(ir_text);
+    _alias_when_guards(ir);
     _normalize_builtins(ir);            # builtin sig/body onto the shared IR, before node binding
     _widen_repair_reads(ir);
     fm = _dict(ir.get("_frontmatter"));
     _FALLBACKS.clear();                 # embodiment-ladder fallbacks for THIS transpile
+    _INTERMEDIATES.clear();             # scratch carries for THIS transpile
+    for _ic in _intermediate_carries(ir) { _INTERMEDIATES.append(_ic); }
     tools_block = _emit_tools(ir);
     wk = _emit_walker(ir);
     walker_block = wk[0];
@@ -2429,6 +3125,10 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     parts.append(tools_block);
     envs = preflight_src(extract_manifest(ir));
     if envs { parts.append("# ===== ENVIRONMENT (binding manifest + preflight; SkillRT AOT pass 2) =====\n" + envs); }
+    if exec_subprocess_tools(ir.get("tools")) {
+        parts.append("# ===== IN-PROCESS PYTHON (a spawned interpreter cannot see .jac/pydeps) =====\n"
+                     + runpy_src());
+    }
     kn = _emit_knowledge(ir);
     if kn { parts.append("# ===== KNOWLEDGE (static globs) =====\n" + kn); }
     mn = model_name if model_name else "gpt-4o-mini";

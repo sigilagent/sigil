@@ -21,7 +21,7 @@ import yaml;
 # `jac test`, which roots the package at the module's own directory.
 import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
 import from src.sigil_agir_yaml { dump_agir }
-import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest }
+import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest, scraped_path_inputs }
 import from src.compiler.mechanical.concurrency { extract_concurrency }
 import from src.compiler.mechanical.toolib { builtin }
 import from .lift_types { CompileVerdict, Modality, RuleKind }
@@ -370,6 +370,53 @@ def gate_env_binding(ir_text: str) -> list[str] {
             + str(kv3[1]) + ") with no existence check or try — a missing file raises and takes "
             + "the walker down before any slot runs. Guard the read and report absence so a ROUTE "
             + "can handle it.");
+    }
+    return issues;
+}
+
+# ---------------------------------------------------------------------------
+# G14-IN — input provenance: the location of an external artifact is an INPUT
+# ---------------------------------------------------------------------------
+
+def gate_input_provenance(ir_text: str) -> list[str] {
+    # A compiled skill is called by a program, not asked in a sentence. When a
+    # tool recovers the files it must open by regex over the task prose and the
+    # walker declares no input for them, the caller CANNOT name them: the phrasing
+    # decides, and the artifact opens whatever path the sentence mentioned first
+    # (caught live: offer-letter-generator opened its own output as the template
+    # and scored 0 in every cell while MCP delivery worked perfectly). The scrape
+    # is a legitimate fallback; the missing declaration is the defect. autofix
+    # lifts these mechanically, so a finding here means it could not be applied.
+    issues: list = [];
+    ir: any = {};
+    try { ir = _load_ir(ir_text); } except Exception { return []; }
+    if not isinstance(ir, dict) { return []; }
+    mined = scraped_path_inputs(ir.get("tools"));
+    if not mined { return []; }
+    wlk: dict[str, any] = {};
+    _w = ir.get("walker");
+    if isinstance(_w, dict) { wlk = _w; }
+    carries: dict[str, any] = {};
+    _c = wlk.get("carries");
+    if isinstance(_c, dict) { carries = _c; }
+    for tn in list(mined) {
+        missing: list = [];
+        for n in list(mined[tn]) {
+            c = carries.get(str(n));
+            if isinstance(c, dict) and (str(c.get("role")) == "input") { continue; }
+            if isinstance(c, dict) { continue; }
+            missing.append(str(n));
+        }
+        if missing {
+            issues.append("G14: tool '" + str(tn) + "' mines "
+                + ", ".join([("'" + str(m) + "'") for m in missing])
+                + " out of the task prose, and the walker declares no input for "
+                + ("them" if len(missing) > 1 else "it") + " — the caller cannot name the file, "
+                + "so the sentence's word order decides which artifact is opened. Declare "
+                + ("them" if len(missing) > 1 else "it")
+                + " as role:input carr" + ("ies" if len(missing) > 1 else "y")
+                + " (type: path) and keep the scrape as the fallback.");
+        }
     }
     return issues;
 }

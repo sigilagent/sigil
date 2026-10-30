@@ -274,7 +274,7 @@ test "every unproduced input carry is bound at spawn, not just `task`" {
     src = transpile_ir(ACT_PATH_IR, "saver");
     # direct args (#argparse): the carry binds from caller params, falling back
     # to the task text, and the manifest is exported for the calling surface
-    assert "spawn SaveAgent(task=task, note=str(params.get('note', task)))" in src;
+    assert "spawn SaveAgent(task=task, note=str(_text_or_file(params.get('note', (_task_file_for('note', task) or task))))" in src;   # a content input handed a PATH is read; the task text stays the fallback
     assert "_EJ_PARAM_KEYS: list[any] = ['note']" in src;
     assert "spawn SaveAgent(task=task);" not in src;
 }
@@ -652,8 +652,15 @@ test "spawn binding carries every caller input, typed, and skips produced ones" 
     # untyped python, so assigning it straight to a typed walker carry checks as
     # <Unknown> and the module fails to compile (error[E1053]). A skill could
     # reach FAITHFUL at the gate and still produce no artifact.
-    assert ("spawn MixedAgent(task=task, src_path=str(params.get('src_path', task)),"
+    # The fallback for an input that NAMES A FILE is the filename the task
+    # mentions, never the sentence itself: `src_path` is a location, and binding
+    # the whole prompt to it made a compiled artifact call open() on the prompt
+    # ("[Errno 36] File name too long", offer-letter-generator/docx). `_inname`
+    # applies here because this walker has exactly one such input; with two, the
+    # caller must name them (see the sibling test).
+    assert ("spawn MixedAgent(task=task, src_path=str(params.get('src_path', _inname(task))),"
             + " retries=int(_as_param(params.get('retries', ''), 0)))") in src;
+    assert "src_path=str(params.get('src_path', task))" not in src;
     assert "retries=task" not in src;      # int input: the task text is not an int
     assert "retries=str(" not in src;      # nor a caller param bound as str
     assert "retries=bool(" not in src;     # the cast follows the declared type
@@ -1474,7 +1481,7 @@ test "with no sinks the report runs latest-produced first, never head-truncated"
 test "a carry named summary is a recognized deliverable" {
     ir = PIPE_REPORT_IR.replace("digest_out", "summary");
     src = transpile_ir(ir, "digester3");
-    assert 'summary={_artifact_text(self.summary)}' in src, src[-1500:];
+    assert 'summary={_artifact_text(self.summary, 1200)}' in src, src[-1500:];
 }
 
 # A plain-scalar value that itself contains a colon — a lifted digest/format line
@@ -1522,4 +1529,183 @@ test "an unrepairable IR still degrades to an empty dict, never raises" {
     # doc must yield {} (an empty module), not an exception that unwinds compile
     ir = _load_ir("name: x\n  : : : \n\t\tbad: [unclosed");
     assert isinstance(ir, dict), str(type(ir));
+}
+
+test "two file inputs are never both filled from one prose filename" {
+    # the wrong-input hazard the single-input fallback avoids: a template AND its
+    # data file cannot both be `_inname(task)` — that hands the same path to both
+    # and the artifact opens the JSON as its template. With two locations declared
+    # the caller names them (flags / MCP schema properties); an unnamed call fails
+    # loudly on an empty path instead of silently succeeding on the wrong file.
+    ir = str(yaml.safe_dump({
+        "types": {},
+        "walker": {"name": "TwoIn", "carries": {
+            "task": {"type": "str", "role": "input"},
+            "template_file": {"type": "str", "role": "input"},
+            "data_file": {"type": "str", "role": "input"}}},
+        "tools": {"load_it": {"sig": "(template_file, data_file) -> dict", "surface": "SENSE",
+                              "serves": ["load"],
+                              "body": "def load_it(template_file: str, data_file: str) -> dict:\n    return {}\n"}},
+        "nodes": [{"id": "load", "type": "SENSE", "owner": "code", "tool": "load_it",
+                   "reads": ["task", "template_file", "data_file"], "writes": ["loaded"]}],
+        "edges": []
+    }, sort_keys=False));
+    src = transpile_ir(ir, "twoin");
+    assert "template_file=str(params.get('template_file', ''))" in src;
+    assert "data_file=str(params.get('data_file', ''))" in src;
+    # the BINDING form only — `_note_input_path(_inname(task))` is bookkeeping, not a bind
+    assert "_inname(task)))" not in src;
+    assert "params.get('template_file', _inname(task))" not in src;
+    # both are still advertised to the caller
+    assert "'template_file'" in src and "'data_file'" in src;
+}
+
+test "a write tool's destination never binds to the source it is reading" {
+    # live fault (offer-letter/docx): once file inputs became declared carries, the
+    # role rung handed `path` — the DESTINATION — the first pathish read it found,
+    # which was the template being filled. The artifact then overwrote its own input
+    # and produced no deliverable: 0/4 while the tool reported success. A destination
+    # may not reuse a carry a source param of the same call already took, nor a
+    # declared input when the call writes.
+    ir = str(yaml.safe_dump({
+        "types": {},
+        "walker": {"name": "Filler", "carries": {
+            "task": {"type": "str", "role": "input"},
+            "template_file": {"type": "path", "role": "input"},
+            "fill_data": {"type": "dict", "produced_by": "plan"},
+            "out_file": {"type": "str", "produced_by": "fill"}}},
+        "tools": {"fill_template": {"sig": "(template_file, fill_data, path) -> str",
+                                    "surface": "ACT·artifact", "serves": ["fill"],
+                                    "body": "def fill_template(template_file: str, fill_data: dict, path: str) -> str:\n    return path\n"}},
+        "nodes": [{"id": "fill", "type": "ACT", "owner": "code", "tool": "fill_template",
+                   "reads": ["template_file", "fill_data"], "writes": ["out_file"]}],
+        "edges": []
+    }, sort_keys=False));
+    src = transpile_ir(ir, "filler");
+    # The property under test is that the DESTINATION never reuses the SOURCE.
+    # Both params are now pathish (is_path_param matches `*_file` by shape, which
+    # is what lets `input_media`/`image_paths` mint a surface at all), so the
+    # source carries a read-side fallback — caller-supplied still wins, and it can
+    # never resolve to the deliverable's name.
+    assert "_fill_template((self.template_file or _inname(self.task)), self.fill_data," in src;
+    # the destination takes the task's filename, never the template
+    assert "self.template_file or _outname" not in src;
+    assert "_outname(self.task" in src;
+}
+
+test "a sys.executable subprocess is rewritten to the in-process runner" {
+    # Under jac, sys.executable IS the jac binary, and its child cannot see the
+    # artifact-local .jac/pydeps the preflight installed into (jac ignores
+    # PYTHONPATH). court-form-filling failed 12/12 calls with No module named
+    # 'pypdf' while pypdf was in the manifest and importable in the parent.
+    body = "import subprocess, sys, os\n"
+           + "proc = subprocess.run([sys.executable, script, pdf_path, out_pdf],\n"
+           + "                      capture_output=True, text=True)\n"
+           + "return proc.stdout if proc.returncode == 0 else proc.stderr";
+    got = _rewrite_exec_subprocess(body);
+    assert "_sigil_run_py([sys.executable, script, pdf_path, out_pdf]" in got, got;
+    assert "subprocess.run(" not in got, got;
+    # everything else survives verbatim: kwargs, the result surface, the return
+    assert "capture_output=True, text=True" in got, got;
+    assert "proc.returncode" in got and "proc.stdout" in got, got;
+    import ast;
+    ast.parse(got);
+
+    # an aliased import is the same call
+    aliased = "import subprocess as _sp, sys as _sys\nr = _sp.run([_sys.executable, s])";
+    assert "_sigil_run_py([_sys.executable, s])" in _rewrite_exec_subprocess(aliased);
+
+    # a real binary is a real subprocess and is NOT rewritten
+    binary = "import subprocess\nsubprocess.run([\"pdftotext\", p], capture_output=True)";
+    assert _rewrite_exec_subprocess(binary) == binary;
+}
+
+test "every model slot that produces text is unfenced, not only GEN-RAW" {
+    # A GEN-EDIT slot returning a corrected script had its ```python line kept,
+    # written to disk and executed: xlsx failed 16 of 18 calls with
+    # "invalid syntax (<unknown>, line 1)".
+    ir = """
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: A
+  carries:
+    task:      { type: str, role: input }
+    draft:     { type: str, produced_by: n_raw }
+    fixed:     { type: str, produced_by: n_edit }
+    filled:    { type: str, produced_by: n_fill }
+nodes:
+  - id: n_raw
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [draft]
+    doc: "Draft the script."
+  - id: n_edit
+    type: GEN-EDIT
+    owner: model
+    reads: [draft]
+    writes: [fixed]
+    doc: "Fix the script."
+  - id: n_fill
+    type: GEN-FILL
+    owner: model
+    reads: [fixed]
+    writes: [filled]
+    doc: "Fill the script."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: n_raw,  to: n_edit, modality: mandatory}
+  - {from: n_edit, to: n_fill, modality: mandatory}
+  - {from: n_fill, to: done,   modality: mandatory}
+""";
+    src = transpile_ir(ir, "fencetest");
+    for c in ["self.draft = str(_strip_fences(", "self.fixed = str(_strip_fences(",
+              "self.filled = str(_strip_fences("] {
+        assert c in src, "unfenced assignment missing: " + c;
+    }
+}
+
+test "the in-process runner is emitted as a fenced python block" {
+    # Emitted bare, `class _SigilProc:` is parsed as Jac and the whole module
+    # fails jac check with "Expected '-->', got 'NAME'" — the artifact never
+    # builds. Nothing tested the EMITTED module, only the helper text.
+    ir = """
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: A
+  carries:
+    task: { type: str, role: input }
+    r:    { type: str, produced_by: n }
+nodes:
+  - id: n
+    type: ACT
+    owner: code
+    reads: [task]
+    writes: [r]
+    tool: t
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: n, to: done, modality: mandatory}
+tools:
+  t:
+    sig: (task) -> str
+    body: |
+      def t(task: str) -> str:
+          import subprocess, sys
+          return subprocess.run([sys.executable, "s.py", task]).returncode
+""";
+    src = transpile_ir(ir, "runpytest");
+    assert "_sigil_run_py([sys.executable" in src, "the tool call was not rewritten";
+    assert "def _sigil_run_py(" in src, "the runner was not emitted";
+    # every python block must be opened AND closed, or the jac parser reads
+    # python as jac from the first unbalanced fence onward
+    assert (src.count("::py::") % 2) == 0, "unbalanced ::py:: fences in the emitted module";
 }
