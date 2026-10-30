@@ -1279,11 +1279,15 @@ with entry:__main__ {
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
+            print("usage: compile <SKILL.md> [--with <SKILL.md>]... [--task <task.md> [--task-bundle <dir>]] [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
             clarify = False; frontend = ""; lint_force = False; no_lint = False;
             adjudicate = True;
+            # TASK-SCOPED compile (src/task_scope.jac): --task compiles the skill(s)
+            # FOR one task, so its named inputs/deliverables/format become the
+            # program's own IO; --with adds further skills into ONE program.
+            task_path = ""; task_bundle = ""; with_paths: list = [];
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
@@ -1298,6 +1302,9 @@ with entry:__main__ {
                 elif flg == "--no-lint" { no_lint = True; }
                 elif flg == "--legacy" { frontend = "legacy"; }
                 elif flg == "--staged" { frontend = "staged"; }
+                elif flg == "--task" { task_path = _arg(argv, i + 1); i += 1; }
+                elif flg == "--task-bundle" { task_bundle = _arg(argv, i + 1); i += 1; }
+                elif flg == "--with" { with_paths.append(_arg(argv, i + 1)); i += 1; }
                 elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
@@ -1309,6 +1316,21 @@ with entry:__main__ {
             # project dir this process pinned itself to
             path = user_path(path);
             if eject_path { eject_path = user_path(eject_path); }
+            if with_paths and (not task_path) {
+                print("  (note: --with only composes skills together with --task; ignoring it)");
+            }
+            if task_path {
+                # Compose skill(s) + the task INSTRUCTION into one bundle and compile
+                # that; its directory is then the bundle every later stage reads.
+                import from src.task_scope { compose_task_skill, task_instruction }
+                tp = user_path(task_path);
+                tname = os.path.basename(os.path.dirname(os.path.abspath(tp))) or "task";
+                bdir = user_path(task_bundle) if task_bundle else os.path.join(
+                    os.path.dirname(eject_path) if eject_path else os.getcwd(), ".sigil-task-" + tname);
+                path = compose_task_skill([path] + [user_path(str(w)) for w in with_paths],
+                                          task_instruction(open(tp).read()), bdir, tname);
+                print("  task-scoped compile: " + path);
+            }
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             # --clarify asks inline; only meaningful with an interactive stdin.
