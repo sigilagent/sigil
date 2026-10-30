@@ -791,7 +791,7 @@ test "the program advertises what it IMPLEMENTS (purpose + steps) for the tool c
     assert "glob _EJ_PURPOSE: str = " in src, "purpose global missing";
     # the LIFT's description lives in the AGIR front matter (`_frontmatter`), not the body
     assert "A model slot extracts a list from the task." in src.split("glob _EJ_PURPOSE")[1].split("\n")[0], src.split("glob _EJ_PURPOSE")[1].split("\n")[0];
-    assert "glob _EJ_STEPS: list = [" in src, "steps global missing";
+    assert "glob _EJ_STEPS: list[any] = [" in src, "steps global missing";
     # the MCP server source composes the description from them
     import from .compiler.ai.eject { _MCP_SERVE_SRC }
     assert "COMPILED PROCEDURE: " in _MCP_SERVE_SRC and "Steps it executes" in _MCP_SERVE_SRC;
@@ -1378,7 +1378,7 @@ edges:
 
 test "a task-only extraction step's value is an optional flag that skips the model call" {
     src = transpile_ir(EXTRACTOR_IR, "city_search");
-    assert "_EJ_PARAM_KEYS: list = ['city']" in src;
+    assert "_EJ_PARAM_KEYS: list[any] = ['city']" in src;
     # bound from the caller, defaulting to "" — never to the task text
     assert "city=str(params.get('city', ''))" in src;
     assert "params.get('city', (_task_file_for" not in src;
@@ -1446,7 +1446,7 @@ edges:
 
 test "a multi-value extraction is skipped only when every value is supplied" {
     src = transpile_ir(EXTRACTOR_MULTI_IR, "route_lookup");
-    assert "_EJ_PARAM_KEYS: list = ['origin_city', 'destination_city']" in src;
+    assert "_EJ_PARAM_KEYS: list[any] = ['origin_city', 'destination_city']" in src;
     assert "if not (str(self.origin_city).strip() and str(self.destination_city).strip()) {" in src;
 }
 
@@ -1493,8 +1493,8 @@ edges:
 
 test "drafting steps and steps that read more than the task are never bypassable" {
     src = transpile_ir(NOT_EXTRACTOR_IR, "drafter");
-    assert "'draft'" not in src.split("_EJ_PARAM_KEYS: list = ")[1].split("\n")[0];
-    assert "'tone'" not in src.split("_EJ_PARAM_KEYS: list = ")[1].split("\n")[0];
+    assert "'draft'" not in src.split("_EJ_PARAM_KEYS: list[any] = ")[1].split("\n")[0];
+    assert "'tone'" not in src.split("_EJ_PARAM_KEYS: list[any] = ")[1].split("\n")[0];
     assert "str(self.draft).strip()) {" not in src;
     assert "str(self.tone).strip()) {" not in src;
 }
