@@ -1,6 +1,8 @@
 """AI compiler — Stage 2: the WorkFlow spine (frozen RuleSet -> WorkflowView).
 
-The P1/P2/P3 pass: type every STEP rule (tightest GEN-*), owner-test it, wire the
+The P1/P2/P3 pass: give every STEP rule its AIS opcode (executable when the
+skill supplies an implementation or the output is mechanizable, the tightest
+semantic opcode otherwise, DELEGATE for a deliberately open subtask), wire the
 modality-annotated CFG. Runs BEFORE the annotator flows because it mints the node
 ids they attach to.
 
@@ -13,11 +15,11 @@ re-prompts with the validator's issues, bounded. The validator enforces:
   realized by >=1 node — a mandate folded into some other node's interior is
   exactly the `monolithic` failure the OSP-loser postmortem named.
 - Cognition preservation (anti-shred): an INVOKE_UNIT rule maps to exactly ONE
-  model-owned Mind node — shredding an observe-and-adapt loop into fixed calls
+  DELEGATE node — shredding an observe-and-adapt loop into fixed calls
   destroys the adaptation; the envelope (autonomy_tools, budget) is the mandate.
 - Forbidden-as-absent: no edge traces to a FORBIDDEN rule (prohibitions become
   node constraints, never transitions).
-- Structure: unique ids, exactly one TERMINAL, edges resolve, no dead ends, all
+- Structure: unique ids, exactly one RETURN, edges resolve, no dead ends, all
   nodes reachable, guarded fan-outs, and an explicit spawn_note (concurrency is
   decided, never silently omitted).
 """
@@ -25,7 +27,7 @@ re-prompts with the validator's issues, bounded. The validator enforces:
 import from jaclang.byllm.lib { Model }
 import from .lift_types { Modality, RuleKind, Cohesion }
 import from .spec_loop { Rule, RuleSet }
-import from .ir_views { NodeType, Owner }
+import from .ir_views { NodeType, Owner, MODEL_TYPES, SEMANTIC_TYPES, unit_for }
 
 # NOTE: objs that ride a `by llm` slot's return schema are defined IN the
 # slot's module — byllm's schema builder cannot resolve a nested obj from
@@ -34,8 +36,8 @@ import from .ir_views { NodeType, Owner }
 
 obj AgirNode {
     has id: str = "";
-    has ntype: NodeType = NodeType.GEN_RAW;
-    has owner: Owner = Owner.MODEL;
+    has ntype: NodeType = NodeType.GENERATE;
+    has owner: Owner = Owner.MODEL;    # derived from ntype after the model answers
     has doc: str = "";
     has reads: list[str] = [];
     has writes: list[str] = [];
@@ -49,7 +51,7 @@ sem AgirNode.id = "snake_case node id, unique in the graph.";
 sem AgirNode.doc = "The node's semantic purpose — becomes the slot sem / routing intent.";
 sem AgirNode.reads = "Carry names this node consumes (dataflow in).";
 sem AgirNode.writes = "Carry names this node produces (dataflow out).";
-sem AgirNode.autonomy_tools = "For an adaptive tool-using node (an INVOKE_UNIT rule): the tool names the model may ReAct over. Empty for single-shot nodes.";
+sem AgirNode.autonomy_tools = "For a DELEGATE node (an INVOKE_UNIT rule): the tool names the runtime agent may ReAct over. Empty for every other node.";
 sem AgirNode.surface = "For ACT nodes only: 'artifact' (a deliverable the user interacts with — must be a tool) or 'workspace' (free scratch).";
 sem AgirNode.traces_to = "The spec rule ids this node realizes. NEVER empty — a node no rule demands is a hallucinated node (C1).";
 
@@ -61,7 +63,7 @@ obj AgirEdge {
     has traces_to: str = "";
 }
 sem AgirEdge = "A control-flow transition. FORBIDDEN rules never become edges — a forbidden path is an ABSENT path (it attaches as a node constraint instead).";
-sem AgirEdge.guard = "For a ROUTE branch: the condition (e.g. \"op == MERGE\"). Empty on unconditional transitions.";
+sem AgirEdge.guard = "For a BRANCH successor: the condition (e.g. \"op == MERGE\"). Empty on unconditional transitions.";
 
 obj WorkflowView {
     has nodes: list[AgirNode] = [];
@@ -69,8 +71,8 @@ obj WorkflowView {
     has spawn_note: str = "";
     has constraints: list[str] = [];
 }
-sem WorkflowView = "The CFG view of the skill: every rule realized as nodes + modality-annotated edges, entry first, exactly one TERMINAL last.";
-sem WorkflowView.spawn_note = "Concurrency decision: if no SPAWN node exists, WHY not (never silently omit). E.g. 'sequential: every step consumes the prior step's output'.";
+sem WorkflowView = "The CFG view of the skill: every rule realized as AIS instructions + modality-annotated edges, entry first, exactly one RETURN last.";
+sem WorkflowView.spawn_note = "Concurrency decision: if no PARALLEL node exists, WHY not (never silently omit). E.g. 'sequential: every step consumes the prior step's output'.";
 sem WorkflowView.constraints = "FORBIDDEN-rule constraints as 'rule_id: <verbatim prohibition>' — enforced as slot sems, not transitions.";
 
 obj SpineResult {
@@ -94,27 +96,36 @@ def pin_workflow_llm(m: any) -> None {
 sem workflow_view = """Design the workflow graph (CFG view) that realizes EVERY
 rule of the spec — nothing added, nothing dropped, nothing re-modalized. Apply,
 in order:
-(P1, the Owner test) For each step ask: is the output a function of the inputs —
-mechanizable without a guess? Yes -> owner=CODE (a CODE/SENSE/ACT/ROUTE node).
-Needs a guess -> owner=MODEL.
-(P2, tighten) Every surviving MODEL node gets the TIGHTEST Mind type:
-GEN_ENUM > GEN_FILL > GEN_EDIT > GEN_RAW. 'Classify/choose' is GEN_ENUM;
-'produce the parameters' is GEN_FILL; reserve GEN_RAW for open-ended bodies.
+(P1, execution type) The opcode decides who executes a step. For each step ask:
+does the skill or its resources supply an implementation, or is the output a
+function of the inputs — mechanizable without a guess? Yes -> an EXECUTABLE
+instruction: COMPUTE (local computation), OBSERVE (obtain a value from outside;
+also every check/verification), ACT (an externally visible effect). Needs model
+judgment -> a SEMANTIC instruction. A subtask whose internal steps the skill
+deliberately leaves open -> DELEGATE.
+(P2, tighten) Every semantic step gets the TIGHTEST semantic opcode:
+SELECT > EXTRACT > MUTATE > GENERATE. 'Classify/choose' is SELECT;
+'produce the parameters' is EXTRACT; reserve GENERATE for open-ended bodies.
+Control is explicit: BRANCH (guards over values already produced), LOOP,
+PARALLEL, CALL, and exactly one RETURN. `owner` follows from the opcode.
 (Granularity — two-sided) Decompose to the COARSEST granularity that still
 exposes every enforceable mandate as its own node — no finer. A rule tagged
 INVOKE_UNIT (adaptive tool use: 'explore...', 'iterate until...') stays ONE
-model-owned node with its tools in autonomy_tools — never shredded into fixed
+DELEGATE node with its tools in autonomy_tools — never shredded into fixed
 calls. Conversely never fold several MANDATORY rules into one big authoring
 node — each mandate gets its own node so the structure can enforce it.
-(Wiring) Entry node first, exactly one TERMINAL last. Edge modality comes from
-the rule's modality. Every ROUTE fan-out edge carries a guard. FORBIDDEN rules
+(Wiring) Entry node first, exactly one RETURN last. Edge modality comes from
+the rule's modality. Every BRANCH fan-out edge carries a guard over a value an
+earlier instruction produced — a choice that needs judgment is a SELECT whose
+result the BRANCH tests. FORBIDDEN rules
 become entries in `constraints` ('rule_id: prohibition'), NEVER edges or nodes.
-(Concurrency) If independent branches share no moving data, add a SPAWN node;
+(Concurrency) If independent branches share no moving data, add a PARALLEL node;
 otherwise set spawn_note explaining why the flow is sequential. Never leave the
 decision implicit.
-(Human gates) A route that consumes human feedback (approval, confirmation,
-review response) is owner=CODE with explicit string-match guards — the human's
-words bind control flow directly; model judgment must never sit between them.
+(Human gates) A BRANCH that consumes human feedback (approval, confirmation,
+review response) guards on a carry a COMPUTE or OBSERVE produced from the human's
+words, with explicit string-match guards — never on a SELECT; model judgment
+must never sit between the human and the transition.
 (Artifact boundary) Every MANDATORY IO rule ends in an ACT node with
 surface 'artifact' that READS the content carry it must write — a deliverable
 authored into a carry but never written is a dropped artifact.
@@ -131,7 +142,16 @@ def workflow_view(spec: RuleSet, skill: str, issues: str) -> WorkflowView by wf_
 # code disposes — the spine validator
 # ---------------------------------------------------------------------------
 
-glob MIND_TYPES: list[any] = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
+glob MIND_TYPES: list[any] = SEMANTIC_TYPES;
+
+def derive_units(wf: WorkflowView) -> None {
+    # The opcode decides the unit (AIS); a semantic step with a tool surface is
+    # a DELEGATE. Applied to whatever the model proposed, before validation.
+    for n in wf.nodes {
+        if (n.ntype in SEMANTIC_TYPES) and n.autonomy_tools { n.ntype = NodeType.DELEGATE; }
+        n.owner = unit_for(n.ntype);
+    }
+}
 
 def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
     issues: list = [];
@@ -147,9 +167,9 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
         if nid in seen { issues.append(f"duplicate node id '{nid}'"); }
         else { seen.append(nid); }
     }
-    terminals = [n.id for n in wf.nodes if n.ntype == NodeType.TERMINAL];
+    terminals = [n.id for n in wf.nodes if n.ntype == NodeType.RETURN];
     if len(terminals) != 1 {
-        issues.append(f"need exactly one TERMINAL node, found {len(terminals)}");
+        issues.append(f"need exactly one RETURN node, found {len(terminals)}");
     }
     for e in wf.edges {
         if e.src not in node_ids { issues.append(f"edge from unknown node '{e.src}'"); }
@@ -157,15 +177,15 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
     }
     # dead ends + reachability (from the first node)
     for n in wf.nodes {
-        if n.ntype == NodeType.TERMINAL { continue; }
+        if n.ntype == NodeType.RETURN { continue; }
         outs = [e for e in wf.edges if e.src == n.id];
         if not outs { issues.append(f"dead end: non-terminal node '{n.id}' has no out-edge"); }
-        if (len(outs) > 1) and (n.ntype != NodeType.ROUTE) and (n.ntype != NodeType.SPAWN) {
-            issues.append(f"unguarded fan-out: node '{n.id}' has {len(outs)} out-edges but is not a ROUTE/SPAWN");
+        if (len(outs) > 1) and (n.ntype != NodeType.BRANCH) and (n.ntype != NodeType.PARALLEL) {
+            issues.append(f"unguarded fan-out: node '{n.id}' has {len(outs)} out-edges but is not a BRANCH/PARALLEL");
         }
-        if (n.ntype == NodeType.ROUTE) and (n.owner == Owner.CODE) {
+        if (n.ntype == NodeType.BRANCH) and (len(outs) > 1) {
             for e2 in outs {
-                if not e2.guard.strip() { issues.append(f"ROUTE '{n.id}' branch to '{e2.dst}' has no guard"); }
+                if not e2.guard.strip() { issues.append(f"BRANCH '{n.id}' successor '{e2.dst}' has no guard"); }
             }
         }
     }
@@ -187,15 +207,15 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
     }
     # concurrency decided, never implicit
     has_spawn = False;
-    for n in wf.nodes { if n.ntype == NodeType.SPAWN { has_spawn = True; } }
+    for n in wf.nodes { if n.ntype == NodeType.PARALLEL { has_spawn = True; } }
     if (not has_spawn) and (not wf.spawn_note.strip()) {
-        issues.append("no SPAWN node and no spawn_note — decide concurrency explicitly");
+        issues.append("no PARALLEL node and no spawn_note — decide concurrency explicitly");
     }
 
     # -- C1 soundness: no hallucinated provenance ---------------------------
     for n in wf.nodes {
-        if (not n.traces_to) and (n.ntype != NodeType.TERMINAL) {
-            # TERMINAL is structural (serializes the report) — every other node
+        if (not n.traces_to) and (n.ntype != NodeType.RETURN) {
+            # RETURN is structural (serializes the report) — every other node
             # must be demanded by a rule or it is an added behavior (C1).
             issues.append(f"node '{n.id}' traces to no rule (hallucinated node?)");
         }
@@ -240,8 +260,8 @@ def validate_spine(spec: RuleSet, wf: WorkflowView) -> list[str] {
             issues.append(f"INVOKE_UNIT rule '{r.id}' shredded across nodes [{frag}] — keep it ONE adaptive node");
         } elif len(owners) == 1 {
             n3 = owners[0];
-            if (n3.owner != Owner.MODEL) or (n3.ntype not in MIND_TYPES) {
-                issues.append(f"INVOKE_UNIT rule '{r.id}' lowered to a non-cognitive node '{n3.id}' — it needs a model-owned Mind node with an autonomy tool-belt");
+            if n3.ntype != NodeType.DELEGATE {
+                issues.append(f"INVOKE_UNIT rule '{r.id}' lowered to '{n3.id}', which is not a DELEGATE — an open subprocedure needs a DELEGATE with its tools in autonomy_tools");
             }
         }
     }
@@ -263,6 +283,7 @@ def workflow_spine(spec: RuleSet, skill: str, max_rounds: int = 0) -> SpineResul
     cap = max_rounds if (max_rounds > 0) else min(6, max(3, 2 + len(spec.rules) // 30));
     while rounds < cap {
         wf = workflow_view(spec, skill, digest);
+        derive_units(wf);
         issues = validate_spine(spec, wf);
         rounds += 1;
         if not issues { break; }

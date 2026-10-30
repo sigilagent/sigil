@@ -23,12 +23,15 @@ import re;
 import from .toolib { builtin, builtin_names, builtin_catalogue }
 import from .envbind { extract_manifest, preflight_src, runpy_src, exec_subprocess_tools }
 import from ...sigil_agir_yaml { load_agir }
+import from ...sigil_ais { PSEUDO_TOOLS }
 import glob as _glob;
 import textwrap;
 import traceback;
 import yaml;
 
-glob GEN_TYPES: list[any] = ["GEN-RAW", "GEN-ENUM", "GEN-FILL", "GEN-EDIT"];
+# The instructions that lower to a `by llm()` slot: the four semantic opcodes, and
+# DELEGATE, which is the same slot with a tool surface (paper Table 3).
+glob GEN_TYPES: list[any] = ["GENERATE", "SELECT", "EXTRACT", "MUTATE", "DELEGATE"];
 
 # guard values that mean "unconditional" — never lower as a literal condition
 glob GUARD_SENTINELS: list[any] = ["", "otherwise", "default", "else", "always", "true", "_"];
@@ -137,7 +140,7 @@ def _pathish_carry(name: any) -> bool {
 }
 
 # Embodiment-ladder rung-3 fallbacks recorded during a transpile: tools with no
-# runnable body that were lowered to the scoped GEN-RAW author-run envelope instead
+# runnable body that were lowered to the scoped GENERATE author-run envelope instead
 # of a silent `pass`. Reset per _transpile; reported by _main (loud, not silent).
 glob _FALLBACKS: list = [];
 
@@ -707,7 +710,7 @@ def _is_input_carry(name: any, carries: any) -> bool {
     return isinstance(c, dict) and (str(c.get("role")) == "input") and (not c.get("produced_by"));
 }
 
-# EDIT MODE. A GEN-EDIT step REVISES a document it already holds; lowered as a
+# EDIT MODE. A MUTATE step REVISES a document it already holds; lowered as a
 # whole-text slot, its output scales with the document instead of the change —
 # restclient-migration's rewrite_calls re-emitted an entire Java class and hit its
 # 2500-token cap. Returns the carry it revises (the edit source), or "" when the
@@ -717,7 +720,7 @@ def _is_input_carry(name: any, carries: any) -> bool {
 # or with the step itself: source_java -> migrated_java (java), pom_xml ->
 # edited_pom (pom), adapter_source for refactor_adapter_class (adapter). Generic
 # words never count, and anything but exactly one match keeps the whole-text
-# lowering — a GEN-EDIT that condenses findings into a summary is not a revision.
+# lowering — a MUTATE that condenses findings into a summary is not a revision.
 glob _EDIT_STOP: list[any] = ["md", "txt", "text", "data", "file", "path", "dir", "out", "output", "result", "results",
     "new", "old", "updated", "edited", "migrated", "refactored", "fixed", "revised", "draft", "final",
     "current", "source", "src", "input", "in", "the", "a", "of", "to"];
@@ -733,7 +736,7 @@ def _edit_tokens(name: any) -> list[any] {
 
 def _edit_source(n: any, carries: any, types: any, creads: list[any]) -> str {
     if not isinstance(n, dict) { return ""; }
-    if str(n.get("type") or "") != "GEN-EDIT" { return ""; }
+    if str(n.get("type") or "") != "MUTATE" { return ""; }
     if str(n.get("owner") or "") != "model" { return ""; }
     ws: list[any] = [str(w) for w in _list(n.get("writes"))];
     if len(ws) != 1 { return ""; }
@@ -763,7 +766,7 @@ def _edit_source(n: any, carries: any, types: any, creads: list[any]) -> str {
 # size the step uses the whole-text slot directly.
 glob EDIT_MODE_MIN_CHARS: int = 6000;
 
-# The edit-mode instruction appended to a GEN-EDIT slot's own prompt.
+# The edit-mode instruction appended to a MUTATE slot's own prompt.
 def _edit_mode_sem(src: str) -> str {
     return (" EDIT MODE: `" + str(src) + "` is the current text. Do NOT return the whole text."
         + " Return ONLY the changes, as one or more blocks, each exactly:\n"
@@ -772,21 +775,21 @@ def _edit_mode_sem(src: str) -> str {
         + " keep each block small. If nothing needs to change, answer exactly: NO CHANGES");
 }
 
-# A model step that only FILLS fields from the request sentence — GEN-FILL /
-# GEN-ENUM reading nothing but `task`, writing plain-str values — re-derives
+# A model step that only FILLS fields from the request sentence — EXTRACT /
+# SELECT reading nothing but `task`, writing plain-str values — re-derives
 # values the caller very often already holds. The travel skills asked the model
 # to pull "Cleveland" back out of "Find pet-friendly accommodations in
 # Cleveland": 15 of the 21 slot calls in one SkillsBench cell were such
 # extractions, each a full model round-trip for a string the caller had typed.
 # Returns the step's writes when it is such an extractor, else [].
-# Deliberately narrow: GEN-RAW (drafting content) is never bypassable, a
+# Deliberately narrow: GENERATE (drafting content) is never bypassable, a
 # non-str value cannot tell "supplied 0/False" from "not supplied", and paths,
 # documents and collection specs keep their own input rules (inputs / SEED FILES).
 def _extractor_writes(n: any, carries: any, types: any) -> list[any] {
     import re;
     if not isinstance(n, dict) { return []; }
     if str(n.get("owner") or "") != "model" { return []; }
-    if str(n.get("type") or "") not in ["GEN-FILL", "GEN-ENUM"] { return []; }
+    if str(n.get("type") or "") not in ["EXTRACT", "SELECT"] { return []; }
     if [str(r) for r in _list(n.get("reads"))] != ["task"] { return []; }
     ws: list[any] = [str(w) for w in _list(n.get("writes"))];
     if not ws { return []; }
@@ -845,11 +848,11 @@ def _intermediate_carries(ir: any) -> list[any] {
             if wn in out { continue; }
             for nd2 in nodes {
                 if str(nd2.get("id")) == nid { continue; }
-                # A TERMINAL node reads the deliverable to REPORT it — that is not
+                # A RETURN node reads the deliverable to REPORT it — that is not
                 # consumption, and treating it as such made the deliverable itself
                 # look like scratch (caught by compiler.test: `exported` is read by
                 # `done`, and the export lost the filename the task asked for).
-                if str(nd2.get("type", "")).upper().startswith("TERMINAL") { continue; }
+                if str(nd2.get("type", "")).upper() == "RETURN" { continue; }
                 if wn in [str(r) for r in list(nd2.get("reads") or [])] {
                     out.append(wn);
                     break;
@@ -1383,7 +1386,7 @@ def _emit_tools(ir: any) -> str {
                 args_lit2 = "[" + _j(", ", [_safe(str(p)) for p in params]) + "]";
                 body = f"return _live_tool({_q(str(name))}, {args_lit2})";
             } else {
-                # EMBODIMENT LADDER rung 3: no runnable body -> a SCOPED GEN-RAW author-run
+                # EMBODIMENT LADDER rung 3: no runnable body -> a SCOPED GENERATE author-run
                 # envelope (never a silent `pass`). Context = tool doc + bound inputs; the
                 # runner authors a script for this job, runs it, verifies, re-authors on fail.
                 _FALLBACKS.append(str(name));
@@ -1415,7 +1418,7 @@ def _emit_tools(ir: any) -> str {
         out.append("    return _tui_tool(" + _q(str(name)) + ", [" + pairs + "], "
                    + "lambda: " + fnm + "__impl(" + fwd + "))");
         serves = _list(t.get("serves"));
-        if surf == "SENSE" { sense_tools.append([name, params, serves]); }
+        if surf == "OBSERVE" { sense_tools.append([name, params, serves]); }
         elif surf.startswith("ACT") { act_tools.append([name, params, serves]); }
     }
     arg_fields: list[any] = [];
@@ -1458,7 +1461,7 @@ def _emit_tool_wrappers(ir: any) -> str {
         if not isinstance(n, dict) { continue; }
         au = _dict(n.get("autonomy"));
         for tt in _list(au.get("tools")) {
-            if (str(tt) != "SENSE") and (str(tt) not in autos) { autos.append(str(tt)); }
+            if (str(tt).upper() not in PSEUDO_TOOLS) and (str(tt) not in autos) { autos.append(str(tt)); }
         }
     }
     tools = _dict(ir.get("tools"));
@@ -1514,7 +1517,7 @@ def _emit_types(ir: any) -> str {
                 ft = jt[0];
                 fd = jt[1];
                 # obj fields feed byLLM structured output — it cannot generate a
-                # schema for `any` (typing.Any). Demote to a typed str so GEN-FILL
+                # schema for `any` (typing.Any). Demote to a typed str so EXTRACT
                 # over this obj works (unions like "path|str|?" land here).
                 if ft == "any" { ft = "str"; fd = "\"\""; }
                 elif "any" in ft { ft = ft.replace("any", "str"); }   # list[any]/dict[..,any] also break byLLM schema
@@ -1546,7 +1549,7 @@ def _node_index(ir: any) -> dict[str, any] {
 }
 
 # Gather the knowledge items RESIDENT on a node and fold their doc + code
-# pattern into the slot prompt, so the GEN-RAW author actually SEES the owned
+# pattern into the slot prompt, so the GENERATE author actually SEES the owned
 # helpers / scaffolds (e.g. `from core.gif_builder import GIFBuilder`) and imports
 # them instead of reinventing them. This is the "knowledge sits on the node" half.
 # Render any knowledge value (str / list / dict) to text so NOTHING is truncated.
@@ -1607,7 +1610,7 @@ def _slot_args(creads: any, carries: any, types: any) -> str {
         jt = str(_jac_type(c.get("type"), types)[0]) if isinstance(c, dict) else "";
         # str inputs to a MODEL slot are capped (see _cap_in): a whole data file
         # routed into a decision slot blew the context window (exoplanet,
-        # light-curve CSV into a GEN-ENUM). Code nodes take the full carry.
+        # light-curve CSV into a SELECT). Code nodes take the full carry.
         # a list/dict carry is capped the same way, shape preserved: a whole light
         # curve as {"time": [...], "flux": [...]} went into a decision slot verbatim
         # (801k tokens on a 128k model; exoplanet gpt4o 3/4, every tool errored).
@@ -1701,7 +1704,7 @@ def _is_deliverable_node(ir: any, n: any) -> bool {
     w0 = str(writes[0]);
     for m in _list(ir.get("nodes")) {
         if not isinstance(m, dict) { continue; }
-        if w0 in _list(m.get("reads")) and str(m.get("type","")) in ["ACT", "TERMINAL"] { return True; }
+        if w0 in _list(m.get("reads")) and str(m.get("type","")) in ["ACT", "RETURN"] { return True; }
     }
     # a slot that nothing downstream consumes except the final report is a deliverable too
     consumed = False;
@@ -1720,16 +1723,15 @@ def _emit_slots(ir: any) -> str {
     for n in _list(ir.get("nodes")) {
         if not isinstance(n, dict) { continue; }
         nt = str(n.get("type", ""));
-        no = str(n.get("owner", ""));
         # SPAWN fans out to sibling walkers; each runs ONE worker slot over its
         # sub-task string. Emit that worker here (its own scoped by-llm cognition,
         # optionally with the node's autonomy tools).
-        if nt == "SPAWN" {
+        if nt == "PARALLEL" {
             wname = _spawn_worker(n["id"]);
             wtools = "";
             wau = _dict(n.get("autonomy"));
             if isinstance(wau, dict) and wau.get("tools") {
-                wreal = [tt for tt in _list(wau.get("tools")) if tt != "SENSE"];
+                wreal = [tt for tt in _list(wau.get("tools")) if str(tt).upper() not in PSEUDO_TOOLS];
                 if wreal { wtools = f"(tools=[{_j(', ', [_safe(tt) for tt in wreal])}, *_skill_tools()])"; }
             }
             # A fan-out worker is prose like any other slot, and is the one most
@@ -1746,14 +1748,14 @@ def _emit_slots(ir: any) -> str {
             out.append(f"sem {wname} = {_q(wsem)};");
             continue;
         }
-        # Emit a by-llm slot for every node the walker invokes as cognition: all
-        # Mind nodes, CALL sub-agents, and owner=model Boundary/Flow nodes that
-        # PRODUCE a carry and have no bound code-tool.
-        is_slot = (nt in GEN_TYPES) or (nt == "CALL");
-        if (not is_slot) and (nt in ["SENSE", "ACT", "LOOP", "ROUTE"]) and (no == "model") and n.get("writes") and (not _node_tool(ir, n["id"], n)) {
-            is_slot = True;
-        }
-        if not is_slot { continue; }
+        # Emit a by-llm slot for every node the walker invokes as cognition: the
+        # semantic instructions and DELEGATE. The reader has already rewritten the
+        # legacy model-owned OBSERVE/ACT/LOOP/BRANCH forms into these (sigil_ais),
+        # so the opcode alone decides.
+        if nt not in GEN_TYPES { continue; }
+        # A DELEGATE lifted from a legacy CALL keeps that form's contract: it
+        # always has context (`task` when it reads nothing) and returns text.
+        legacy_call = str(n.get("from_legacy") or "") == "CALL";
         slot = _slot_name(n["id"], carries);
         # Cap the slot's arity so byLLM's schema stays manageable — but 6 was low
         # enough to silently drop real inputs: a verification-gate repair reads the
@@ -1761,7 +1763,7 @@ def _emit_slots(ir: any) -> str {
         # diagnostic. Losing a declared read makes the slot unable to do its job, so
         # keep the ceiling generous.
         creads = [r for r in _list(n.get("reads")) if r in list(carries)][:SLOT_ARITY_CAP];
-        if (nt == "CALL") and (not creads) and ("task" in list(carries)) { creads = ["task"]; }
+        if legacy_call and (not creads) and ("task" in list(carries)) { creads = ["task"]; }
         params: list = [];
         for r in creads {
             jt = _jac_type(carries[r].get("type"), types);
@@ -1771,7 +1773,7 @@ def _emit_slots(ir: any) -> str {
         }
         outt = n.get("output");
         ret = "str";
-        if nt == "CALL" {
+        if legacy_call {
             ret = "str";
         } elif outt and (outt in types) {
             ret = str(outt);
@@ -1810,7 +1812,7 @@ def _emit_slots(ir: any) -> str {
         tools = "";
         au = _dict(n.get("autonomy"));
         if isinstance(au, dict) and au.get("tools") {
-            real = [tt for tt in _list(au.get("tools")) if tt != "SENSE"];
+            real = [tt for tt in _list(au.get("tools")) if str(tt).upper() not in PSEUDO_TOOLS];
             if real {
                 names = _j(", ", [_safe(tt) for tt in real]);
                 # `*_skill_tools()`: the OTHER compiled skills Sigil says this run
@@ -1846,7 +1848,7 @@ def _emit_slots(ir: any) -> str {
         # task is context for THIS step only and the deliverable checklist is not
         # its job. Terminal/deliverable-producing slots (the ones whose write IS
         # the artifact) are left alone — for them the checklist is the point.
-        if ("task" in creads) and (nt in GEN_TYPES) and (not _is_deliverable_node(ir, n)) {
+        if ("task" in creads) and (not legacy_call) and (not _is_deliverable_node(ir, n)) {
             semtext = semtext + " SCOPE: `task` is background context for THIS step only. Do exactly this step and return only its result. Any output-format or 'required content / literal strings' checklist inside the task applies to the FINAL deliverable, not to this step — do not produce the deliverable here.";
         }
         # discriminator slot: its written carry feeds ==-literal route guards.
@@ -2206,8 +2208,8 @@ def _emit_walker(ir: any) -> list[any] {
         _to = str(_je2.get("to"));
         if _gl and (_gl.lower() not in GUARD_SENTINELS) {
             _elabel[(_fr, _to)] = _gl;
-            if _ntype_of.get(_fr, "") == "ROUTE" { _route_conds.setdefault(_fr, []).append(_gl); }
-        } elif _ntype_of.get(_fr, "") == "ROUTE" {
+            if _ntype_of.get(_fr, "") == "BRANCH" { _route_conds.setdefault(_fr, []).append(_gl); }
+        } elif _ntype_of.get(_fr, "") == "BRANCH" {
             _elabel[(_fr, _to)] = "__default__:" + _fr;
         } else { _elabel[(_fr, _to)] = ""; }
     }
@@ -2291,7 +2293,6 @@ def _emit_walker(ir: any) -> list[any] {
         nid = n["id"];
         arch = _arch(nid, types);
         ntype = n.get("type");
-        owner = n.get("owner");
         writes = _list(n.get("writes"));
         reads = _list(n.get("reads"));
         out_edges = [e for e in edges if e.get("from") == nid];
@@ -2302,7 +2303,7 @@ def _emit_walker(ir: any) -> list[any] {
         }
         out.append(f"        _progress({_q(nid)});");   # live: mark current node
 
-        if ntype == "TERMINAL" {
+        if ntype == "RETURN" {
             out.append(f"        self.report = {_terminal_report(name, ir, carries, types)};");
             out.append("        disengage;");
             out.append("    }");
@@ -2312,7 +2313,23 @@ def _emit_walker(ir: any) -> list[any] {
 
         body: list[any] = [];
         can_dispatch = ("args" in ckeys) and (route_field in ckeys);
-        if ntype in GEN_TYPES {
+        if (ntype == "DELEGATE") and (str(n.get("from_legacy") or "") == "CALL") {
+            # A DELEGATE lifted from a legacy CALL: the sub-agent slot over the
+            # caller's carries, then — when the module authors a program — exec the
+            # produced script into the target's artifact carry, as CALL always did.
+            tgtc = writes[0] if writes else None;
+            slot = _slot_name(nid, carries);
+            ccreads = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
+            if (not ccreads) and ("task" in ckeys) { ccreads = ["task"]; }
+            callc = f"{slot}({_slot_args(ccreads, carries, types)})";
+            if "script" in ckeys {
+                body.append(f"        self.script = str(_strip_fences({callc}));");
+                ttc = str(_jac_type(carries[tgtc].get("type"), types)[0]) if (tgtc and (tgtc in ckeys)) else "str";
+                for fl in _exec_repair_lines(tgtc, "", ttc) { body.append(fl); }
+            } else {
+                body.append(_slot_assign(tgtc, callc, carries, types, code_owned));
+            }
+        } elif ntype in GEN_TYPES {
             # MUST match the cap in _emit_slots: that one fixes the slot's declared
             # arity, this one the call site. Let them drift and the emitted program
             # calls an 8-param slot with 6 arguments.
@@ -2336,8 +2353,8 @@ def _emit_walker(ir: any) -> list[any] {
                 tt = _jac_type(carries[tgt].get("type"), types)[0];
                 val = call;
                 # EVERY model slot that produces text can wrap it in a markdown
-                # fence, not just the raw ones. xlsx's `fix_errors` is a GEN-EDIT
-                # returning the corrected build script; unfenced only for GEN-RAW,
+                # fence, not just the raw ones. xlsx's `fix_errors` is a MUTATE
+                # returning the corrected build script; unfenced only for GENERATE,
                 # its ```python line 1 was written to _sigil_build_model_fixed.py
                 # and executed, so 16 of 18 calls came back "REBUILD FAILED:
                 # invalid syntax (<unknown>, line 1)" and the cell scored 0/8.
@@ -2354,7 +2371,7 @@ def _emit_walker(ir: any) -> list[any] {
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));
                 # a GEN slot's TEXT must never clobber a code-produced OBJECT
-                # carry (caught live: xlsx's GEN-ENUM enforce_template_matching
+                # carry (caught live: xlsx's SELECT enforce_template_matching
                 # overwrote the openpyxl Workbook with prose — every save died)
                 if (str(tgt) in list(code_owned)) and (str(tt) != "str") {
                     body.append(f"        {call};  # advisory only: '{tgt}' is code-produced — model text must not clobber the object");
@@ -2399,9 +2416,9 @@ def _emit_walker(ir: any) -> list[any] {
                         xi += 1;
                     }
                 }
-                # author+execute fold: a GEN-RAW that writes a `script` carry needs
+                # author+execute fold: a GENERATE (or DELEGATE) that writes a `script` carry needs
                 # the authored code RUN so the deliverable is produced.
-                if (ntype == "GEN-RAW") and (tgt == "script") {
+                if (ntype in ["GENERATE", "DELEGATE"]) and (tgt == "script") {
                     # Does the node own a run_*/exec autonomy tool?
                     au_fold = _dict(n.get("autonomy"));
                     runtool = "";
@@ -2450,7 +2467,7 @@ def _emit_walker(ir: any) -> list[any] {
             } else {
                 body.append(f"        {call};");
             }
-        } elif (ntype == "ROUTE") and (owner == "code") {
+        } elif ntype == "BRANCH" {
             # A code ROUTE usually DECIDES before it branches: its tool folds the
             # carries it reads into the verdict its guards test (six check_*_ok
             # flags -> all_checks_passed). Emitting only the branch left that carry
@@ -2496,33 +2513,7 @@ def _emit_walker(ir: any) -> list[any] {
                 body.append(f"        else {{ visit [-->][?:{only_target}]; }}");
             }
             if (not branches) and (not default_target) { body.append("        visit [-->];"); }
-        } elif (ntype == "ROUTE") and (owner == "model") {
-            # a model ROUTE that PRODUCES a carry (e.g. route_format -> spec) is a
-            # GEN step + branch: call its slot, assign, then route.
-            if writes and (not _node_tool(ir, nid, n)) {
-                slot = _slot_name(nid, carries);
-                creadsR = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-                callR = f"{slot}({_slot_args(creadsR, carries, types)})";
-                body.append(_slot_assign(writes[0], callR, carries, types, code_owned));
-            }
-            if len(out_edges) > 1 {
-                # LLM-guided traversal (byLLM `visit ... by llm`): `intent` steers the
-                # choice, `incl_info` injects the deciding context. Inject the intent
-                # from the ROUTE node's own semantic purpose (its IR `doc`) and widen
-                # incl_info from task-only to the node's read carries, so the model
-                # routes on the actual state — not just the task string.
-                rintent = str(n.get("doc") or "").strip();
-                if not rintent { rintent = "Choose the outgoing node that best fits the task and current state."; }
-                info_parts = ["\"task\": self.task"];
-                for r in reads {
-                    if (r in ckeys) and (r != "task") { info_parts.append(f"{_q(r)}: str(self.{_safe(str(r))})"); }
-                }
-                info = "{" + _j(", ", info_parts[:6]) + "}";
-                body.append(f"        visit [-->] by llm(intent={_q(rintent)}, incl_info={info});");
-            } else {
-                body.append("        visit [-->];");
-            }
-        } elif (ntype == "SENSE") and (owner == "code") {
+        } elif ntype == "OBSERVE" {
             tgt3 = writes[0] if writes else None;
             st3 = _node_tool(ir, nid, n);
             if st3 {
@@ -2531,28 +2522,7 @@ def _emit_walker(ir: any) -> list[any] {
             } elif can_dispatch and tgt3 and (tgt3 in ckeys) {
                 body.append(f"        self.{_safe(tgt3)} = _run_sense(self.{route_field}.name, self.args);");
             } else {
-                body.append(f"        # SENSE {nid} (no recognized tool dispatch)");
-            }
-        } elif (ntype == "SENSE") and (owner == "model") {
-            # bounded cognitive fetch: a by-llm slot (may ReAct over autonomy.tools).
-            # A writes-less model SENSE gets NO slot declared (the emission above
-            # requires writes) — calling one anyway is a NameError at the first
-            # visit (caught live: dispatching-parallel-agents' knowledge-recital
-            # node killed all 9 cells). Its content already rides downstream
-            # prompts as resident knowledge. A tool-bound model SENSE likewise
-            # has no slot: dispatch the tool with carry-threaded args instead.
-            stM = _node_tool(ir, nid, n);
-            if not writes {
-                body.append(f"        # knowledge recital {nid}: resident text rides downstream prompts");
-            } elif stM {
-                exprM = _toolfn_prefix(str(stM[0])) + "(" + _bind_args(stM[1], reads, carries, types) + ")";
-                for alM in _assign_writes(writes, exprM, carries, types) { body.append(alM); }
-            } else {
-                tgt3m = writes[0];
-                slot = _slot_name(nid, carries);
-                creads3 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-                call3 = f"{slot}({_slot_args(creads3, carries, types)})";
-                body.append(_slot_assign(tgt3m, call3, carries, types, code_owned));
+                body.append(f"        # OBSERVE {nid} (no recognized tool dispatch)");
             }
         } elif ntype == "ACT" {
             tgt5 = writes[0] if writes else "artifact";
@@ -2585,7 +2555,9 @@ def _emit_walker(ir: any) -> list[any] {
                 exprlines = _exec_repair_lines(tgt5, aarg, tt5);
             } elif ("data" in reads) and ("data" in ckeys) and ("args" in ckeys) and (tgt5 in ckeys) {
                 expr = "_emit(self.data, self.args)";
-            } elif (owner == "code") and can_dispatch and (tgt5 in ckeys) {
+            } elif can_dispatch and (tgt5 in ckeys) and (str(n.get("owner_declared") or "") != "model") {
+                # (an ACT authored model-owned reached its bound tool directly, and
+                # still does now that the reader re-owns it to code)
                 expr = "_run_act(self." + route_field + ".name, self.args)";
             }
             # Standard node-level dispatch: a tool bound to this node (its `tool:` or
@@ -2596,15 +2568,6 @@ def _emit_walker(ir: any) -> list[any] {
             if (not expr) and stA {
                 expr = _toolfn_prefix(str(stA[0])) + "(" + _bind_args(stA[1], reads, carries, types, wt5) + ")";
                 tool_exprA = True;
-            }
-            slot_exprA = False;
-            if (not expr) and (owner == "model") {
-                # ACT owner=model with no tool = a cognitive emit (e.g. report,
-                # completion tips) -> a by-llm slot over its reads.
-                slot = _slot_name(nid, carries);
-                creads5 = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-                expr = f"{slot}({_slot_args(creads5, carries, types)})";
-                slot_exprA = True;
             }
             # ACT with no tool but a str content carry it reads -> write it to a
             # deterministic run-dir file (app-controlled path). Applies regardless
@@ -2630,24 +2593,29 @@ def _emit_walker(ir: any) -> list[any] {
             }
             if exprlines { for el in exprlines { body.append(el); } }
             elif expr and tool_exprA { for alA in _assign_writes(writes, expr, carries, types) { body.append(alA); } }
-            elif expr and slot_exprA { body.append(_slot_assign(tgt5, expr, carries, types, code_owned)); }
             elif expr { body.append(_assign_carry(tgt5, expr, carries, types)); }
             else { body.append(f"        # ACT {nid} (no recognized tool dispatch)"); }
         } elif ntype == "CALL" {
-            # CALL expands a sub-IR: lower its author slot (a by-llm sub-agent),
-            # binding the SAME reads the slot declares, then exec the produced
-            # script into the target's artifact carry.
-            tgtc = writes[0] if writes else None;
-            slot = _slot_name(nid, carries);
-            ccreads = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-            if (not ccreads) and ("task" in ckeys) { ccreads = ["task"]; }
-            callc = f"{slot}({_slot_args(ccreads, carries, types)})";
-            if "script" in ckeys {
-                body.append(f"        self.script = str(_strip_fences({callc}));");
-                ttc = str(_jac_type(carries[tgtc].get("type"), types)[0]) if (tgtc and (tgtc in ckeys)) else "str";
-                for fl in _exec_repair_lines(tgtc, "", ttc) { body.append(fl); }
+            # CALL invokes another named procedure (paper Table 3): a tool of this
+            # module is called directly; any other name is a separately compiled
+            # skill, run through the host's skill registry. Either way the result
+            # is a value the program can branch on, never an exception.
+            proc = str(n.get("procedure") or "").strip();
+            tgtP = writes[0] if writes else None;
+            stP = _node_tool(ir, proc, {"tool": proc}) if proc else [];
+            if stP {
+                exprP = _toolfn_prefix(str(stP[0])) + "(" + _bind_args(stP[1], reads, carries, types) + ")";
+                for alP in _assign_writes(writes, exprP, carries, types) { body.append(alP); }
+            } elif proc {
+                argP = "self.task";
+                for rP in reads {
+                    if (rP in ckeys) and (argP == "self.task") { argP = "str(self." + _safe(str(rP)) + ")"; }
+                }
+                exprP2 = f"_call_skill({_q(proc)}, {argP})";
+                if tgtP and (tgtP in ckeys) { body.append(_assign_carry(tgtP, exprP2, carries, types)); }
+                else { body.append(f"        {exprP2};"); }
             } else {
-                body.append(_slot_assign(tgtc, callc, carries, types, code_owned));
+                body.append(f"        # CALL {nid} (no procedure named)");
             }
         } elif ntype == "LOOP" {
             # bounded revise/retry: author/produce, then advance (the back-edge guard
@@ -2656,14 +2624,10 @@ def _emit_walker(ir: any) -> list[any] {
             if stL {
                 expr = _toolfn_prefix(str(stL[0])) + "(" + _bind_args(stL[1], reads, carries, types) + ")";
                 for alL in _assign_writes(writes, expr, carries, types) { body.append(alL); }
-            } elif owner == "model" {
-                slot = _slot_name(nid, carries);
-                creadsL = [r for r in reads if r in ckeys][:SLOT_ARITY_CAP];
-                body.append(_slot_assign(writes[0] if writes else None, f"{slot}({_slot_args(creadsL, carries, types)})", carries, types, code_owned));
             } else {
                 body.append(f"        # LOOP {nid}");
             }
-        } elif ntype == "SPAWN" {
+        } elif ntype == "PARALLEL" {
             # Fork one sibling walker per sub-task, run them CONCURRENTLY via Jac's
             # flow/wait over `root spawn` (the sigil_subagents mechanism), then join
             # and aggregate their results into the write carry. Real parallelism for
@@ -2686,7 +2650,7 @@ def _emit_walker(ir: any) -> list[any] {
             } else {
                 tasks_expr = "[self.task]";
             }
-            body.append(f"        # SPAWN {nid}: fan out workers concurrently (isolation: {iso}; siblings write-isolated by idx, worktree isolation deferred to host runtime)");
+            body.append(f"        # PARALLEL {nid}: fan out workers concurrently (isolation: {iso}; siblings write-isolated by idx, worktree isolation deferred to host runtime)");
             body.append(f"        _tasks = {tasks_expr};");
             body.append(f"        _futs = [flow (root spawn {sib_name}(task=_t, idx=_i)) for (_i, _t) in enumerate(_tasks)];");
             body.append("        _sibs = [wait _f for _f in _futs];");
@@ -2700,7 +2664,7 @@ def _emit_walker(ir: any) -> list[any] {
             } else {
                 body.append("        _spawn_results = [_s.result for _s in _sibs];");
             }
-        } elif ntype == "CODE" {
+        } elif ntype == "COMPUTE" {
             stC = _node_tool(ir, nid, n);
             if stC {
                 # a CODE node served by an ACT-surface tool is a WRITE: its path
@@ -2728,10 +2692,10 @@ def _emit_walker(ir: any) -> list[any] {
                 if tgtC and ("\n" not in inb) and inb.startswith("self.") {
                     body.append("        " + inb + ";");
                 } else {
-                    body.append(f"        # CODE {nid} (inline body not lowerable)");
+                    body.append(f"        # COMPUTE {nid} (inline body not lowerable)");
                 }
             } else {
-                body.append(f"        # CODE {nid}");
+                body.append(f"        # COMPUTE {nid}");
             }
         }
 
@@ -2930,7 +2894,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             }
         }
         # EXTRACTOR VALUES (see _extractor_writes). Each plain value a
-        # task-only GEN-FILL/GEN-ENUM step produces becomes an OPTIONAL flag, so
+        # task-only EXTRACT/SELECT step produces becomes an OPTIONAL flag, so
         # a caller that already holds it (a city, a route) passes it instead of
         # paying a model round-trip to re-read it out of its own sentence. The
         # step is skipped (guard at emission) only when EVERY value it produces
@@ -3028,15 +2992,15 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         # sends an extraction request to a form filler (flink-query 2/3).
         _fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
         _purpose = " ".join(str(ir.get("description") or _fm.get("description") or "").split())[:400];
-        _steps = [str(_sn.get("id")) for _sn in _list(ir.get("nodes")) if isinstance(_sn, dict) and str(_sn.get("type") or "").upper() not in ("ROUTE", "TERMINAL") and str(_sn.get("id") or "") not in ("done", "end", "terminal")][:24];
+        _steps = [str(_sn.get("id")) for _sn in _list(ir.get("nodes")) if isinstance(_sn, dict) and str(_sn.get("type") or "").upper() not in ("BRANCH", "RETURN") and str(_sn.get("id") or "") not in ("done", "end", "terminal")][:24];
         out.insert(2, f"glob _EJ_PURPOSE: str = {_q(_purpose)};");
         out.insert(3, f"glob _EJ_STEPS: list[any] = {_steps};");
         out.append(f"    agent = {var[first]} spawn {walker_name}({sargs});");
         out.append("    if not agent.report {");
         out.append("        # loud, not silent: an empty report means the walker stopped at a");
-        out.append("        # dead-end/escape-hatch node without reaching TERMINAL (see the");
+        out.append("        # dead-end/escape-hatch node without reaching RETURN (see the");
         out.append("        # AGIR_PROGRESS trace for the exact node).");
-        out.append("        return \"INCOMPLETE: traversal ended without reaching TERMINAL — no deliverable was produced\";");
+        out.append("        return \"INCOMPLETE: traversal ended without reaching RETURN — no deliverable was produced\";");
         out.append("    }");
         out.append("    return agent.report;");
     } else {
@@ -3049,7 +3013,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
 # ---------------------------------------------------------------------------
 # top-level
 # ---------------------------------------------------------------------------
-# A repair node (GEN-EDIT) rewrites a carry that another node already produced.
+# A repair node (MUTATE) rewrites a carry that another node already produced.
 # LIFT tends to wire it to read only the REJECTED attempt plus the gate's boolean
 # verdicts — which makes it repair blind: told THAT the column count is wrong but
 # never what the input was, it cannot know the answer, and a small model fills the
@@ -3063,7 +3027,7 @@ def _widen_repair_reads(ir: any) -> None {
     nodes = _list(ir.get("nodes"));
     ck = list(_dict(_dict(ir.get("walker")).get("carries")));
     for n in nodes {
-        if str(n.get("type")) != "GEN-EDIT" { continue; }
+        if str(n.get("type")) != "MUTATE" { continue; }
         writes = [str(w) for w in _list(n.get("writes"))];
         if not writes { continue; }
         reads: list[any] = [str(r) for r in _list(n.get("reads"))];
@@ -3138,7 +3102,7 @@ def _transpile(ir_text: str, name: str, model_name: str = "") -> str {
     tw = _emit_tool_wrappers(ir);
     if tw { parts.append("# ===== AUTONOMY TOOL WRAPPERS (typed + sem for byLLM) =====\n" + tw); }
     sl = _emit_slots(ir);
-    if sl { parts.append("# ===== COGNITIVE SLOTS (GEN-*) =====\n" + sl); }
+    if sl { parts.append("# ===== COGNITIVE SLOTS (SELECT / EXTRACT / MUTATE / GENERATE / DELEGATE) =====\n" + sl); }
     if _FALLBACKS {
         # Rung-3 authoring slot for un-embodied tools (see _scoped_author_run). Scoped:
         # it receives only the tool's job + inputs, and returns a runnable script.

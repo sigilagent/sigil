@@ -31,6 +31,7 @@ import re;
 import yaml;
 import from src.compiler.mechanical.compiler { _load_ir }
 import from src.sigil_agir_yaml { dump_agir }
+import from src.sigil_ais { canonical_opcode }
 import from .lift_types { Cohesion, Modality, RuleKind }
 import from .spec_loop { Rule, RuleSet }
 
@@ -99,7 +100,7 @@ def required_shape(kind: RuleKind, modality: Modality, binds: str = "agent") -> 
 
 obj PNode {
     has id: str = "";
-    has ntype: str = "";        # upper-cased, dashes normalized to underscores (GEN_RAW, ACT, ...)
+    has ntype: str = "";        # the AIS opcode, canonical (GENERATE, ACT, ...)
     has owner: str = "model";
     has doc: str = "";
     has reads: list[str] = [];
@@ -142,7 +143,7 @@ def _slist(v: any) -> list[str] {
 }
 
 def _ntype(v: any) -> str {
-    return str(v or "").upper().replace("-", "_").strip();
+    return canonical_opcode(v);
 }
 
 # The content sub-fields a knowledge entry may use (guide §8: template / pattern /
@@ -299,16 +300,16 @@ def fold_untraced_prohibitions(ir_text: str, spec: RuleSet, drop_ids: list[str])
     # 5/6, one CONSTRAINT rule and no model node in the whole IR). CONSTRAINT is
     # realized by any TRACED node — check_completeness reads traces_to and
     # ignores owner — so fall back to the code nodes instead of folding nothing.
-    # TERMINAL is never a target either way: an end marker is not a slot a
+    # RETURN is never a target either way: an end marker is not a slot a
     # prohibition can govern.
     model_nodes: list[any] = [];
     code_nodes: list[any] = [];
     for nd in list(ir.get("nodes") or []) {
         if not isinstance(nd, dict) { continue; }
         ntype = _ntype(nd.get("type"));
-        if ntype == "TERMINAL" { continue; }
+        if ntype == "RETURN" { continue; }
         owner = str(nd.get("owner", "model")).lower();
-        if (owner == "code") or (ntype == "CODE") { code_nodes.append(nd); }
+        if (owner == "code") or (ntype == "COMPUTE") { code_nodes.append(nd); }
         else { model_nodes.append(nd); }
     }
     targets: list[any] = model_nodes if model_nodes else code_nodes;
@@ -399,10 +400,10 @@ def _realizes_write(pir: ParsedIR, rid: str) -> bool {
 }
 
 def _realizes_gate(pir: ParsedIR, rid: str) -> bool {
-    # an owner=code ROUTE traced to the rule, OR a traced node served by an
+    # a BRANCH traced to the rule (always code in the AIS), OR a traced node served by an
     # ask/confirm tool (the HIL gate the mechanical half emits).
     for n in _traced_nodes(pir, rid) {
-        if (n.ntype == "ROUTE") and (n.owner == "code") { return True; }
+        if n.ntype == "BRANCH" { return True; }
         for t in _tool_for(pir, n) {
             low = t.name.lower();
             if low.startswith("ask_") or low.startswith("confirm") or ("ask_user" in low) { return True; }
@@ -449,9 +450,9 @@ def _realizes_live_tool(pir: ParsedIR, rid: str) -> bool {
     for t in pir.tools {
         if rid in t.traces_to { return True; }
     }
-    # a live source is often bound to a SENSE node that traces the rule
+    # a live source is often bound to an OBSERVE node that traces the rule
     for n in _traced_nodes(pir, rid) {
-        if n.ntype == "SENSE" { return True; }
+        if n.ntype == "OBSERVE" { return True; }
     }
     return False;
 }
@@ -471,7 +472,7 @@ def _fix_for(shape: RealShape, r: Rule) -> str {
              + "' to their traces_to (an untraced prohibition cannot be verified): " + q;
     }
     if shape == RealShape.CODE_GATE {
-        return "add an owner=code ROUTE (or an ask/confirm tool) traced to '" + r.id + "' for the human gate: " + q;
+        return "add a BRANCH (or an ask/confirm tool) traced to '" + r.id + "' for the human gate: " + q;
     }
     if shape == RealShape.EMBODIED_KNOWLEDGE {
         return "add a knowledge item (content verbatim) traced to '" + r.id + "', resident on the node(s) that use it: " + q;
@@ -515,7 +516,7 @@ def check_soundness(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
     rule_ids: list[str] = [r.id for r in spec.rules];
 
     for n in pir.nodes {
-        if n.ntype == "TERMINAL" { continue; }   # structural exit — serializes the report
+        if n.ntype == "RETURN" { continue; }   # structural exit — serializes the report
         if not n.traces_to {
             out.append(FaithFinding(axis="faithfulness", severity="fail", rule="", shape="",
                 message="ADDED behavior: node '" + n.id + "' traces to no rule — every node must"
@@ -553,7 +554,6 @@ def check_soundness(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
 # The closure — the strategy-independent verification core.
 # ---------------------------------------------------------------------------
 
-glob _MIND_TYPES: list[str] = ["GEN_RAW", "GEN_ENUM", "GEN_FILL", "GEN_EDIT"];
 
 def check_cohesion(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
     # Cognition preservation (anti-shred). An INVOKE_UNIT rule is an adaptive
@@ -574,11 +574,11 @@ def check_cohesion(spec: RuleSet, pir: ParsedIR) -> list[FaithFinding] {
                         + frag + "] — keep it ONE adaptive node with a tool-belt"));
         } elif len(owners) == 1 {
             n3 = owners[0];
-            if (str(n3.owner).lower() != "model") or (str(n3.ntype) not in _MIND_TYPES) {
+            if str(n3.ntype) != "DELEGATE" {
                 out.append(FaithFinding(axis="coherence", severity="warn", rule=str(r.id),
                     shape="INVOKE_UNIT",
                     message="INVOKE_UNIT rule '" + str(r.id) + "' lowered to the non-cognitive node '"
-                            + str(n3.id) + "' — it needs a model-owned Mind node with an autonomy tool-belt"));
+                            + str(n3.id) + "' (" + str(n3.ntype) + ") — an open subprocedure is a DELEGATE with its tools in autonomy.tools"));
             }
         }
     }

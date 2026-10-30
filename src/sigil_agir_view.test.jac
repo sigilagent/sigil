@@ -28,19 +28,19 @@ test "parse_agir: a pipeline IR projects to its nodes, edges and dataflow" {
     assert str(compute["tool"]) == "count_top_words";
 }
 
-test "parse_agir: node types map to their primitive family" {
+test "parse_agir: node types map to their AIS instruction class" {
     g = parse_agir(_cookbook("word_frequency"));
     by_id: dict[str, any] = {};
     for n in g["nodes"] { by_id[str(n["id"])] = str(n["group"]); }
-    assert by_id["read_input"] == "boundary";      # SENSE
-    assert by_id["compute"] == "code";             # CODE
-    assert by_id["write_output"] == "boundary";    # ACT
-    assert by_id["done"] == "terminal";
-    # a model-owned slot is what the canvas draws as a diamond
+    assert by_id["read_input"] == "executable";    # OBSERVE
+    assert by_id["compute"] == "executable";       # COMPUTE
+    assert by_id["write_output"] == "executable";  # ACT
+    assert by_id["done"] == "termination";         # RETURN
+    # a semantic instruction is what the canvas draws as a diamond
     g2 = parse_agir(_cookbook("contact_to_csv"));
-    gen = [n for n in g2["nodes"] if str(n["type"]).startswith("GEN-")];
+    gen = [n for n in g2["nodes"] if str(n["type"]) in ["SELECT", "EXTRACT", "MUTATE", "GENERATE"]];
     assert gen;
-    for n in gen { assert str(n["group"]) == "mind"; }
+    for n in gen { assert str(n["group"]) == "semantic"; }
 }
 
 test "parse_agir: a tool's `serves` binds it to the node it runs on" {

@@ -22,15 +22,15 @@ def _spec() -> RuleSet {
 def _wf() -> WorkflowView {
     return WorkflowView(
         nodes=[
-            AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE,
+            AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                      doc="Parse the input file.", reads=["task"], writes=["data"], traces_to=["r1"]),
-            AgirNode(id="summarize", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+            AgirNode(id="summarize", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                      doc="Summarize the data in one sentence.",
                      reads=["data", "csv_rules"], writes=["summary"], traces_to=["r2"]),
             AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, surface="artifact",
                      doc="Write the output as CSV with a header row.",
                      reads=["data", "summary"], writes=["artifact"], traces_to=["r3"]),
-            AgirNode(id="done", ntype=NodeType.TERMINAL)
+            AgirNode(id="done", ntype=NodeType.RETURN)
         ],
         edges=[
             AgirEdge(src="parse", dst="summarize", modality=Modality.MANDATORY, traces_to="r1"),
@@ -82,7 +82,7 @@ test "a lossless join assembles with no issues" {
 # escalates to the model slot that PRODUCES what that node consumes.
 test "a prohibition is scoped to the slots it governs, not sprayed on all of them" {
     wf = _wf();
-    wf.nodes.append(AgirNode(id="pick_name", ntype=NodeType.GEN_ENUM, owner=Owner.MODEL,
+    wf.nodes.append(AgirNode(id="pick_name", ntype=NodeType.SELECT, owner=Owner.MODEL,
                              doc="Choose a short label for the run.",
                              reads=["task"], writes=["label"], traces_to=["r2"]));
     views = _views();

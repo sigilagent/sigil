@@ -281,8 +281,8 @@ def _ask_user(question=None):
     _tui_sub("✗", "\033[31m", "no answer within HIL_TIMEOUT")
     return "[human did not answer in time]"
 
-# ---- edit-mode revision (GEN-EDIT lowering): apply SEARCH/REPLACE blocks ----
-# A GEN-EDIT step revises a document it already holds. Asking the model for the
+# ---- edit-mode revision (MUTATE lowering): apply SEARCH/REPLACE blocks ----
+# A MUTATE step revises a document it already holds. Asking the model for the
 # whole revised document makes its output scale with the FILE, not the change —
 # restclient-migration's rewrite_calls re-emitted an entire Java class and hit its
 # 2500-token cap. The edits slot returns only the changed spans; this applies them.
@@ -858,6 +858,23 @@ def _skill_tools():
             continue
     return list(_SKILL_TOOL_CACHE)
 
+def _call_skill(name, task=""):
+    # AIS CALL to a procedure that is not a tool of this module: a separately
+    # compiled skill from the registry Sigil hands the run. An unknown name is a
+    # value the program can branch on, not an exception (spec: faults vs results).
+    raw = os.environ.get("SIGIL_SKILL_TOOLS", "")
+    try:
+        rows = _json.loads(raw) if raw else []
+    except Exception:
+        rows = []
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            if str(row["name"]) == str(name):
+                return _tui_tool(str(name), [("task", task)], lambda: _skill_run(str(row["module"]), str(task)))
+        except Exception:
+            continue
+    return "[CALL %s: no such procedure in this run]" % name
+
 def _scoped_author_run(context, out_path=None, tries=3):
     # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
     # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
@@ -886,7 +903,7 @@ def _scoped_author_run(context, out_path=None, tries=3):
     return out_path if (out_path and os.path.exists(out_path)) else ""
 
 def _clean_path(p):
-    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # EXTRACT slots (byLLM) occasionally leak JSON structure into a string field,
     # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
     # verbatim writes the artifact to a garbage filename and the deliverable is lost.
     # Strip trailing structural junk and cut at the first filename-illegal char after
@@ -1040,7 +1057,7 @@ def _cap_seq(v, n=400, chars=60000):
 
 def _cap_in(v, n=60000):
     # A model slot fed a whole data file (exoplanet: the light-curve CSV went
-    # into a GEN-ENUM decision) blows the context window; nothing an enum or a
+    # into a SELECT decision) blows the context window; nothing an enum or a
     # plan needs lives past the first 60k chars. Code nodes never pass here.
     if not _sigil_on("INPUT_CAPS"):
         return v
@@ -1240,7 +1257,7 @@ def _is_input_path(p):
         return False
     return os.path.abspath(q) in _INPUT_PATHS or os.path.basename(q) in _INPUT_PATHS
 def _outname(task, fallback="output.txt"):
-    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # GENERATE deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
     # filename that follows a save/output/write verb; else the first bare filename; else fallback.
     # EXTENSION-AWARE: the fallback name encodes WHICH deliverable this write is

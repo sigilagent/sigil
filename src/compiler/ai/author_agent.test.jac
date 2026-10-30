@@ -66,8 +66,8 @@ test "_views_from_ir reads nodes, owners and the rule traces G5 audits" {
     byid = {n.id: n for n in wf.nodes};
     assert byid["read_input"].owner == Owner.CODE;
     assert byid["decide"].owner == Owner.MODEL;      # default when not code
-    assert byid["read_input"].ntype == NodeType.SENSE;
-    assert byid["done"].ntype == NodeType.TERMINAL;
+    assert byid["read_input"].ntype == NodeType.OBSERVE;
+    assert byid["done"].ntype == NodeType.RETURN;
     assert byid["decide"].traces_to == ["r2", "r3"];
     assert byid["read_input"].reads == ["task"];
 }
@@ -99,12 +99,12 @@ test "the parsed views drive the REAL gates, not a private copy of them" {
 test "every node type the compiler accepts round-trips — no silent GEN_RAW" {
     # An unmapped type defaults to GEN_RAW, which would read a CODE node (gated by
     # construction) back as a model slot. Cover the whole alphabet.
-    for (name, want) in [("GEN-RAW", NodeType.GEN_RAW), ("GEN-ENUM", NodeType.GEN_ENUM),
-                         ("GEN-FILL", NodeType.GEN_FILL), ("GEN-EDIT", NodeType.GEN_EDIT),
-                         ("ROUTE", NodeType.ROUTE), ("LOOP", NodeType.LOOP),
-                         ("SPAWN", NodeType.SPAWN), ("CALL", NodeType.CALL),
-                         ("SENSE", NodeType.SENSE), ("ACT", NodeType.ACT),
-                         ("CODE", NodeType.CODE), ("TERMINAL", NodeType.TERMINAL)] {
+    for (name, want) in [("GEN-RAW", NodeType.GENERATE), ("GEN-ENUM", NodeType.SELECT),
+                         ("GEN-FILL", NodeType.EXTRACT), ("GEN-EDIT", NodeType.MUTATE),
+                         ("ROUTE", NodeType.BRANCH), ("LOOP", NodeType.LOOP),
+                         ("SPAWN", NodeType.PARALLEL), ("CALL", NodeType.CALL),
+                         ("SENSE", NodeType.OBSERVE), ("ACT", NodeType.ACT),
+                         ("CODE", NodeType.COMPUTE), ("TERMINAL", NodeType.RETURN)] {
         (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + name + "\n");
         assert wf.nodes[0].ntype == want;
     }

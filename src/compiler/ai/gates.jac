@@ -142,7 +142,7 @@ def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> l
 # lower — no tool bound, no inline body. The ability is still generated (it has
 # to be, the walker must traverse it), so its NAME appears in the module either
 # way; only the marker distinguishes a real gate from a pass-through.
-glob HOLLOW_MARKERS: list[str] = ["# CODE ", "# SENSE ", "# ACT "];
+glob HOLLOW_MARKERS: list[str] = ["# COMPUTE ", "# OBSERVE ", "# ACT "];
 
 """Did this node lower to a marker comment instead of to work?
 
@@ -308,7 +308,7 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
         }
     }
     for n in wf.nodes {
-        if n.ntype != NodeType.ROUTE { continue; }
+        if n.ntype != NodeType.BRANCH { continue; }
         feeds = [rd for rd in n.reads if rd in hil_carries];
         if not feeds { continue; }
         if n.owner != Owner.CODE {
@@ -362,13 +362,13 @@ def gate_env_binding(ir_text: str) -> list[str] {
         issues.append("G7: tool '" + str(kv2[0]) + "' invents a default input path ('"
             + str(kv2[1]) + "') when its lookup fails — that turns 'no input' into 'wrong input', "
             + "which the graph cannot tell from success. Return an empty/None sentinel and let a "
-            + "ROUTE branch on it.");
+            + "BRANCH test it.");
     }
     ung = mf.get("unguarded_read") or {};
     for kv3 in ung.items() {
         issues.append("G7: tool '" + str(kv3[0]) + "' opens an external artifact ("
             + str(kv3[1]) + ") with no existence check or try — a missing file raises and takes "
-            + "the walker down before any slot runs. Guard the read and report absence so a ROUTE "
+            + "the walker down before any slot runs. Guard the read and report absence so a BRANCH "
             + "can handle it.");
     }
     return issues;

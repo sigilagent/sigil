@@ -16,7 +16,7 @@ Three passes, straight from the 33-skill batch's failure classes:
 - POINTERS: a knowledge entry whose body is "See FORMS.md" when FORMS.md sits
   in the skill directory. The lift had the file all along — embody it.
 - HOLLOW: an owner=code CODE node no tool serves lowers to a marker comment —
-  a station the walker visits that does nothing. Re-own it to a GEN-RAW model
+  a station the walker visits that does nothing. Make it a GENERATE model
   slot: the degraded-but-real realization (the step is at least executed)
   beats the hollow one (silently skipped), and the note says exactly what was
   traded.
@@ -225,16 +225,16 @@ def _fix_hollow(ir: any) -> list[any] {
     for nd in list(ir.get("nodes") or []) {
         if not isinstance(nd, dict) { continue; }
         if str(nd.get("owner", "")).lower() != "code" { continue; }
-        if str(nd.get("type", "")).upper() != "CODE" { continue; }
+        if str(nd.get("type", "")).upper() != "COMPUTE" { continue; }
         if str(nd.get("body") or "").strip() { continue; }   # inline body lowers fine
         nid = str(nd.get("id"));
         tn = nd.get("tool");
         if isinstance(tn, list) { tn = tn[0] if tn else None; }
         if (nid in served) or (isinstance(tn, str) and (tn in tools)) { continue; }
-        nd["type"] = "GEN-RAW";
+        nd["type"] = "GENERATE";
         nd["owner"] = "model";
         fixes.append("hollow: code node '" + nid + "' had no tool and would lower to a no-op marker"
-                     + " — re-owned to a model slot (degraded from code gate; the step now executes)");
+                     + " — made a GENERATE (degraded from an executable COMPUTE; the step now executes)");
     }
     return fixes;
 }

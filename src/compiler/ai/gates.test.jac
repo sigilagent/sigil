@@ -84,8 +84,8 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
         Rule(id="r3", quote="verify", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     wf = WorkflowView(nodes=[
-        AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE, traces_to=["r1"]),
-        AgirNode(id="write", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=["r2"])
+        AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE, traces_to=["r1"]),
+        AgirNode(id="write", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=["r2"])
         # r3 traced by nothing -> missing
     ]);
     src_slotted = "can n_parse with X entry {}\ncan n_write with Y entry {}\ndef write(data: str) -> str by llm;";
@@ -140,7 +140,7 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
     # on its own. Seven is over the limit; six is not.
     seven = [f"r{i}" for i in range(7)];
     over = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven)
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=seven)
     ]);
     hits = det_overloaded(over);
     assert len(hits) == 1;
@@ -148,7 +148,7 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
     assert "folds 7 mandates" in hits[0];
 
     at_limit = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven[:6])
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=seven[:6])
     ]);
     assert det_overloaded(at_limit) == [];
 
@@ -164,14 +164,14 @@ test "G12-DET leaves code nodes and decomposed graphs alone" {
     # owner=code carries no slot to overload — a checklist gate legitimately
     # cites every element it verifies.
     gated = WorkflowView(nodes=[
-        AgirNode(id="check_all", ntype=NodeType.CODE, owner=Owner.CODE,
+        AgirNode(id="check_all", ntype=NodeType.COMPUTE, owner=Owner.CODE,
                  traces_to=[f"r{i}" for i in range(20)])
     ]);
     assert det_overloaded(gated) == [];
 
     # The shape the gate is steering toward: one node per mandate.
     split = WorkflowView(nodes=[
-        AgirNode(id=f"s{i}", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=[f"r{i}"])
+        AgirNode(id=f"s{i}", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=[f"r{i}"])
         for i in range(20)
     ]);
     assert det_overloaded(split) == [];
@@ -185,7 +185,7 @@ test "G12-DET fires where the monolithic bucket cannot see" {
              for i in range(7)];
     spec = RuleSet(rules=rules);
     wf = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                  traces_to=[f"r{i}" for i in range(7)])
     ]);
     src = "can n_author_doc with X entry {}\ndef author_doc(task: str) -> str by llm;";
@@ -205,7 +205,7 @@ test "G5 does not score a HOLLOW code station as gated" {
         Rule(id="r1", quote="compile checkpoint", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     wf = WorkflowView(nodes=[
-        AgirNode(id="compile_checkpoint", ntype=NodeType.CODE, owner=Owner.CODE, traces_to=["r1"])
+        AgirNode(id="compile_checkpoint", ntype=NodeType.COMPUTE, owner=Owner.CODE, traces_to=["r1"])
     ]);
     hollow = "can n_compile_checkpoint with Z entry {\n    # CODE compile_checkpoint\n    visit [-->];\n}";
     sc = gate_struct_cov(spec, wf, hollow);
@@ -226,11 +226,11 @@ test "G3-hard: IO mandates must chain to an embodied artifact write" {
         Rule(id="r2", quote="write the log", kind=RuleKind.IO, modality=Modality.MANDATORY),
         Rule(id="r3", quote="may export csv", kind=RuleKind.IO, modality=Modality.DISCRETIONARY)
     ]);
-    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    author = AgirNode(id="author", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["plan"], traces_to=["r1"]);
     emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE,
                     reads=["plan"], writes=["artifact"], traces_to=["r1"]);
-    orphan = AgirNode(id="log_note", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    orphan = AgirNode(id="log_note", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["log_text"], traces_to=["r2"]);
     wf = WorkflowView(nodes=[author, emit, orphan]);
     vb = ViewBundle(kn=KnowledgeView(tools=[
@@ -246,7 +246,7 @@ test "G3-hard: IO mandates must chain to an embodied artifact write" {
 
 test "G3-hard: the _write_artifact fallback (ACT with a content read) counts as embodied" {
     spec = RuleSet(rules=[Rule(id="r1", quote="write it", kind=RuleKind.IO, modality=Modality.MANDATORY)]);
-    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    author = AgirNode(id="author", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["doc"], traces_to=["r1"]);
     emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, reads=["doc"]);
     wf = WorkflowView(nodes=[author, emit]);
@@ -254,9 +254,9 @@ test "G3-hard: the _write_artifact fallback (ACT with a content read) counts as 
 }
 
 test "G6: a model-owned route consuming human feedback is flagged; code-owned passes" {
-    wait_n = AgirNode(id="wait_review", ntype=NodeType.SENSE, owner=Owner.CODE,
+    wait_n = AgirNode(id="wait_review", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                       writes=["feedback"], traces_to=["r1"]);
-    bad_route = AgirNode(id="approved_route", ntype=NodeType.ROUTE, owner=Owner.MODEL,
+    bad_route = AgirNode(id="approved_route", ntype=NodeType.BRANCH, owner=Owner.MODEL,
                          reads=["feedback"], traces_to=["r1"]);
     wf = WorkflowView(nodes=[wait_n, bad_route]);
     vb = ViewBundle(hil=HILView(points=[HILPoint(`node="wait_review", kind="APPROVE", prompt="review the spec")]));

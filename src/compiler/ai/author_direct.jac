@@ -24,7 +24,8 @@ import from jaclang.byllm.lib { Model }
 import from .spec_loop { RuleSet }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle, KnowledgeItem, KnowledgeView, ToolDef }
-import from .ir_views { NodeType, Owner }
+import from .ir_views { NodeType, Owner, node_type_of, unit_for }
+import from src.sigil_agir_yaml { load_agir }
 
 glob direct_llm: any = Model(model_name="gpt-4o-mini");
 glob _DIRECT_PINNED: bool = False;
@@ -151,13 +152,7 @@ def author_direct(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict[
 # (Duplicated from author_agent.jac to keep the DIRECT path free of the
 # sigil_claude_cc / agent_run dependency the AGENT front-end carries.)
 # ---------------------------------------------------------------------------
-glob _NODE_TYPES: dict[str, NodeType] = {
-    "GEN-RAW": NodeType.GEN_RAW, "GEN-ENUM": NodeType.GEN_ENUM,
-    "GEN-FILL": NodeType.GEN_FILL, "GEN-EDIT": NodeType.GEN_EDIT,
-    "ROUTE": NodeType.ROUTE, "LOOP": NodeType.LOOP, "SPAWN": NodeType.SPAWN,
-    "CALL": NodeType.CALL, "SENSE": NodeType.SENSE, "ACT": NodeType.ACT,
-    "CODE": NodeType.CODE, "TERMINAL": NodeType.TERMINAL
-};
+
 
 def _as_list(v: any) -> list[str] {
     if isinstance(v, list) { return [str(x) for x in v]; }
@@ -166,12 +161,9 @@ def _as_list(v: any) -> list[str] {
 }
 
 def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
-    body = str(ir_text or "");
-    if body.lstrip().startswith("---") {
-        parts = body.lstrip().split("---", 2);
-        if len(parts) >= 3 { body = parts[2]; }
-    }
-    try { ir = yaml.safe_load(body) or {}; } except Exception { ir = {}; }
+    # The shared reader, so the views see the document the compiler lowers —
+    # canonicalized to the paper's AIS (legacy mnemonics included).
+    ir = load_agir(str(ir_text or ""));
     if not isinstance(ir, dict) { ir = {}; }
 
     nodes: list[AgirNode] = [];
@@ -179,8 +171,8 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
         if not isinstance(raw, dict) { continue; }
         nodes.append(AgirNode(
             id=str(raw.get("id", "")),
-            ntype=_NODE_TYPES.get(str(raw.get("type", "GEN-RAW")).upper(), NodeType.GEN_RAW),
-            owner=(Owner.CODE if str(raw.get("owner", "model")).lower() == "code" else Owner.MODEL),
+            ntype=node_type_of(raw.get("type", "GENERATE")),
+            owner=unit_for(node_type_of(raw.get("type", "GENERATE"))),
             doc=str(raw.get("doc", "")),
             reads=_as_list(raw.get("reads")),
             writes=_as_list(raw.get("writes")),

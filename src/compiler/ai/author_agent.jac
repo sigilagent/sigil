@@ -36,7 +36,8 @@ import time;
 import yaml;
 import from pathlib { Path }
 import from .lift_types { Modality, RuleKind }
-import from .ir_views { LiftResult, NodeType, Owner }
+import from .ir_views { LiftResult, NodeType, Owner, node_type_of, unit_for }
+import from src.sigil_agir_yaml { load_agir }
 import from .spec_loop { extract_spec, strip_frontmatter, RuleSet, Rule }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle, KnowledgeItem, KnowledgeView, ToolDef }
@@ -46,16 +47,7 @@ import from .repair { repair_compile_loop, _sigil_bin }
 import from src.sigil_claude_cc { agent_run, AUTHOR }
 import from src.sigil_runtime { repo_root }
 
-# The full alphabet the mechanical half accepts. Partial coverage here would be
-# worse than useless: an unmapped type silently becomes GEN_RAW, i.e. a CODE node
-# the compiler gates by construction would be read back as a model slot.
-glob _NODE_TYPES: dict[str, NodeType] = {
-    "GEN-RAW": NodeType.GEN_RAW, "GEN-ENUM": NodeType.GEN_ENUM,
-    "GEN-FILL": NodeType.GEN_FILL, "GEN-EDIT": NodeType.GEN_EDIT,
-    "ROUTE": NodeType.ROUTE, "LOOP": NodeType.LOOP, "SPAWN": NodeType.SPAWN,
-    "CALL": NodeType.CALL, "SENSE": NodeType.SENSE, "ACT": NodeType.ACT,
-    "CODE": NodeType.CODE, "TERMINAL": NodeType.TERMINAL
-};
+
 
 
 def _as_list(v: any) -> list[str] {
@@ -70,12 +62,9 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
     #   G5 wants node id / owner / traces_to;  G1 wants tool body|command and
     #   knowledge content. Everything else stays default — this is a parse, not
     #   a second opinion about the IR.
-    body = str(ir_text or "");
-    if body.lstrip().startswith("---") {
-        parts = body.lstrip().split("---", 2);
-        if len(parts) >= 3 { body = parts[2]; }
-    }
-    try { ir = yaml.safe_load(body) or {}; } except Exception { ir = {}; }
+    # The shared reader, so the views see the document the compiler lowers —
+    # canonicalized to the paper's AIS (legacy mnemonics included).
+    ir = load_agir(str(ir_text or ""));
     if not isinstance(ir, dict) { ir = {}; }
 
     nodes: list[AgirNode] = [];
@@ -83,8 +72,8 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
         if not isinstance(raw, dict) { continue; }
         nodes.append(AgirNode(
             id=str(raw.get("id", "")),
-            ntype=_NODE_TYPES.get(str(raw.get("type", "GEN-RAW")).upper(), NodeType.GEN_RAW),
-            owner=(Owner.CODE if str(raw.get("owner", "model")).lower() == "code" else Owner.MODEL),
+            ntype=node_type_of(raw.get("type", "GENERATE")),
+            owner=unit_for(node_type_of(raw.get("type", "GENERATE"))),
             doc=str(raw.get("doc", "")),
             reads=_as_list(raw.get("reads")),
             writes=_as_list(raw.get("writes")),

@@ -6,23 +6,50 @@ rule-id spine (`traces_to`). Every obj is walker-safe: all fields defaulted, no
 `T | None`.
 """
 
+import from src.sigil_ais { canonical_opcode }
+
 enum NodeType {
-    GEN_RAW, GEN_ENUM, GEN_FILL, GEN_EDIT,
-    ROUTE, LOOP, SPAWN, CALL,
-    SENSE, ACT, CODE, TERMINAL
+    SELECT, EXTRACT, MUTATE, GENERATE,
+    DELEGATE,
+    COMPUTE, OBSERVE, ACT,
+    BRANCH, LOOP, PARALLEL, CALL,
+    RETURN
 }
-sem NodeType = "The AG-IR action-type alphabet. Mind (GEN_*) always owner=MODEL; CODE always owner=CODE; Flow/Boundary either.";
-sem NodeType.GEN_ENUM = "Choose from a fixed set — the TIGHTEST Mind form. 'Classify the operation' is GEN_ENUM, not GEN_RAW.";
-sem NodeType.GEN_FILL = "Fill a typed object from context (schema-validated).";
-sem NodeType.GEN_EDIT = "Mutate existing content touching only what must change.";
-sem NodeType.GEN_RAW = "Free-form generation — reserve for genuinely open-ended output.";
-sem NodeType.SENSE = "Pull world-state in (read, grep, fetch). Idempotent.";
-sem NodeType.ACT = "Push an effect out (write a file, emit the deliverable).";
-sem NodeType.CODE = "Pure function of inputs — no guess, runs for free.";
-sem NodeType.TERMINAL = "The single exit node; serializes produced carries into the report.";
+sem NodeType = "The Agent Instruction Set (AIS) opcode. The opcode decides who executes it: SELECT/EXTRACT/MUTATE/GENERATE/DELEGATE run on the model; every other opcode runs as code.";
+sem NodeType.SELECT = "Semantic: choose among a specified set of alternatives — the TIGHTEST semantic form. 'Classify the operation' is SELECT, not GENERATE.";
+sem NodeType.EXTRACT = "Semantic: derive typed or structured information (a declared object) from semantic input.";
+sem NodeType.MUTATE = "Semantic: modify an existing value according to instructions, touching only what must change.";
+sem NodeType.GENERATE = "Semantic: produce new open-ended content — reserve for genuinely open-ended output.";
+sem NodeType.DELEGATE = "Delegated: a bounded subtask whose internal orchestration is deliberately left to the runtime agent, with declared context, tools (autonomy_tools) and output contract.";
+sem NodeType.COMPUTE = "Executable: invoke an available local computation — a pure function of its inputs, no guess.";
+sem NodeType.OBSERVE = "Executable: obtain a value from an external source (read, grep, fetch, a check). Idempotent.";
+sem NodeType.ACT = "Executable: cause an externally visible effect (write a file, emit the deliverable).";
+sem NodeType.BRANCH = "Control: select an explicit successor using an available value or predicate (guards over carries).";
+sem NodeType.LOOP = "Control: repeat an explicitly represented region, with a verdict and a cap.";
+sem NodeType.PARALLEL = "Control: execute explicitly represented regions independently or concurrently.";
+sem NodeType.CALL = "Control: invoke another named procedure.";
+sem NodeType.RETURN = "Termination: the single exit; returns the produced carries as the report.";
+
+# The AIS execution classes, as NodeType sets (paper Table 1).
+glob SEMANTIC_TYPES: list[any] = [NodeType.SELECT, NodeType.EXTRACT, NodeType.MUTATE, NodeType.GENERATE];
+glob MODEL_TYPES: list[any] = [NodeType.SELECT, NodeType.EXTRACT, NodeType.MUTATE, NodeType.GENERATE, NodeType.DELEGATE];
 
 enum Owner { MODEL, CODE }
-sem Owner = "Who fires the node: MODEL needs a guess; CODE is a function of its inputs (the Owner test).";
+sem Owner = "Who executes the node. Derived from the opcode (MODEL for the semantic opcodes and DELEGATE, CODE otherwise) — never chosen independently.";
+
+def node_type_of(raw: any) -> NodeType {
+    # Any spelling of an opcode (paper or legacy) -> its NodeType; unknown
+    # spellings read as GENERATE, the loosest semantic instruction.
+    op = canonical_opcode(raw);
+    for t in NodeType {
+        if t.name == op { return t; }
+    }
+    return NodeType.GENERATE;
+}
+
+def unit_for(t: NodeType) -> Owner {
+    return Owner.MODEL if t in MODEL_TYPES else Owner.CODE;
+}
 
 obj AssembleResult {
     has ir_text: str = "";
