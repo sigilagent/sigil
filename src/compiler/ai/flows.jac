@@ -1,4 +1,4 @@
-"""AI compiler — Stage 3: the four annotator flows (the SPAWN fan-out).
+"""AI compiler — Stage 3: the four annotator flows (the PARALLEL fan-out).
 
 Each flow reads the frozen Spec + the spine and emits ONE view of the AG-IR:
 
@@ -9,7 +9,7 @@ Each flow reads the frozen Spec + the spine and emits ONE view of the AG-IR:
 
 They are read-shared / write-isolated (each writes only its own view), so they
 fan out concurrently via Jac's flow/wait — the same mechanism the compiler's
-SPAWN lowering emits. LLM calls are I/O-bound: four flows finish in ~1x
+PARALLEL lowering emits. LLM calls are I/O-bound: four flows finish in ~1x
 wall-clock. `parallel=False` runs them sequentially (tests script a MockLLM
 whose outputs pop in call order, so tests need a deterministic order).
 """
@@ -65,7 +65,7 @@ obj ToolDef {
 }
 sem ToolDef = "An owner=code tool. EMBODY, don't point: `body` carries the runnable implementation VERBATIM (or `command` the exact command line). A tool with neither is a prose-pointer — the standalone gate rejects it.";
 sem ToolDef.sig = "The tool signature, e.g. \"(inputs, out) -> path\".";
-sem ToolDef.surface = "SENSE (read -> data) or ACT (writes an effect/artifact).";
+sem ToolDef.surface = "OBSERVE (read -> data) or ACT (writes an effect/artifact).";
 sem ToolDef.serves = "The node ids this tool fires for.";
 
 obj KnowledgeItem {
@@ -144,6 +144,14 @@ sem io_view = """The dataflow pass. For every datum in the workflow ask: does it
 sit still or travel? MOVING data (produced at one node, consumed downstream)
 becomes a Carry with its produced_by node; static reference material is NOT a
 carry (it belongs to knowledge). Always include the 'task' carry (role=input).
+Every EXTERNAL ARTIFACT the procedure opens or writes whose location the skill
+does not fix — a template, a data file, an input directory, an output
+destination — is its own Carry with role=input and type=path, named for what it
+holds (template_path, data_path, output_path). A compiled skill is called by a
+program: those carries are its parameters. Never leave a file location to be
+recovered from the task sentence by an OBSERVE tool's regex — prose-mining may be
+the FALLBACK inside that tool, never the only way in, or the caller's word order
+silently decides which file is opened.
 Every node's writes must appear as a carry; every non-knowledge read must be a
 carry someone produces. The artifact boundary is the USER-INTERACTION line, not
 the filesystem: note in artifact_note which ACT delivers the artifact the user

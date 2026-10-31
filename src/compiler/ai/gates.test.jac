@@ -1,4 +1,4 @@
-"""Tests — the G4 compile oracle. The happy path is a LIVE round-trip: a minimal
+"""Tests — the COMPILE compile oracle. The happy path is a LIVE round-trip: a minimal
 AG-IR through mechanical.transpile_ir + a real `jac check` subprocess. The
 failure paths must return routed verdicts, never raise."""
 
@@ -8,6 +8,7 @@ import from .flows { ToolDef, KnowledgeItem, KnowledgeView, HILView, HILPoint }
 import from .spec_loop { RuleSet }
 import from .lift_types { Modality, RuleKind }
 import from .skeleton { skeleton_ir }
+import from .report { classify }
 
 glob GOOD_IR: str = """---
 name: note-writer
@@ -61,7 +62,7 @@ test "transpile without check still requires a run() entrypoint" {
     assert "def run(" in v.module_src;
 }
 
-test "G1 standalone: embodied views pass; pointers and empty tools are flagged" {
+test "G5 standalone: embodied views pass; pointers and empty tools are flagged" {
     good = ViewBundle(kn=KnowledgeView(
         tools=[ToolDef(name="write", sig="(x) -> path", serves=["emit"], body="return 'out.txt'")],
         knowledge=[KnowledgeItem(key="rules", content="The output must include a header row naming every column of the table.")]
@@ -77,15 +78,15 @@ test "G1 standalone: embodied views pass; pointers and empty tools are flagged" 
     assert len([i for i in issues if "'forms'" in i and "pointer" in i]) == 1;
 }
 
-test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
+test "G2 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     spec = RuleSet(rules=[
         Rule(id="r1", quote="parse", kind=RuleKind.STEP, modality=Modality.MANDATORY),
         Rule(id="r2", quote="write", kind=RuleKind.IO, modality=Modality.MANDATORY),
         Rule(id="r3", quote="verify", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     wf = WorkflowView(nodes=[
-        AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE, traces_to=["r1"]),
-        AgirNode(id="write", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=["r2"])
+        AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE, traces_to=["r1"]),
+        AgirNode(id="write", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=["r2"])
         # r3 traced by nothing -> missing
     ]);
     src_slotted = "can n_parse with X entry {}\ncan n_write with Y entry {}\ndef write(data: str) -> str by llm;";
@@ -101,7 +102,7 @@ test "G5 STRUCT-COV classifies gated / slotted / monolithic / missing" {
     assert len([i for i in sc2.issues if "MONOLITHIC" in i]) == 1;
 }
 
-test "G13 flags a slot prompt that carries its document, not its mandate" {
+test "G5_BLOAT flags a slot prompt that carries its document, not its mandate" {
     # An absolute cap, not a ratio: the property is that a slot prompt stays
     # BOUNDED as the source skill grows. A ratio would punish a short skill for
     # nothing -- the repo's corpus runs 8.6%-29.1% of source length and every one
@@ -113,34 +114,34 @@ test "G13 flags a slot prompt that carries its document, not its mandate" {
     hits = gate_slot_prompt_bloat(big);
     assert len(hits) == 1, str(hits);
     assert "make_tldr" in hits[0];
-    assert hits[0].startswith("G13: "), hits[0];
+    assert hits[0].startswith("G5_BLOAT: "), hits[0];
 
     # exactly at the cap is fine -- the cap is a ceiling, not a target
     at = "sem make_tldr =\n\"\"\"" + ("x" * SLOT_PROMPT_CAP) + "\"\"\";";
     assert gate_slot_prompt_bloat(at) == [];
 }
 
-test "G13 is on by default and can be switched off" {
+test "G5_BLOAT is on by default and can be switched off" {
     import os;
     big = "sem s =\n\"\"\"" + ("x" * (SLOT_PROMPT_CAP + 1)) + "\"\"\";";
     assert gate_slot_prompt_bloat(big);
     os.environ["SIGIL_GATE_G13"] = "0";
     assert gate_slot_prompt_bloat(big) == [];
     del os.environ["SIGIL_GATE_G13"];
-    os.environ["SIGIL_GATES_OFF"] = "G13";
+    os.environ["SIGIL_GATES_OFF"] = "G5_BLOAT";
     assert gate_slot_prompt_bloat(big) == [];
     del os.environ["SIGIL_GATES_OFF"];
     assert gate_slot_prompt_bloat(big);
 }
 
 
-test "G12-DET flags a mega-slot, counting mandates per model node" {
+test "G2_OVERLOAD flags a mega-slot, counting mandates per model node" {
     # The case this gate exists for: ONE owner=model node citing many mandates.
     # It lowers to a single `by llm` slot, so no mandate in it can be certified
     # on its own. Seven is over the limit; six is not.
     seven = [f"r{i}" for i in range(7)];
     over = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven)
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=seven)
     ]);
     hits = det_overloaded(over);
     assert len(hits) == 1;
@@ -148,7 +149,7 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
     assert "folds 7 mandates" in hits[0];
 
     at_limit = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=seven[:6])
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=seven[:6])
     ]);
     assert det_overloaded(at_limit) == [];
 
@@ -160,42 +161,42 @@ test "G12-DET flags a mega-slot, counting mandates per model node" {
     assert len(det_overloaded(over)) == 1;
 }
 
-test "G12-DET leaves code nodes and decomposed graphs alone" {
+test "G2_OVERLOAD leaves code nodes and decomposed graphs alone" {
     # owner=code carries no slot to overload — a checklist gate legitimately
     # cites every element it verifies.
     gated = WorkflowView(nodes=[
-        AgirNode(id="check_all", ntype=NodeType.CODE, owner=Owner.CODE,
+        AgirNode(id="check_all", ntype=NodeType.COMPUTE, owner=Owner.CODE,
                  traces_to=[f"r{i}" for i in range(20)])
     ]);
     assert det_overloaded(gated) == [];
 
     # The shape the gate is steering toward: one node per mandate.
     split = WorkflowView(nodes=[
-        AgirNode(id=f"s{i}", ntype=NodeType.GEN_RAW, owner=Owner.MODEL, traces_to=[f"r{i}"])
+        AgirNode(id=f"s{i}", ntype=NodeType.GENERATE, owner=Owner.MODEL, traces_to=[f"r{i}"])
         for i in range(20)
     ]);
     assert det_overloaded(split) == [];
 }
 
-test "G12-DET fires where the monolithic bucket cannot see" {
+test "G2_OVERLOAD fires where the monolithic bucket cannot see" {
     # Regression: counting StructCov's `monolithic` bucket missed this entirely.
     # A mega-slot node HAS a dedicated slot def, so every mandate on it grades
-    # `slotted` and the monolithic bucket comes back empty — while G12 fires.
+    # `slotted` and the monolithic bucket comes back empty — while G2_OVERLOAD fires.
     rules = [Rule(id=f"r{i}", quote="q", kind=RuleKind.STEP, modality=Modality.MANDATORY)
              for i in range(7)];
     spec = RuleSet(rules=rules);
     wf = WorkflowView(nodes=[
-        AgirNode(id="author_doc", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+        AgirNode(id="author_doc", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                  traces_to=[f"r{i}" for i in range(7)])
     ]);
     src = "can n_author_doc with X entry {}\ndef author_doc(task: str) -> str by llm;";
     sc = gate_struct_cov(spec, wf, src);
     assert sc.monolithic == [];
     assert len(sc.slotted) == 7;
-    assert len([i for i in sc.issues if i.startswith("G12:")]) == 1;
+    assert len([i for i in sc.issues if i.startswith("G2_OVERLOAD:")]) == 1;
 }
 
-test "G5 does not score a HOLLOW code station as gated" {
+test "G2 does not score a HOLLOW code station as gated" {
     # The ability exists but its body is only the marker the mechanical half
     # emits when nothing bound a tool: the walker visits the station and does
     # nothing. Scoring that `gated` reports a hollow gate as the strongest
@@ -205,7 +206,7 @@ test "G5 does not score a HOLLOW code station as gated" {
         Rule(id="r1", quote="compile checkpoint", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     wf = WorkflowView(nodes=[
-        AgirNode(id="compile_checkpoint", ntype=NodeType.CODE, owner=Owner.CODE, traces_to=["r1"])
+        AgirNode(id="compile_checkpoint", ntype=NodeType.COMPUTE, owner=Owner.CODE, traces_to=["r1"])
     ]);
     hollow = "can n_compile_checkpoint with Z entry {\n    # CODE compile_checkpoint\n    visit [-->];\n}";
     sc = gate_struct_cov(spec, wf, hollow);
@@ -220,17 +221,17 @@ test "G5 does not score a HOLLOW code station as gated" {
     assert sc2.issues == [];
 }
 
-test "G3-hard: IO mandates must chain to an embodied artifact write" {
+test "G2_ARTIFACT-hard: IO mandates must chain to an embodied artifact write" {
     spec = RuleSet(rules=[
         Rule(id="r1", quote="write the plan", kind=RuleKind.IO, modality=Modality.MANDATORY),
         Rule(id="r2", quote="write the log", kind=RuleKind.IO, modality=Modality.MANDATORY),
         Rule(id="r3", quote="may export csv", kind=RuleKind.IO, modality=Modality.DISCRETIONARY)
     ]);
-    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    author = AgirNode(id="author", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["plan"], traces_to=["r1"]);
     emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE,
                     reads=["plan"], writes=["artifact"], traces_to=["r1"]);
-    orphan = AgirNode(id="log_note", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    orphan = AgirNode(id="log_note", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["log_text"], traces_to=["r2"]);
     wf = WorkflowView(nodes=[author, emit, orphan]);
     vb = ViewBundle(kn=KnowledgeView(tools=[
@@ -244,19 +245,19 @@ test "G3-hard: IO mandates must chain to an embodied artifact write" {
     assert "'r2'" in issues[0];
 }
 
-test "G3-hard: the _write_artifact fallback (ACT with a content read) counts as embodied" {
+test "G2_ARTIFACT-hard: the _write_artifact fallback (ACT with a content read) counts as embodied" {
     spec = RuleSet(rules=[Rule(id="r1", quote="write it", kind=RuleKind.IO, modality=Modality.MANDATORY)]);
-    author = AgirNode(id="author", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+    author = AgirNode(id="author", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                       writes=["doc"], traces_to=["r1"]);
     emit = AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, reads=["doc"]);
     wf = WorkflowView(nodes=[author, emit]);
     assert gate_artifact_boundary(spec, wf, ViewBundle()) == [];
 }
 
-test "G6: a model-owned route consuming human feedback is flagged; code-owned passes" {
-    wait_n = AgirNode(id="wait_review", ntype=NodeType.SENSE, owner=Owner.CODE,
+test "G3_HIL: a model-owned route consuming human feedback is flagged; code-owned passes" {
+    wait_n = AgirNode(id="wait_review", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                       writes=["feedback"], traces_to=["r1"]);
-    bad_route = AgirNode(id="approved_route", ntype=NodeType.ROUTE, owner=Owner.MODEL,
+    bad_route = AgirNode(id="approved_route", ntype=NodeType.BRANCH, owner=Owner.MODEL,
                          reads=["feedback"], traces_to=["r1"]);
     wf = WorkflowView(nodes=[wait_n, bad_route]);
     vb = ViewBundle(hil=HILView(points=[HILPoint(`node="wait_review", kind="APPROVE", prompt="review the spec")]));
@@ -266,6 +267,154 @@ test "G6: a model-owned route consuming human feedback is flagged; code-owned pa
 
     bad_route.owner = Owner.CODE;
     assert gate_hil_gates(wf, vb) == [];
+}
+
+test "G3_HIL: a SELECT that judges human feedback for a BRANCH is flagged" {
+    # The AIS shape of the old failure: the BRANCH is code, but it tests a value a
+    # model step derived from the human's words.
+    wait_n = AgirNode(id="wait_review", ntype=NodeType.OBSERVE, owner=Owner.CODE,
+                      writes=["feedback"], traces_to=["r1"]);
+    judge = AgirNode(id="judge", ntype=NodeType.SELECT, owner=Owner.MODEL,
+                     reads=["feedback"], writes=["verdict"], traces_to=["r1"]);
+    route = AgirNode(id="route", ntype=NodeType.BRANCH, owner=Owner.CODE,
+                     reads=["verdict"], traces_to=["r1"]);
+    wf = WorkflowView(nodes=[wait_n, judge, route]);
+    vb = ViewBundle(hil=HILView(points=[HILPoint(`node="wait_review", kind="APPROVE", prompt="review the spec")]));
+    issues = gate_hil_gates(wf, vb);
+    assert len(issues) == 1, issues;
+    assert ("'route'" in issues[0]) and ("judge -> verdict" in issues[0]);
+
+    judge.ntype = NodeType.COMPUTE;
+    judge.owner = Owner.CODE;
+    assert gate_hil_gates(wf, vb) == [];
+}
+
+glob FLOW_IR: str = """---
+name: phi-note
+description: Summarize a record and log the summary.
+---
+agir_version: 0.2
+walker:
+  name: PhiAgent
+  carries:
+    task: {type: str, role: input}
+    record: {type: str, produced_by: read_record}
+    summary: {type: str, produced_by: summarize}
+    redacted: {type: str, produced_by: redact}
+nodes:
+  - {id: read_record, type: OBSERVE, tool: read_file, reads: [task], writes: [record]}
+  - {id: summarize, type: GENERATE, reads: [record], writes: [summary], doc: "Summarize the record."}
+  - {id: redact, type: COMPUTE, reads: [summary], writes: [redacted]}
+  - {id: write_log, type: ACT, reads: [summary]}
+  - {id: done, type: RETURN}
+edges:
+  - {from: read_record, to: summarize}
+  - {from: summarize, to: redact}
+  - {from: redact, to: write_log}
+  - {from: write_log, to: done}
+constraints:
+  - {id: no_phi_in_logs, kind: forbid_flow, from: [record], to: [write_log], through: [redact]}
+  - {id: summary_first, kind: require_before, before: summarize, after: write_log}
+""";
+
+test "G2_FLOW: a value derived from a prohibited source reaching its sink is an error" {
+    found = gate_constraints(FLOW_IR);
+    flows = [f for f in found if str(f[0]) == "G2_FLOW"];
+    assert len(flows) == 1, found;
+    assert ("'write_log'" in str(flows[0][1])) and ("summary" in str(flows[0][1]));
+    assert classify("G2_FLOW") == "error";
+    # reading the sanitized value instead satisfies the constraint
+    clean = FLOW_IR.replace("{id: write_log, type: ACT, reads: [summary]}", "{id: write_log, type: ACT, reads: [redacted]}");
+    assert [f for f in gate_constraints(clean) if str(f[0]) == "G2_FLOW"] == [];
+}
+
+test "G2_ORDER: a path that skips the required earlier step is an error" {
+    assert [f for f in gate_constraints(FLOW_IR) if str(f[0]) == "G2_ORDER"] == [];
+    bypass = FLOW_IR.replace("  - {from: write_log, to: done}", "  - {from: write_log, to: done}\n  - {from: read_record, to: write_log}");
+    order = [f for f in gate_constraints(bypass) if str(f[0]) == "G2_ORDER"];
+    assert len(order) == 1, order;
+    assert "'summarize'" in str(order[0][1]);
+}
+
+test "constraints: unknown kinds and dangling names are reported, not ignored" {
+    bad = FLOW_IR.replace("kind: require_before", "kind: sometimes").replace("to: [write_log]", "to: [nowhere]");
+    found = gate_constraints(bad);
+    assert [f for f in found if (str(f[0]) == "G2") and ("sometimes" in str(f[1]))];
+    assert [f for f in found if (str(f[0]) == "G2_FLOW") and ("nowhere" in str(f[1]))];
+}
+
+glob LEGACY_ROUTE_IR: str = """---
+name: router
+description: Answer briefly or at length.
+---
+agir_version: 0.1
+walker:
+  name: RouterAgent
+  carries:
+    task: {type: str, role: input}
+    answer: {type: str, produced_by: short}
+    long_answer: {type: str, produced_by: long}
+nodes:
+  - id: pick
+    type: ROUTE
+    owner: model
+    reads: [task]
+    doc: "Pick the short or the long answer."
+  - id: short
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [answer]
+    doc: "Answer briefly."
+  - id: long
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [long_answer]
+    doc: "Answer at length."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: pick, to: short}
+  - {from: pick, to: long}
+  - {from: short, to: done}
+  - {from: long, to: done}
+""";
+
+test "a legacy model-chosen ROUTE lowers as SELECT + BRANCH and compiles" {
+    v = compile_gate(LEGACY_ROUTE_IR, "router");
+    assert v.ok, v.errors;
+    assert "PickRoute" in v.module_src;
+    assert "by llm(intent=" not in v.module_src;
+}
+
+test "the paper's CALL invokes a tool of the module by name" {
+    ir = GOOD_IR.replace("""  - id: done
+    type: TERMINAL""", """  - id: count
+    type: CALL
+    procedure: count_words
+    reads: [note]
+    writes: [words]
+  - id: done
+    type: TERMINAL""").replace("  - {from: draft, to: done, modality: mandatory}",
+        "  - {from: draft, to: count, modality: mandatory}\n  - {from: count, to: done, modality: mandatory}"
+    ).replace("""    report:
+      type: str
+      produced_by: done""", """    words:
+      type: str
+      produced_by: count
+    report:
+      type: str
+      produced_by: done""").replace("walker:", """tools:
+  count_words:
+    sig: "(note) -> str"
+    body: |
+      def count_words(note):
+          return str(len(str(note or "").split()))
+walker:""");
+    v = compile_gate(ir, "note_counter");
+    assert v.ok, v.errors;
+    assert "_count_words(" in v.module_src;
 }
 
 test "_diagnostic keeps the ERROR blocks, not just the tail of the output" {
@@ -293,7 +442,7 @@ test "_diagnostic stays within its budget and says what it dropped" {
 }
 
 # ---------------------------------------------------------------------------
-# G9-TY — the fault this gate exists for was caught LIVE: a fresh compile
+# G4 — the fault this gate exists for was caught LIVE: a fresh compile
 # shipped a model slot typed `-> str` into a tool body demanding `list`,
 # green through every gate, TypeError at runtime.
 # ---------------------------------------------------------------------------
@@ -349,12 +498,12 @@ tools:
           return 'out.txt'
 """;
 
-test "G9: a str carry feeding a tool that guard-raises on non-list is a conflict" {
+test "G4: a str carry feeding a tool that guard-raises on non-list is a conflict" {
     issues = gate_type_unification(TY_CONFLICT_IR);
     assert len([i for i in issues if "'proposed'" in i and "list[str]" in i]) == 1, issues;
 }
 
-test "G9 autofix adopts the consumer's demand and the patched IR passes clean" {
+test "G4 autofix adopts the consumer's demand and the patched IR passes clean" {
     fx = autofix_carry_types(TY_CONFLICT_IR);
     assert len(list(fx["fixes"])) == 1, fx["fixes"];
     assert "list[str]" in str(fx["fixes"][0]);
@@ -367,7 +516,7 @@ test "G9 autofix adopts the consumer's demand and the patched IR passes clean" {
     assert "-> list[str] by llm" in v.module_src;
 }
 
-test "G9: an annotated tool param is a demand too" {
+test "G4: an annotated tool param is a demand too" {
     ir = TY_CONFLICT_IR.replace(
         "      def write_out(proposed):\n          if not isinstance(proposed, list) or not all(isinstance(h, str) for h in proposed):\n              raise TypeError('proposed must be a list of strings')\n",
         "      def write_out(proposed: list):\n");
@@ -375,7 +524,7 @@ test "G9: an annotated tool param is a demand too" {
     assert len([i for i in issues if "'proposed'" in i]) == 1, issues;
 }
 
-test "G9: a coercion branch is NOT read as a demand" {
+test "G4: a coercion branch is NOT read as a demand" {
     # `if isinstance(x, str): ...` ACCEPTS str — only a guard that raises (or
     # an assert) states a contract.
     ir = TY_CONFLICT_IR.replace(
@@ -428,7 +577,7 @@ tools:
           return str(plan)
 """;
 
-test "G9: an untyped model->code carry with no stated demand is flagged" {
+test "G4: an untyped model->code carry with no stated demand is flagged" {
     issues = gate_type_unification(TY_UNTYPED_IR);
     assert len([i for i in issues if "'plan'" in i and "untyped" in i]) == 1, issues;
     # nothing states the true type, so there is no mechanical fix — only a report
@@ -473,7 +622,7 @@ tools:
           return 'out.txt'
 """;
 
-test "G9: an embodied ACT reading a producer-less carry is a disconnected artifact" {
+test "G4: an embodied ACT reading a producer-less carry is a disconnected artifact" {
     # Caught live: a relearned agent ran green to TERMINAL while its write node
     # consumed a carry nothing produced — the 'artifact' was the carry's seed
     # (the task string) echoed into the input file.
@@ -485,7 +634,7 @@ test "G9: an embodied ACT reading a producer-less carry is a disconnected artifa
     assert gate_type_unification(ir2) == [];
 }
 
-test "G9 + autofix never raise on garbage input" {
+test "G4 + autofix never raise on garbage input" {
     assert gate_type_unification("::: not yaml {{{") == [];
     fx = autofix_carry_types("::: not yaml {{{");
     assert fx["fixes"] == [];
@@ -493,7 +642,7 @@ test "G9 + autofix never raise on garbage input" {
 
 
 # ===========================================================================
-# G10 (trace fan-out) + G11 (artifact embodiment) — the two holes that let a
+# G1_TRACE (trace fan-out) + G2_EMBODY (artifact embodiment) — the two holes that let a
 # hollow agent certify as faithful. Both fixtures are shrunk-down reproductions
 # of real v0.5.1 output: soc2's `append_file` claiming dozens of procedural
 # mandates, and a graph that never touches the scripts its own rules name.
@@ -539,36 +688,36 @@ edges:
 """;
 
 
-test "G11 catches a graph that never touches the scripts its rules name" {
+test "G2_EMBODY catches a graph that never touches the scripts its rules name" {
     issues = gate_artifact_embodiment(SPEC_SCRIPTS, HOLLOW_IR);
-    assert len(issues) >= 2, "G11 missed the unbound scripts: " + str(issues);
+    assert len(issues) >= 2, "G2_EMBODY missed the unbound scripts: " + str(issues);
     joined = " ".join(issues);
     assert "completeness_checker.py" in joined, joined;
     assert "control_coverage_validator.py" in joined, joined;
-    for m in issues { assert m.startswith("G11: "), m; }
+    for m in issues { assert m.startswith("G2_EMBODY: "), m; }
 }
 
 
-test "G11 passes a skeleton — it binds every artifact its rules name" {
+test "G2_EMBODY passes a skeleton — it binds every artifact its rules name" {
     ir = skeleton_ir(SPEC_SCRIPTS, "grc");
     issues = gate_artifact_embodiment(SPEC_SCRIPTS, ir);
     assert len(issues) == 0, "skeleton failed artifact embodiment: " + str(issues);
 }
 
 
-test "G10 catches one element standing in for many procedures" {
+test "G1_TRACE catches one element standing in for many procedures" {
     os.environ["SIGIL_INFL_CAP"] = "2";
     try {
         issues = gate_trace_inflation(SPEC_SCRIPTS, HOLLOW_IR);
-        assert len(issues) >= 1, "G10 missed the fan-out: " + str(issues);
-        for m in issues { assert m.startswith("G10: "), m; }
+        assert len(issues) >= 1, "G1_TRACE missed the fan-out: " + str(issues);
+        for m in issues { assert m.startswith("G1_TRACE: "), m; }
     } finally {
         os.environ["SIGIL_INFL_CAP"] = "12";
     }
 }
 
 
-test "G10 passes a skeleton — one stub per procedure, no fan-out" {
+test "G1_TRACE passes a skeleton — one stub per procedure, no fan-out" {
     os.environ["SIGIL_INFL_CAP"] = "2";
     try {
         ir = skeleton_ir(SPEC_SCRIPTS, "grc");
@@ -580,7 +729,7 @@ test "G10 passes a skeleton — one stub per procedure, no fan-out" {
 }
 
 
-test "G10 does not punish folded prohibitions" {
+test "G1_TRACE does not punish folded prohibitions" {
     spec = RuleSet(skill_name="p", rules=[
         Rule(id="r1", quote="Draft the summary.", kind=RuleKind.STEP, modality=Modality.MANDATORY),
         Rule(id="r2", quote="Never invent numbers.", kind=RuleKind.CONSTRAINT, modality=Modality.FORBIDDEN),
@@ -609,7 +758,7 @@ edges:
     os.environ["SIGIL_INFL_CAP"] = "1";
     try {
         issues = gate_trace_inflation(spec, ir);
-        assert len(issues) == 0, "G10 counted prohibitions as procedures: " + str(issues);
+        assert len(issues) == 0, "G1_TRACE counted prohibitions as procedures: " + str(issues);
     } finally {
         os.environ["SIGIL_INFL_CAP"] = "12";
     }
@@ -659,13 +808,13 @@ edges:
 """;
 
 
-test "G9 flags nodes no edge path can reach" {
+test "G4 flags nodes no edge path can reach" {
     issues = gate_type_unification(UNREACHABLE_IR);
     hits = [i for i in issues if "unreachable from entry" in i];
     assert len(hits) == 1, "expected one reachability finding, got: " + str(issues);
     assert "2 of 4 nodes" in hits[0], hits[0];
     assert "build_project" in hits[0], hits[0];
-    assert hits[0].startswith("G9: "), hits[0];
+    assert hits[0].startswith("G4: "), hits[0];
 }
 
 
@@ -680,12 +829,12 @@ test "the reachability gate is on by default and can be switched off" {
     del os.environ["SIGIL_GATE_G9_REACH"];
 
     # The list form turns several off in one variable.
-    os.environ["SIGIL_GATES_OFF"] = "G12, G9_REACH";
+    os.environ["SIGIL_GATES_OFF"] = "G2_OVERLOAD, G4_REACH";
     assert not [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
     del os.environ["SIGIL_GATES_OFF"];
 
     # ...and an unrelated name in that list leaves this gate alone.
-    os.environ["SIGIL_GATES_OFF"] = "G12";
+    os.environ["SIGIL_GATES_OFF"] = "G2_OVERLOAD";
     assert [i for i in gate_type_unification(UNREACHABLE_IR) if "unreachable" in i];
     del os.environ["SIGIL_GATES_OFF"];
 }
@@ -698,4 +847,39 @@ test "a fully wired graph raises no reachability finding" {
         "  - {from: build_project, to: review_errors}\n"
         "  - {from: review_errors, to: done}");
     assert not [i for i in gate_type_unification(ir) if "unreachable" in i], str(gate_type_unification(ir));
+}
+
+test "G4_INPUT flags a file location the caller cannot name, and clears once lifted" {
+    # the live fault: a compiled skill is called by a program, but this artifact's
+    # only way in was a sentence — the SENSE tool regex-mined its paths, so word
+    # order decided which file was opened (offer-letter-generator opened its own
+    # output as the template and scored 0 in every cell).
+    body = ("def load_template_data(task: str) -> dict:\n"
+            "    import re\n"
+            "    docxs = re.findall(r'[^\\s]+\\.docx\\b', task or \"\")\n"
+            "    template_path = docxs[0] if docxs else \"template.docx\"\n"
+            "    return {\"template_path\": template_path}\n");
+    ir = str(yaml.safe_dump({
+        "walker": {"name": "T", "carries": {"task": {"type": "str", "role": "input"}}},
+        "tools": {"load_template_data": {"sig": "(task) -> dict", "surface": "SENSE", "body": body}},
+        "nodes": [{"id": "load_inputs", "type": "SENSE", "owner": "code",
+                   "tool": "load_template_data", "reads": ["task"], "writes": []}],
+        "edges": []
+    }, sort_keys=False));
+    issues = gate_input_provenance(ir);
+    assert len(issues) == 1;
+    assert "template_path" in str(issues[0]);
+    assert "cannot name" in str(issues[0]);
+
+    # declaring the input is the fix — the same scrape is then just the fallback
+    lifted = str(yaml.safe_dump({
+        "walker": {"name": "T", "carries": {"task": {"type": "str", "role": "input"},
+                                            "template_path": {"type": "path", "role": "input"}}},
+        "tools": {"load_template_data": {"sig": "(task, template_path) -> dict",
+                                         "surface": "SENSE", "body": body}},
+        "nodes": [{"id": "load_inputs", "type": "SENSE", "owner": "code",
+                   "tool": "load_template_data", "reads": ["task", "template_path"], "writes": []}],
+        "edges": []
+    }, sort_keys=False));
+    assert gate_input_provenance(lifted) == [];
 }

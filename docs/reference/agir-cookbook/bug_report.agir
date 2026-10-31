@@ -2,7 +2,7 @@
 name: write_bug_report
 description: Create a bug report from a task description using a fixed template and save it to a Markdown file named in the task.
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
@@ -78,14 +78,12 @@ walker:
 
 nodes:
   - id: extract_fields
-    type: GEN-FILL
-    owner: model
+    type: EXTRACT
     reads: [task]
     writes: [report]
     doc: "Extract the six fields from the task per the bug template knowledge. Output only a JSON object with keys: title, environment, steps, expected, actual, severity. Steps must be a list of concise, reproducible actions. Severity must be one of Low, Medium, High, Critical. No markdown."
   - id: render
     type: ACT
-    owner: code
     op: render_bug_report
     tool: render_bug_report
     reads: [report]
@@ -93,14 +91,13 @@ nodes:
     doc: "Deterministically format the report to Markdown with the exact section titles and order: Title, Environment, Steps to Reproduce, Expected, Actual, Severity."
   - id: save
     type: ACT
-    owner: code
     op: write_file
     tool: write_file
     reads: [report_md]
     writes: [out_file]
     doc: "Write the markdown to the output path named in the task; return the written file path."
   - id: done
-    type: TERMINAL
+    type: RETURN
 
 edges:
   - {from: extract_fields, to: render, modality: mandatory}

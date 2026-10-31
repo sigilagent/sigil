@@ -5,8 +5,8 @@ AG-IR through byLLM slots, one narrow judgment at a time, because that is how yo
 keep an unfaithful skill from slipping through. This module keeps the part that
 carries the guarantee and replaces the part that does not.
 
-    LIFT:   spec loop -> spine -> flows -> assemble -> G1 · G4 · G5
-    AGENT:  spec loop -> [ a Claude Code session writes agent.ir ] -> G1 · G4 · G5
+    LIFT:   spec loop -> spine -> flows -> assemble -> G5 · COMPILE · G2
+    AGENT:  spec loop -> [ a Claude Code session writes agent.ir ] -> G5 · COMPILE · G2
             ^^^^^^^^^                                                ^^^^^^^^^^^^
             kept: grounding                                          kept: the gates
 
@@ -36,7 +36,8 @@ import time;
 import yaml;
 import from pathlib { Path }
 import from .lift_types { Modality, RuleKind }
-import from .ir_views { LiftResult, NodeType, Owner }
+import from .ir_views { LiftResult, NodeType, Owner, node_type_of, unit_for }
+import from src.sigil_agir_yaml { load_agir }
 import from .spec_loop { extract_spec, strip_frontmatter, RuleSet, Rule }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle, KnowledgeItem, KnowledgeView, ToolDef }
@@ -46,16 +47,7 @@ import from .repair { repair_compile_loop, _sigil_bin }
 import from src.sigil_claude_cc { agent_run, AUTHOR }
 import from src.sigil_runtime { repo_root }
 
-# The full alphabet the mechanical half accepts. Partial coverage here would be
-# worse than useless: an unmapped type silently becomes GEN_RAW, i.e. a CODE node
-# the compiler gates by construction would be read back as a model slot.
-glob _NODE_TYPES: dict[str, NodeType] = {
-    "GEN-RAW": NodeType.GEN_RAW, "GEN-ENUM": NodeType.GEN_ENUM,
-    "GEN-FILL": NodeType.GEN_FILL, "GEN-EDIT": NodeType.GEN_EDIT,
-    "ROUTE": NodeType.ROUTE, "LOOP": NodeType.LOOP, "SPAWN": NodeType.SPAWN,
-    "CALL": NodeType.CALL, "SENSE": NodeType.SENSE, "ACT": NodeType.ACT,
-    "CODE": NodeType.CODE, "TERMINAL": NodeType.TERMINAL
-};
+
 
 
 def _as_list(v: any) -> list[str] {
@@ -67,15 +59,12 @@ def _as_list(v: any) -> list[str] {
 
 def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
     # Rebuild the slice of LIFT's views the gates actually read:
-    #   G5 wants node id / owner / traces_to;  G1 wants tool body|command and
+    #   G2 wants node id / owner / traces_to;  G5 wants tool body|command and
     #   knowledge content. Everything else stays default — this is a parse, not
     #   a second opinion about the IR.
-    body = str(ir_text or "");
-    if body.lstrip().startswith("---") {
-        parts = body.lstrip().split("---", 2);
-        if len(parts) >= 3 { body = parts[2]; }
-    }
-    try { ir = yaml.safe_load(body) or {}; } except Exception { ir = {}; }
+    # The shared reader, so the views see the document the compiler lowers —
+    # canonicalized to the paper's AIS (legacy mnemonics included).
+    ir = load_agir(str(ir_text or ""));
     if not isinstance(ir, dict) { ir = {}; }
 
     nodes: list[AgirNode] = [];
@@ -83,8 +72,8 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
         if not isinstance(raw, dict) { continue; }
         nodes.append(AgirNode(
             id=str(raw.get("id", "")),
-            ntype=_NODE_TYPES.get(str(raw.get("type", "GEN-RAW")).upper(), NodeType.GEN_RAW),
-            owner=(Owner.CODE if str(raw.get("owner", "model")).lower() == "code" else Owner.MODEL),
+            ntype=node_type_of(raw.get("type", "GENERATE")),
+            owner=unit_for(node_type_of(raw.get("type", "GENERATE"))),
             doc=str(raw.get("doc", "")),
             reads=_as_list(raw.get("reads")),
             writes=_as_list(raw.get("writes")),
@@ -122,7 +111,7 @@ def _views_from_ir(ir_text: str) -> tuple[WorkflowView, ViewBundle] {
 
 def _rules_md(spec: RuleSet) -> str {
     # The frozen rule set as the agent's anchor. Ids matter most: they are what a
-    # node's `traces_to` names, and what G5 audits against.
+    # node's `traces_to` names, and what G2 audits against.
     lines: list[str] = [
         "# Frozen rule set for '" + spec.skill_name + "'",
         "",
@@ -171,11 +160,11 @@ def _brief(name: str, must: list[str]) -> str {
         + "    " + _sigil_bin() + " gate agent.ir " + name + "\n\n"
         + "Run that after every edit; it is the compile oracle, and it exits "
         + "nonzero while the IR is broken. Keep going until it prints `gate: ok`.\n\n"
-        + "DECOMPOSE, do not lump: no single owner=model node may satisfy more "
+        + "DECOMPOSE, do not lump: no single semantic instruction may satisfy more "
         + "than ~6 mandates. Give each independently-checkable mandate its own "
-        + "node, and prefer an owner=code gate for mechanical ones (exact values, "
+        + "instruction, and prefer an executable gate (COMPUTE/OBSERVE) for mechanical ones (exact values, "
         + "required-element checklists, format rules) — the gate rejects a "
-        + "mega-slot (G12-DET).\n\n"
+        + "mega-slot (G2_OVERLOAD).\n\n"
         + "These MANDATORY rules must each appear in some node's `traces_to`, or "
         + "the coverage gate rejects the IR:\n    "
         + (", ".join(must) if must else "(none)") + "\n\n"
@@ -293,7 +282,7 @@ def agent_lift(skill: str, name: str, progress: any = None) -> LiftResult {
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t2,
            "g4": g4.ok, "repairs": len(ro.attempts)});
 
-    findings: list[any] = [finding(auto_gate(str(g), "G1"), str(g)) for g in gate_issues]
+    findings: list[any] = [finding(auto_gate(str(g), "G5"), str(g)) for g in gate_issues]
                    + [finding("spec", str(s)) for s in spec_issues];
     status = status_of(g4.ok, findings, [], notes);
     ok = g4.ok and (not spec_issues) and (not gate_issues);

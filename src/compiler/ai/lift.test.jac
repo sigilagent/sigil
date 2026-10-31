@@ -1,5 +1,5 @@
 """Tests — the end-to-end LIFT. One scripted MockLLM drives every model stage
-(spec loop -> spine -> the four flows); assemble + the G4 oracle then run LIVE:
+(spec loop -> spine -> the four flows); assemble + the COMPILE oracle then run LIVE:
 the pipeline's output is a real AG-IR that must transpile + jac-check clean."""
 
 import from jaclang.byllm.lib { MockLLM }

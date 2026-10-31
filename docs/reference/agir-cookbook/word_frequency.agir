@@ -2,7 +2,7 @@
 name: word_frequencies_top20
 description: Count word frequencies in a task-named text file, lowercase and ignore punctuation, and write the top 20 (word and count, most frequent first) to a task-named output file.
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
@@ -11,7 +11,7 @@ knowledge: {}
 
 tools:
   read_file:
-    surface: SENSE
+    surface: OBSERVE
     serves: [read_input]
   write_file:
     surface: ACT·artifact
@@ -41,16 +41,14 @@ walker:
 
 nodes:
   - id: read_input
-    type: SENSE
-    owner: code
+    type: OBSERVE
     op: read_file
     tool: read_file
     reads: []
     writes: [input_text]
     doc: "Read the input file named in the task (via task-filename fallback)."
   - id: compute
-    type: CODE
-    owner: code
+    type: COMPUTE
     op: count_top_words
     tool: count_top_words
     reads: [input_text]
@@ -58,14 +56,13 @@ nodes:
     doc: "Deterministically compute top-20 word frequencies: lowercase, ignore punctuation."
   - id: write_output
     type: ACT
-    owner: code
     op: write_file
     tool: write_file
     reads: [output_text]
     writes: [out_file]
     doc: "Write the result lines to the output file named in the task (via task-filename fallback)."
   - id: done
-    type: TERMINAL
+    type: RETURN
 
 edges:
   - {from: read_input,  to: compute,      modality: mandatory}

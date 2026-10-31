@@ -1,5 +1,5 @@
 """Scenario — the STAGED lift() front-end end-to-end + view repair,
-MockLLM-scripted with LIVE assemble/G4. Forces SIGIL_STAGED=1: lift() now
+MockLLM-scripted with LIVE assemble/COMPILE. Forces SIGIL_STAGED=1: lift() now
 defaults to the direct front-end (see lift_direct.jac); this scenario exercises
 the staged spine/flows/assemble path and its coverage-fallback target.
 See workflow_loop.jac for why this runs under `jac run`. Exits nonzero on failure."""
@@ -39,15 +39,15 @@ with entry:__main__ {
     ]);
     wf = WorkflowView(
         nodes=[
-            AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE,
+            AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                      doc="Parse the input file.", reads=["task"], writes=["data"], traces_to=["r1"]),
-            AgirNode(id="summarize", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+            AgirNode(id="summarize", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                      doc="Summarize the data in one sentence.",
                      reads=["data", "csv_rules"], writes=["summary"], traces_to=["r2"]),
             AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, surface="artifact",
                      doc="Write the output as CSV with a header row.",
                      reads=["data", "summary"], writes=["artifact"], traces_to=["r3"]),
-            AgirNode(id="done", ntype=NodeType.TERMINAL)
+            AgirNode(id="done", ntype=NodeType.RETURN)
         ],
         edges=[
             AgirEdge(src="parse", dst="summarize", modality=Modality.MANDATORY, traces_to="r1"),
@@ -109,15 +109,15 @@ with entry:__main__ {
     ]);
     wf = WorkflowView(
         nodes=[
-            AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE,
+            AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                      doc="Parse the input file.", reads=["task"], writes=["data"], traces_to=["r1"]),
-            AgirNode(id="summarize", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+            AgirNode(id="summarize", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                      doc="Summarize the data in one sentence.",
                      reads=["data", "csv_rules"], writes=["summary"], traces_to=["r2"]),
             AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, surface="artifact",
                      doc="Write the output as CSV with a header row.",
                      reads=["data", "summary"], writes=["artifact"], traces_to=["r3"]),
-            AgirNode(id="done", ntype=NodeType.TERMINAL)
+            AgirNode(id="done", ntype=NodeType.RETURN)
         ],
         edges=[
             AgirEdge(src="parse", dst="summarize", modality=Modality.MANDATORY, traces_to="r1"),

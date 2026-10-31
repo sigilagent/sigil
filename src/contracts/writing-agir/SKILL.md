@@ -21,27 +21,29 @@ structure faithfully — not to improve the skill, and not to summarize it.
 Your draft is not accepted because it looks right. It is accepted because it clears
 three gates, and each one maps to a rule you must follow while drafting.
 
-**G4 — it must compile.** `sigil gate agent.ir <name>` lowers your IR and
+**COMPILE — it must compile.** `sigil gate agent.ir <name>` lowers your IR and
 type-checks the result. Run it after every edit. It exits nonzero while the IR is
 broken and prints the exact diagnostic.
 
-**G1 — every tool and knowledge item must be embodied.** A tool with no `body:` and
+**G5 — every tool and knowledge item must be embodied.** A tool with no `body:` and
 no `command:` is a prose-pointer, and it is rejected. Knowledge must carry its
 content **verbatim**, never "see the section above" or "follow the format in
 FORMS.md". The test: if `SKILL.md` were deleted, would the IR still lower to a
 working agent? If the answer depends on prose that only lives in the skill, embody
 that prose in the IR.
 
-**G5 — every mandatory rule must be realized by a node.** Each rule in the frozen
+**G2 — every mandatory rule must be realized by a node.** Each rule in the frozen
 set has an id (`r1`, `r2`, …). Each node carries `traces_to: [r3, r7]` naming the
 rules it realizes. A mandatory STEP or IO rule with no node tracing to it is a
 structural gap and fails. Worse than missing is *monolithic*: several rules folded
 into one model slot, so nothing guarantees each was done. Give a rule its own node
 when it is its own obligation.
 
-Prefer `owner: code` where the rule is mechanical — a code node is **guaranteed by
-construction**. A model slot is only *observable*. Reserve model slots for genuine
-judgment.
+Prefer an executable instruction (`COMPUTE` / `OBSERVE` / `ACT`) where the rule is
+mechanical — code is **guaranteed by construction**. A semantic instruction
+(`SELECT` / `EXTRACT` / `MUTATE` / `GENERATE`) is only *observable*. Reserve semantic
+instructions for genuine judgment, and `DELEGATE` for an open-ended activity the skill
+leaves to the agent. The opcode decides who executes the step; there is no `owner`.
 
 ## Prohibitions are not steps
 
@@ -75,17 +77,17 @@ nowhere in the IR has been dropped, even if the IR compiles.
    each intermediate, the final artifact. Every carry that is not `role: input`
    names the node that `produced_by` it.
 
-4. **Draft the nodes**, one per obligation, in the skill's order. Set `owner: code`
-   for anything deterministic and `owner: model` only for judgment. Give every node
+4. **Draft the nodes**, one per obligation, in the skill's order. Use an executable
+   opcode for anything deterministic and a semantic one only for judgment. Give every node
    `traces_to` naming the rules it realizes. Steps the skill states as mandatory
    must be on the mandatory path — never behind an optional edge.
 
-5. **Embody the tools.** Any `owner: code` node needs a tool with a real `body: |`
+5. **Embody the tools.** Every executable node needs a tool with a real `body: |`
    (Python) or an exact `command:`. Copy code snippets from the skill **verbatim** —
    the agent must run the skill's prescribed code, not a paraphrase of it.
 
 6. **Wire the edges.** Required. Without them the walker stops after the first node.
-   Entry node first, exactly one `TERMINAL` last.
+   Entry node first, exactly one `RETURN` last.
 
 7. **Verify.** Run the oracle:
 
@@ -107,7 +109,7 @@ nowhere in the IR has been dropped, even if the IR compiles.
 - **Never summarize embodied content.** Verbatim or not at all.
 - **Output valid YAML.** Put code in `body: |` block scalars. Never emit a raw
   `::py::` block, and never leave an unescaped `:` in an unquoted value.
-- **Bind registered MCP tools by their exact name** as SENSE/ACT nodes — do not
+- **Bind registered MCP tools by their exact name** as OBSERVE/ACT nodes — do not
   re-script a tool that already exists.
 - **Edit `agent.ir` only.** Do not create other files.
 

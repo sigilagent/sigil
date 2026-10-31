@@ -19,15 +19,18 @@ This projection is read-only and total: anything it cannot decode comes back as 
 """
 
 import from .sigil_agir_yaml { load_agir }
+import from .sigil_ais { unit_of }
 import from .sigil_core { Registry, TaskGraph, latest_by_sig }
 
-# AG-IR node type -> the group the canvas colours by. Mirrors the primitive
-# families in src/contracts/: model-owned cognition, code-owned mechanism, flow.
+# AG-IR node type -> the group the canvas colours by: the AIS instruction
+# classes of the SIGIL paper (Table 1). The reader has already canonicalized
+# legacy mnemonics, so only the paper's opcodes arrive here.
 glob _GROUPS: dict[str, any] = {
-    "GEN-RAW": "mind", "GEN-FILL": "mind", "GEN-ENUM": "mind", "GEN-EDIT": "mind",
-    "SENSE": "boundary", "ACT": "boundary", "CODE": "code",
-    "ROUTE": "flow", "LOOP": "flow", "CALL": "flow", "SPAWN": "flow",
-    "TERMINAL": "terminal"
+    "SELECT": "semantic", "EXTRACT": "semantic", "MUTATE": "semantic", "GENERATE": "semantic",
+    "DELEGATE": "delegated",
+    "COMPUTE": "executable", "OBSERVE": "executable", "ACT": "executable",
+    "BRANCH": "control", "LOOP": "control", "PARALLEL": "control", "CALL": "control",
+    "RETURN": "termination"
 };
 
 def _group_for(ntype: str) -> str {
@@ -95,7 +98,7 @@ def parse_agir(text: str) -> dict[str, any] {
             "id": nid,
             "type": ntype,
             "group": _group_for(ntype),
-            "owner": str(n.get("owner") or ("code" if _group_for(ntype) == "code" else "")),
+            "owner": str(n.get("owner") or unit_of(ntype)),
             "op": str(n.get("op") or ""),
             "tool": str(n.get("tool") or serves.get(nid) or ""),
             "reads": [str(x) for x in _as_list(n.get("reads"))],

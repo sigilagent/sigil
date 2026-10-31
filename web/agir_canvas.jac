@@ -18,16 +18,17 @@ switch) and re-themed in place when `dark` flips.
 
 import from "./vis_interop.js" { makeNetwork, makeDataSet }
 
-# AG-IR primitive family -> colour. Mind = model-owned cognition (violet, the
-# registry colour), code = deterministic (cyan, the compiled-core colour),
-# boundary = SENSE/ACT touching the world (sky), flow = control (gold).
+# AIS instruction class -> colour. Semantic = the model produces the result
+# (violet, the registry colour), delegated = a bounded subtask left to the model
+# (pink), executable = a supplied implementation runs (cyan, the compiled-core
+# colour), control = explicit control flow (gold), termination = RETURN (green).
 def _acolor(group: str) -> dict[str, any] {
     bg = "#6f6c86";
-    if group == "mind" { bg = "#a78bfa"; }
-    elif group == "code" { bg = "#22d3ee"; }
-    elif group == "boundary" { bg = "#38bdf8"; }
-    elif group == "flow" { bg = "#f5c451"; }
-    elif group == "terminal" { bg = "#4ade80"; }
+    if group == "semantic" { bg = "#a78bfa"; }
+    elif group == "delegated" { bg = "#f472b6"; }
+    elif group == "executable" { bg = "#22d3ee"; }
+    elif group == "control" { bg = "#f5c451"; }
+    elif group == "termination" { bg = "#4ade80"; }
     return {"background": bg, "border": bg,
             "highlight": {"background": "#f5c451", "border": "#fbbf24"}};
 }
@@ -62,10 +63,11 @@ def:pub AgirCanvas(nodes: list[any], edges: list[any], dark: bool,
         es = edges if edges else [];
         vn = [{"id": str(n.id), "label": str(n.id),
                "color": _acolor(str(n.group)),
-               # a model-owned slot is a diamond, code is a box, the rest are dots:
-               # the shape says who decides, before you have read a single label
-               "shape": ("diamond" if (str(n.group) == "mind")
-                         else ("box" if (str(n.group) == "code") else "dot")),
+               # a model-executed instruction is a diamond, an executable one is a
+               # box, the rest are dots: the shape says who decides, before you
+               # have read a single label
+               "shape": ("diamond" if (str(n.group) in ["semantic", "delegated"])
+                         else ("box" if (str(n.group) == "executable") else "dot")),
                "font": {"color": fontColor, "size": 12, "face": "ui-monospace"},
                "title": _tooltip(n)} for n in ns];
         # a forbidden/optional edge should not read like the mandated spine

@@ -139,11 +139,12 @@ LIFT's anchor is the spec loop: a model extracts candidate rules, and a
 deterministic grounding check drops any rule whose quote is not verbatim in the
 skill, so a hallucinated rule can never survive. Coverage critics hunt for
 dropped obligations, and a code audit catches modality drift. Then the gates
-check the result — G4, the compile oracle, round-trips every candidate IR through
-the mechanical back-end and the `jac` type-checker. They diagnose rather than
-veto: mechanical autofixes land first, scoped model repair second, faithful
-degradation third, and whatever remains rides the result as typed findings. A
-compile fails only when no runnable module exists at all, and `--strict` restores
+check the result — the SIGIL paper's validation checks G1–G6, then COMPILE, the
+compile oracle, which round-trips every candidate IR through the mechanical
+back-end and the `jac` type-checker. Repair comes first: mechanical autofixes,
+then scoped model repair, then faithful degradation, and whatever remains rides
+the result as typed findings. A compile fails when no runnable module exists, or
+when an error finding survives that repair budget, and `--strict` restores
 fail-on-any-finding for CI.
 
 Compiling interactively also offers to lint the skill first. Obligations the spec

@@ -1037,7 +1037,7 @@ def compile_stage_line(ev: dict[str, any]) -> str {
         n_fx = int(ev.get("fixes", 0));
         return (str(n_fx) + " fix(es) applied") if n_fx else "nothing to fix";
     } elif s == "bind" {
-        # the SkillRT-inspired mechanical passes: G7 env binding + G8 concurrency
+        # the SkillRT-inspired mechanical passes: G6_ENV env binding + G6_PAR concurrency
         g7 = int(ev.get("g7_issues", 0));
         g8 = int(ev.get("g8_issues", 0));
         po = int(ev.get("par_opps", 0));

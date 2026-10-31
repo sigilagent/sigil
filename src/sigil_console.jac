@@ -558,10 +558,10 @@ def _gate_row(gid: str, name: str, severity: str, issues: list[any], enabled: bo
 def skill_gates(signature: str) -> dict[str, any] {
     # The mechanical gates, re-run on demand against the AG-IR this version was
     # stored with: the same functions `sigil gate` and the compile's gate battery
-    # call. The gates that need the extracted spec (faithfulness, G5, G6) only run
+    # call. The gates that need the extracted spec (faithfulness, G2, G3_HIL) only run
     # inside a compile, so they are not here.
     import from .compiler.ai.gates {
-        compile_gate, gate_type_unification, det_overloaded, gate_env_binding,
+        compile_gate, gate_type_unification, det_overloaded, gate_env_binding, gate_constraints,
         gate_concurrency, gate_slot_prompt_bloat
     }
     import from .compiler.ai.report { gate_enabled }
@@ -574,31 +574,38 @@ def skill_gates(signature: str) -> dict[str, any] {
     try {
         gv = compile_gate(ir, signature);
         module_src = str(gv.module_src or "");
-        rows.append(_gate_row("G4", "Lowers and type-checks", "fatal", ([] if gv.ok else [str(gv.errors)[-600:]])));
-    } except Exception as e { rows.append(_gate_row("G4", "Lowers and type-checks", "fatal", ["gate crashed: " + str(e)[:200]])); }
+        rows.append(_gate_row("COMPILE", "Lowers and type-checks", "fatal", ([] if gv.ok else [str(gv.errors)[-600:]])));
+    } except Exception as e { rows.append(_gate_row("COMPILE", "Lowers and type-checks", "fatal", ["gate crashed: " + str(e)[:200]])); }
     try {
-        rows.append(_gate_row("G7", "Packages and commands it needs exist here", "warn",
-                              list(gate_env_binding(ir)), gate_enabled("G7")));
-    } except Exception as e { rows.append(_gate_row("G7", "Packages and commands it needs exist here", "warn", ["gate crashed: " + str(e)[:200]])); }
+        rows.append(_gate_row("G6_ENV", "Packages and commands it needs exist here", "warn",
+                              list(gate_env_binding(ir)), gate_enabled("G6_ENV")));
+    } except Exception as e { rows.append(_gate_row("G6_ENV", "Packages and commands it needs exist here", "warn", ["gate crashed: " + str(e)[:200]])); }
     try {
         conc = dict(gate_concurrency(ir));
-        rows.append(_gate_row("G8", "No false parallelism", "error", list(conc.get("issues") or []), gate_enabled("G8")));
-    } except Exception as e { rows.append(_gate_row("G8", "No false parallelism", "error", ["gate crashed: " + str(e)[:200]])); }
+        rows.append(_gate_row("G6_PAR", "No false parallelism", "error", list(conc.get("issues") or []), gate_enabled("G6_PAR")));
+    } except Exception as e { rows.append(_gate_row("G6_PAR", "No false parallelism", "error", ["gate crashed: " + str(e)[:200]])); }
     try {
-        rows.append(_gate_row("G9", "Data types line up and every node is reachable", "error",
-                              list(gate_type_unification(ir)), gate_enabled("G9")));
-    } except Exception as e { rows.append(_gate_row("G9", "Data types line up and every node is reachable", "error", ["gate crashed: " + str(e)[:200]])); }
+        rows.append(_gate_row("G4", "Data types line up and every node is reachable", "error",
+                              list(gate_type_unification(ir)), gate_enabled("G4")));
+    } except Exception as e { rows.append(_gate_row("G4", "Data types line up and every node is reachable", "error", ["gate crashed: " + str(e)[:200]])); }
+    try {
+        gcs = gate_constraints(ir);
+        rows.append(_gate_row("G2_FLOW", "No prohibited data flow is reachable", "error",
+                              [str(g[1]) for g in gcs if str(g[0]) == "G2_FLOW"], gate_enabled("G2_FLOW")));
+        rows.append(_gate_row("G2_ORDER", "Required orderings hold on every path", "error",
+                              [str(g[1]) for g in gcs if str(g[0]) == "G2_ORDER"], gate_enabled("G2_ORDER")));
+    } except Exception as e { rows.append(_gate_row("G2_FLOW", "No prohibited data flow is reachable", "error", ["gate crashed: " + str(e)[:200]])); }
     try {
         import from .compiler.ai.author_direct { _views_from_ir }
         (wf, vb) = _views_from_ir(ir);
-        rows.append(_gate_row("G12", "No model slot carries more than six mandates", "error",
-                              list(det_overloaded(wf)), gate_enabled("G12")));
-    } except Exception as e { rows.append(_gate_row("G12", "No model slot carries more than six mandates", "error", ["gate crashed: " + str(e)[:200]])); }
+        rows.append(_gate_row("G2_OVERLOAD", "No model slot carries more than six mandates", "error",
+                              list(det_overloaded(wf)), gate_enabled("G2_OVERLOAD")));
+    } except Exception as e { rows.append(_gate_row("G2_OVERLOAD", "No model slot carries more than six mandates", "error", ["gate crashed: " + str(e)[:200]])); }
     if module_src {
         try {
-            rows.append(_gate_row("G13", "Slot prompts carry a mandate, not a document", "warn",
-                                  list(gate_slot_prompt_bloat(module_src)), gate_enabled("G13")));
-        } except Exception as e { rows.append(_gate_row("G13", "Slot prompts carry a mandate, not a document", "warn", ["gate crashed: " + str(e)[:200]])); }
+            rows.append(_gate_row("G5_BLOAT", "Slot prompts carry a mandate, not a document", "warn",
+                                  list(gate_slot_prompt_bloat(module_src)), gate_enabled("G5_BLOAT")));
+        } except Exception as e { rows.append(_gate_row("G5_BLOAT", "Slot prompts carry a mandate, not a document", "warn", ["gate crashed: " + str(e)[:200]])); }
     }
     return {"ok": True, "signature": signature, "version": vers[-1].version, "gates": rows,
             "lines": len(module_src.splitlines())};

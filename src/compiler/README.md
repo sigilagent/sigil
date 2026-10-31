@@ -13,9 +13,9 @@ src/compiler/
     ir_views.jac       the four AG-IR views (nodes/edges, carries, residency, tools, HIL)
     spec_loop.jac      Stage 1: SKILL.md -> frozen RuleSet (the convergence loop)
     workflow.jac       Stage 2: the WorkFlow spine (CFG view) + its code validator
-    flows.jac          Stage 3: IO/Context/Knowledge/HIL flows — flow/wait SPAWN fan-out
+    flows.jac          Stage 3: IO/Context/Knowledge/HIL flows — flow/wait PARALLEL fan-out
     assemble.jac       Stage 4: the rule-id join + reflexive 5d -> AG-IR YAML
-    gates.jac          G1 standalone · G4 compile oracle · G5 STRUCT-COV
+    gates.jac          the paper's checks G1–G6 (G5 standalone, G2 STRUCT-COV, constraints, …) · COMPILE oracle
     autofix.jac        mechanical fix-forward: lanes / pointer inlining / hollow re-own / canonicalize
     repair.jac         per-error-class repair (view repair + scoped repair_ir loop)
     report.jac         severity classification · status (failed|degraded|fixed|clean) · explain
@@ -27,16 +27,17 @@ Wiring: there is ONE compile pathway. `sigil compile` and `sigil register-skill
 selects the older front-ends), and `sigil relearn` recompiles a skill's stored
 source through the same engine at a bumped version.
 
-**The raise contract is fix-forward.** The gates DIAGNOSE; they do not veto. A
-lift fails only when no runnable module exists (G4 rejects the IR after the
-whole repair ladder) — and a failure raises the `explain()` note (what failed,
-what the ladder tried, the next concrete step), never a bare error. Everything
-runnable persists: mechanical autofixes land first (each re-gated through G4),
+**The raise contract is the paper's validate-and-repair loop.** A lift fails when
+no runnable module exists (COMPILE rejects the IR after the whole repair ladder)
+or when an error finding survives that ladder (`SIGIL_GATE_FAIL_ON_ERROR=0` keeps
+such a module) — and a failure raises the `explain()` note (what failed, what the
+ladder tried, the next concrete step), never a bare error. Everything else
+persists: mechanical autofixes land first (each re-gated through COMPILE),
 scoped model repair second, faithful degradation third, and whatever remains
 rides `LiftResult.findings` as typed `{gate, severity, message}` entries —
-errors are runtime crashes / violated mandates (G3/G6/G8/G9), warnings are
-faithfulness audits (G1/G5/G7/spec/spine/assemble). `--strict` / `SIGIL_STRICT=1`
-restores fail-on-any-finding for CI.
+errors are runtime crashes / violated mandates (G2_ARTIFACT/G3_HIL/G6_PAR/G4), warnings are
+faithfulness audits (G5/G2/G6_ENV/spec/spine/assemble). `--strict` / `SIGIL_STRICT=1`
+also fails on warnings, for CI.
 
 The first-class entry is the CLI:
 
@@ -80,7 +81,7 @@ underspecified and the *front-end* is at fault.
   until sound ∧ complete ∧ no-drift (with dry-detection + a hard cap), then
   freezes the RuleSet — the anchor every later stage is audited against.
 - **The gates** (`gates.jac`): typed, routed verdicts — never a silent success.
-  G4 round-trips a candidate IR through `mechanical.transpile_ir` + `jac check`
+  COMPILE round-trips a candidate IR through `mechanical.transpile_ir` + `jac check`
   and rejects empty lowerings; the remaining gates (standalone / C1 /
   determinization / STRUCT-COV / grounding-integrity) land beside it.
 

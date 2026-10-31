@@ -27,16 +27,16 @@ def _spec() -> RuleSet {
 def _good_view() -> WorkflowView {
     return WorkflowView(
         nodes=[
-            AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE,
+            AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                      doc="Parse the input file.", reads=["task"], writes=["data"], traces_to=["r1"]),
-            AgirNode(id="explore", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+            AgirNode(id="explore", ntype=NodeType.DELEGATE, owner=Owner.MODEL,
                      doc="Explore the data until the schema is clear.",
                      reads=["data"], writes=["schema"],
                      autonomy_tools=["read_rows", "sample_column"], traces_to=["r2"]),
             AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, surface="artifact",
                      doc="Write the output as CSV with a header row.",
                      reads=["data", "schema"], writes=["artifact"], traces_to=["r3"]),
-            AgirNode(id="done", ntype=NodeType.TERMINAL)
+            AgirNode(id="done", ntype=NodeType.RETURN)
         ],
         edges=[
             AgirEdge(src="parse", dst="explore", modality=Modality.MANDATORY, traces_to="r1"),
@@ -65,8 +65,8 @@ test "a shredded INVOKE_UNIT rule is flagged (cognition preservation)" {
     v = _good_view();
     # split the adaptive explore step into two fixed halves — the anti-pattern
     v.nodes = [n for n in v.nodes if n.id != "explore"];
-    v.nodes.append(AgirNode(id="explore_a", ntype=NodeType.CODE, owner=Owner.CODE, traces_to=["r2"]));
-    v.nodes.append(AgirNode(id="explore_b", ntype=NodeType.CODE, owner=Owner.CODE, traces_to=["r2"]));
+    v.nodes.append(AgirNode(id="explore_a", ntype=NodeType.COMPUTE, owner=Owner.CODE, traces_to=["r2"]));
+    v.nodes.append(AgirNode(id="explore_b", ntype=NodeType.COMPUTE, owner=Owner.CODE, traces_to=["r2"]));
     v.edges = [
         AgirEdge(src="parse", dst="explore_a"), AgirEdge(src="explore_a", dst="explore_b"),
         AgirEdge(src="explore_b", dst="emit"), AgirEdge(src="emit", dst="done")
@@ -75,23 +75,23 @@ test "a shredded INVOKE_UNIT rule is flagged (cognition preservation)" {
     assert len([i for i in issues if "shredded" in i]) == 1;
 }
 
-test "an INVOKE_UNIT lowered to a code node is flagged" {
+test "an INVOKE_UNIT lowered to anything but a DELEGATE is flagged" {
     v = _good_view();
     for n in v.nodes {
-        if n.id == "explore" { n.ntype = NodeType.CODE; n.owner = Owner.CODE; }
+        if n.id == "explore" { n.ntype = NodeType.COMPUTE; n.owner = Owner.CODE; }
     }
     issues = validate_spine(_spec(), v);
-    assert len([i for i in issues if "non-cognitive" in i]) == 1;
+    assert len([i for i in issues if "not a DELEGATE" in i]) == 1;
 }
 
 test "structural breakage is flagged: bad edge, two terminals, silent concurrency" {
     v = _good_view();
     v.edges.append(AgirEdge(src="emit", dst="nowhere"));
-    v.nodes.append(AgirNode(id="done2", ntype=NodeType.TERMINAL));
+    v.nodes.append(AgirNode(id="done2", ntype=NodeType.RETURN));
     v.spawn_note = "";
     issues = validate_spine(_spec(), v);
     assert len([i for i in issues if "unknown node 'nowhere'" in i]) == 1;
-    assert len([i for i in issues if "exactly one TERMINAL" in i]) == 1;
+    assert len([i for i in issues if "exactly one RETURN" in i]) == 1;
     assert len([i for i in issues if "spawn_note" in i]) == 1;
 }
 

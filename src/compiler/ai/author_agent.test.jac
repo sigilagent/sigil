@@ -59,20 +59,20 @@ glob SPEC: RuleSet = RuleSet(skill_name="demo", rules=[
     Rule(id="r9", quote="You may add a summary.", kind=RuleKind.STEP, modality=Modality.DISCRETIONARY)
 ]);
 
-test "_views_from_ir reads nodes, owners and the rule traces G5 audits" {
+test "_views_from_ir reads nodes, owners and the rule traces G2 audits" {
     (wf, vb) = _views_from_ir(IR);
     ids = [n.id for n in wf.nodes];
     assert ids == ["read_input", "decide", "done"];
     byid = {n.id: n for n in wf.nodes};
     assert byid["read_input"].owner == Owner.CODE;
     assert byid["decide"].owner == Owner.MODEL;      # default when not code
-    assert byid["read_input"].ntype == NodeType.SENSE;
-    assert byid["done"].ntype == NodeType.TERMINAL;
+    assert byid["read_input"].ntype == NodeType.OBSERVE;
+    assert byid["done"].ntype == NodeType.RETURN;
     assert byid["decide"].traces_to == ["r2", "r3"];
     assert byid["read_input"].reads == ["task"];
 }
 
-test "_views_from_ir reads the tools and knowledge G1 audits" {
+test "_views_from_ir reads the tools and knowledge G5 audits" {
     (wf, vb) = _views_from_ir(IR);
     tools = {t.name: t for t in vb.kn.tools};
     assert "def read_file" in tools["read_file"].body;
@@ -84,27 +84,35 @@ test "_views_from_ir reads the tools and knowledge G1 audits" {
 }
 
 test "the parsed views drive the REAL gates, not a private copy of them" {
-    # G1 must flag save_it: it has neither body nor command.
+    # G5 must flag save_it: it has neither body nor command.
     (wf, vb) = _views_from_ir(IR);
     issues = gate_standalone(vb);
     assert len(issues) == 1;
     assert "save_it" in issues[0];
-    # G5 must flag r2: it is traced, but only to a node with no lowered ability.
+    # G2 must flag r2: it is traced, but only to a node with no lowered ability.
     sc = gate_struct_cov(SPEC, wf, "can n_read_input with X entry { }");
     assert "r1" in sc.gated;          # owner=code + lowered ability
     assert "r2" in sc.missing;        # traced to `decide`, which never lowered
     assert "r9" not in sc.missing;    # DISCRETIONARY rules are not audited
 }
 
-test "every node type the compiler accepts round-trips — no silent GEN_RAW" {
-    # An unmapped type defaults to GEN_RAW, which would read a CODE node (gated by
-    # construction) back as a model slot. Cover the whole alphabet.
-    for (name, want) in [("GEN-RAW", NodeType.GEN_RAW), ("GEN-ENUM", NodeType.GEN_ENUM),
-                         ("GEN-FILL", NodeType.GEN_FILL), ("GEN-EDIT", NodeType.GEN_EDIT),
-                         ("ROUTE", NodeType.ROUTE), ("LOOP", NodeType.LOOP),
-                         ("SPAWN", NodeType.SPAWN), ("CALL", NodeType.CALL),
-                         ("SENSE", NodeType.SENSE), ("ACT", NodeType.ACT),
-                         ("CODE", NodeType.CODE), ("TERMINAL", NodeType.TERMINAL)] {
+test "every AIS opcode round-trips — no silent GENERATE" {
+    # An unmapped type defaults to GENERATE, which would read a COMPUTE node
+    # (gated by construction) back as a model call. Cover the whole alphabet.
+    for t in NodeType {
+        extra = "    procedure: p\n" if t == NodeType.CALL else "";
+        (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + t.name + "\n" + extra);
+        assert wf.nodes[0].ntype == t;
+    }
+}
+
+test "every legacy mnemonic reads as its AIS opcode" {
+    for (name, want) in [("GEN-RAW", NodeType.GENERATE), ("GEN-ENUM", NodeType.SELECT),
+                         ("GEN-FILL", NodeType.EXTRACT), ("GEN-EDIT", NodeType.MUTATE),
+                         ("ROUTE", NodeType.BRANCH), ("LOOP", NodeType.LOOP),
+                         ("SPAWN", NodeType.PARALLEL), ("CALL", NodeType.DELEGATE),
+                         ("SENSE", NodeType.OBSERVE), ("ACT", NodeType.ACT),
+                         ("CODE", NodeType.COMPUTE), ("TERMINAL", NodeType.RETURN)] {
         (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + name + "\n");
         assert wf.nodes[0].ntype == want;
     }

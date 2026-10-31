@@ -5,7 +5,7 @@ lock in the two properties the rearchitecture turns on:
 
   1. required_shape maps EVERY (kind, modality) to a realization shape — so
      completeness is defined for prohibitions/gates/knowledge/grounding, not just
-     the MANDATORY STEP/IO that today's G5 audits.
+     the MANDATORY STEP/IO that today's G2 audits.
   2. the closure FAILS on a dropped rule of ANY kind (a FORBIDDEN prohibition, a
      HIL gate) and on an ADDED (untraced) node — the exact holes the direct path
      ships green today.
@@ -184,7 +184,7 @@ test "check_completeness skips a non-agent step but demands the knowledge" {
 
 # --- Layer 2: completeness (nothing dropped) ------------------------------
 
-test "a dropped FORBIDDEN prohibition is caught (today's G5 ignores it)" {
+test "a dropped FORBIDDEN prohibition is caught (today's G2 ignores it)" {
     # the PDF skill's real rule: 'Never use Unicode subscript characters'
     spec = RuleSet(rules=[
         Rule(id="r_forbid", quote="Never use Unicode subscript/superscript characters",
@@ -222,7 +222,7 @@ test "a dropped HIL gate is caught; a code-owned route realizes it" {
     spec = RuleSet(rules=[
         Rule(id="r_gate", quote="confirm before deleting", kind=RuleKind.HIL, modality=Modality.MANDATORY)
     ]);
-    # a model slot that 'asks' is NOT a gate (the G6 failure) -> dropped
+    # a model slot that 'asks' is NOT a gate (the G3_HIL failure) -> dropped
     bad = ParsedIR(nodes=[PNode(id="ask", ntype="GEN_RAW", owner="model", traces_to=["r_gate"])]);
     db = check_completeness(spec, bad);
     assert len(db) == 1;
@@ -395,8 +395,8 @@ walker:
     task: { type: str, role: input }
 nodes:
   - id: explore
-    type: GEN-RAW
-    owner: model
+    type: DELEGATE
+    autonomy: {tools: [read_file]}
     traces_to: [r1]
 edges: []
 """;
@@ -432,8 +432,19 @@ test "an INVOKE_UNIT rule split across nodes is flagged as shredded" {
     assert "'r1'" in c[0].message;
 }
 
-test "an INVOKE_UNIT rule kept as one adaptive model node is clean" {
+test "an INVOKE_UNIT rule kept as one DELEGATE is clean" {
     assert check_cohesion(_invoke_spec(), parse_ir(_WHOLE_IR)) == [];
+}
+
+test "a legacy GEN-RAW with a tool belt reads as a DELEGATE and stays clean" {
+    legacy = _WHOLE_IR.replace("type: DELEGATE", "type: GEN-RAW\n    owner: model");
+    assert check_cohesion(_invoke_spec(), parse_ir(legacy)) == [];
+}
+
+test "an INVOKE_UNIT rule lowered to a tool-less GENERATE loses its loop" {
+    c = check_cohesion(_invoke_spec(), parse_ir(_WHOLE_IR.replace("type: DELEGATE", "type: GENERATE").replace("    autonomy: {tools: [read_file]}\n", "")));
+    assert len(c) == 1;
+    assert "DELEGATE" in c[0].message;
 }
 
 test "an INVOKE_UNIT rule lowered to a code node loses its loop" {

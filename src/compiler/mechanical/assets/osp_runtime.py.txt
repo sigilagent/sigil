@@ -69,6 +69,19 @@ def _sigil_on(name):
     import os
     return str(os.environ.get("SIGIL_" + str(name).upper(), "")).strip().lower() not in ("0", "false", "no", "off")
 
+def _seed_file_text(path, limit=20000):
+    # contents of a caller-supplied seed file for a model-extracted collection
+    # (a `<carry>_path` input), or "" when no readable file was named
+    import os
+    p = str(path or "").strip()
+    if not p or not os.path.isfile(p):
+        return ""
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            return f.read()[:int(limit)]
+    except Exception:
+        return ""
+
 # ---- live progress: append a node-entry event to AGIR_PROGRESS (one JSON/line) ----
 def _progress(node):
     import os, json, time
@@ -268,6 +281,35 @@ def _ask_user(question=None):
     _tui_sub("✗", "\033[31m", "no answer within HIL_TIMEOUT")
     return "[human did not answer in time]"
 
+# ---- edit-mode revision (MUTATE lowering): apply SEARCH/REPLACE blocks ----
+# A MUTATE step revises a document it already holds. Asking the model for the
+# whole revised document makes its output scale with the FILE, not the change —
+# restclient-migration's rewrite_calls re-emitted an entire Java class and hit its
+# 2500-token cap. The edits slot returns only the changed spans; this applies them.
+# Strict on purpose: every SEARCH must occur exactly once, or the whole edit set is
+# rejected ("") and the caller falls back to the whole-document slot, so a
+# partially-applied revision can never reach the deliverable.
+def _apply_edits(src, edits):
+    import re as _re
+    s = str(src if src is not None else "")
+    e = str(edits if edits is not None else "").strip()
+    if e.startswith("```"):
+        _ls = e.splitlines()[1:]
+        if _ls and _ls[-1].strip().startswith("```"):
+            _ls = _ls[:-1]
+        e = "\n".join(_ls).strip()
+    if e.upper().rstrip(".") in ("NO CHANGES", "NO CHANGE"):
+        return s
+    blocks = _re.findall(r"<{5,}[ \t]*SEARCH[ \t]*\r?\n(.*?)\r?\n={5,}[ \t]*\r?\n(.*?)(?:\r?\n)?>{5,}[ \t]*REPLACE", e, _re.S)
+    if not blocks:
+        return ""
+    out = s
+    for old, new in blocks:
+        if (not old) or (out.count(old) != 1):
+            return ""
+        out = out.replace(old, new, 1)
+    return out
+
 # ---- shared OSP runtime helpers (deliver / execute / fence-strip / module read) ----
 def _strip_fences(code):
     c = str(code).strip()
@@ -297,6 +339,8 @@ def _strip_fences(code):
                     _inner = None
                     if isinstance(_v, _ast.Constant) and isinstance(_v.value, str):
                         _inner = _v.value
+                    elif isinstance(_v, _ast.JoinedStr):
+                        _inner = None
                     elif isinstance(_v, _ast.BinOp):
                         _parts = []
                         def _walk(_n):
@@ -814,6 +858,23 @@ def _skill_tools():
             continue
     return list(_SKILL_TOOL_CACHE)
 
+def _call_skill(name, task=""):
+    # AIS CALL to a procedure that is not a tool of this module: a separately
+    # compiled skill from the registry Sigil hands the run. An unknown name is a
+    # value the program can branch on, not an exception (spec: faults vs results).
+    raw = os.environ.get("SIGIL_SKILL_TOOLS", "")
+    try:
+        rows = _json.loads(raw) if raw else []
+    except Exception:
+        rows = []
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            if str(row["name"]) == str(name):
+                return _tui_tool(str(name), [("task", task)], lambda: _skill_run(str(row["module"]), str(task)))
+        except Exception:
+            continue
+    return "[CALL %s: no such procedure in this run]" % name
+
 def _scoped_author_run(context, out_path=None, tries=3):
     # EMBODIMENT LADDER rung 3 (compiler redesign): the IR gave this tool no runnable
     # body, so instead of a silent `pass`, author a SCOPED script for exactly this tool's
@@ -842,7 +903,7 @@ def _scoped_author_run(context, out_path=None, tries=3):
     return out_path if (out_path and os.path.exists(out_path)) else ""
 
 def _clean_path(p):
-    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # EXTRACT slots (byLLM) occasionally leak JSON structure into a string field,
     # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
     # verbatim writes the artifact to a garbage filename and the deliverable is lost.
     # Strip trailing structural junk and cut at the first filename-illegal char after
@@ -930,6 +991,23 @@ def _as_param(raw, default):
     return v
 
 
+
+def _text_or_file(v, limit=20000000):
+    # A *_text / content input is meant to carry the TEXT, but callers hand the
+    # PATH just as often (manufacturing-codebook-normalization: codebook_text
+    # got "/app/data/codebook.json" and the parser saw one line of path).
+    import os
+    q = str(v if v is not None else "")
+    t = q.strip()
+    if t and len(t) < 4096 and "\n" not in t and os.path.isfile(t):
+        try:
+            _note_input_path(t)      # a file we READ is never a write target
+            with open(t, encoding="utf-8", errors="replace") as f:
+                return f.read()[:limit]
+        except Exception:
+            return q
+    return q
+
 def _cap_seq(v, n=400, chars=60000):
     if not _sigil_on("INPUT_CAPS"):
         return v
@@ -979,7 +1057,7 @@ def _cap_seq(v, n=400, chars=60000):
 
 def _cap_in(v, n=60000):
     # A model slot fed a whole data file (exoplanet: the light-curve CSV went
-    # into a GEN-ENUM decision) blows the context window; nothing an enum or a
+    # into a SELECT decision) blows the context window; nothing an enum or a
     # plan needs lives past the first 60k chars. Code nodes never pass here.
     if not _sigil_on("INPUT_CAPS"):
         return v
@@ -1050,6 +1128,48 @@ def _nothink_pop():
     else:
         os.environ["SIGIL_THINK"] = prev
 
+
+def _task_file_path_for(param, task):
+    # the PATH variant of _task_file_for: the one task-named file whose extension
+    # appears in the parameter/carry name, or "" (used to default seed inputs)
+    import os, re
+    try:
+        toks = set(t for t in re.split(r"[^a-z0-9]+", str(param or "").lower()) if t)
+        cands = []
+        for m in re.finditer(r'((?:/[A-Za-z0-9_.~-]+)+\.[A-Za-z0-9]{1,6}|\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z0-9]{1,5})\b', str(task or "")):
+            c = m.group(1); ext = c.rsplit(".", 1)[-1].lower()
+            if ext in toks and os.path.isfile(c) and c not in cands:
+                cands.append(c)
+        if len(cands) == 1:
+            _note_input_path(cands[0])
+            return cands[0]
+    except Exception:
+        pass
+    return ""
+
+def _task_file_for(param, task):
+    # Fallback for an entry CONTENT input the caller left out: if the task names
+    # exactly one existing file whose extension appears in the parameter name
+    # (draft_bib <- /root/test.bib, source_csv <- data.csv, spec_md <- README.md),
+    # that file's text IS the subject of the call — the task prose is not.
+    # (citation-check: the caller passed only output_path, `draft_bib` fell back
+    # to the task text, the parser found 0 entries, and the run reported "no
+    # fake citations".)
+    import os, re
+    try:
+        toks = set(t for t in re.split(r"[^a-z0-9]+", str(param or "").lower()) if t)
+        cands = []
+        for m in re.finditer(r'((?:/[A-Za-z0-9_.~-]+)+\.[A-Za-z0-9]{1,6}|\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z0-9]{1,5})\b', str(task or "")):
+            c = m.group(1); ext = c.rsplit(".", 1)[-1].lower()
+            if ext in toks and os.path.isfile(c) and c not in cands:
+                cands.append(c)
+        if len(cands) == 1:
+            _note_input_path(cands[0])
+            with open(cands[0], encoding="utf-8", errors="replace") as f:
+                return f.read()[:20000000]
+    except Exception:
+        pass
+    return None
 
 _INPUT_PATHS = set()
 _DEST_PATHS = set()   # paths the task names after a write/output verb
@@ -1136,9 +1256,8 @@ def _is_input_path(p):
     if os.path.abspath(q) in _DEST_PATHS or os.path.basename(q) in _DEST_PATHS:
         return False
     return os.path.abspath(q) in _INPUT_PATHS or os.path.basename(q) in _INPUT_PATHS
-
 def _outname(task, fallback="output.txt"):
-    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # GENERATE deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
     # filename that follows a save/output/write verb; else the first bare filename; else fallback.
     # EXTENSION-AWARE: the fallback name encodes WHICH deliverable this write is
@@ -1338,6 +1457,57 @@ def _format_contract(task):
             "no comments. Use exactly the keys and structure the task specifies. This concerns the file's "
             "contents only: intermediate steps (drafts, entries, notes, analyses) keep their own natural format.")
 
+def _field(ret, key):
+    # one field of a multi-write slot's typed return (obj attribute or dict key); total
+    if ret is None:
+        return ""
+    if isinstance(ret, dict):
+        v = ret.get(key)
+        return "" if v is None else v
+    v = getattr(ret, key, None)
+    return "" if v is None else v
+
+_JOIN_ARRIVALS = {}
+
+def _join_reset():
+    # per run: the MCP server keeps this module warm across tools/call
+    _JOIN_ARRIVALS.clear()
+
+def _join_arrive(nid, indeg):
+    # A DAG join (several mandatory in-edges, no route/loop) executes ONCE, on its
+    # LAST arrival: jac's visit queue reaches it once per incoming path, and each
+    # early visit would run it on inputs the other branch has not produced yet.
+    n = int(_JOIN_ARRIVALS.get(nid, 0)) + 1
+    _JOIN_ARRIVALS[nid] = n
+    if n < int(indeg):
+        return False
+    _JOIN_ARRIVALS[nid] = 0
+    return True
+
+def _task_input_file(task, out_path=None):
+    # The ONE document the task points at, for an extractor that reads only `task`
+    # and whose carry name carries no extension hint (citation-check: `identifiers`
+    # is drafted by a model slot from the task text, but the entries live in
+    # /root/test.bib — the slot saw "Run the validator on /root/test.bib" and
+    # extracted nothing; the tool then reported "zero entries"). Only an existing,
+    # registered INPUT file with a document extension counts; two candidates =
+    # ambiguous = no default (the caller's <carry>_path still wins).
+    import os, re
+    t = str(task or "")
+    outp = os.path.abspath(os.path.expanduser(str(out_path))) if out_path else ""
+    seen = []
+    for c in re.findall(r'([A-Za-z0-9_.~/-]*[A-Za-z0-9_]\.(?:bib|csv|json|md|txt|html?|ya?ml|xml|tex|rst|tsv|py|jsonl))\b', t):
+        q = os.path.expanduser(c)
+        try:
+            if not os.path.isfile(q):
+                continue
+        except Exception:
+            continue
+        a = os.path.abspath(q)
+        if (outp and a == outp) or not _is_input_path(a) or a in seen:
+            continue
+        seen.append(a)
+    return seen[0] if len(seen) == 1 else ""
 
 def _csv_guard(path, text):
     # A .csv deliverable written with a Markdown report (gravitational-wave: the
@@ -1375,7 +1545,6 @@ def _refuse_csv_write(path, text):
         return ("[write_file refused: %s must contain CSV rows but this content is a report/prose, so it was saved "
                 "as %s instead. If the task needs CSV at %s, produce the rows yourself from that file.]" % (path, _alt, path))
     return "[write_file refused: %s must contain CSV rows but this content is a report/prose; produce the CSV at %s yourself.]" % (path, path)
-
 def _write_artifact(content, path):
     if not _sigil_on("WRITE_GUARDS"):
         return _write_artifact_raw(content, path)
