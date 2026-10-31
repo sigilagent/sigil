@@ -1,7 +1,11 @@
 # Skill compilation
 
 The core of Sigil: turning a plain-markdown `SKILL.md` into a typed, runnable
-agent harness. The compiler has two halves (`src/compiler/`):
+agent harness. The method is the one the SIGIL paper describes
+([arXiv 2607.27309](https://arxiv.org/abs/2607.27309)): recover the skill's
+requirements, build an AG-IR program in the Agent Instruction Set
+([ais-spec.md](ais-spec.md)), validate and repair it, and lower it
+deterministically. The compiler has two halves (`src/compiler/`):
 
 - **The AI half** (`ai/`) — the LIFT front-end. Frontier-model judgment under a
   faithfulness constraint: extract what the skill *mandates*, design the graph
@@ -18,7 +22,7 @@ flowchart LR
     SPEC --> SPINE["workflow spine\n(the CFG)"]
     SPINE --> FLOWS["annotator flows\nIO · context · knowledge · HIL"]
     FLOWS --> ASM["assemble\n(one AG-IR)"]
-    ASM --> GATES{"gates\nG1…G6 · compile oracle\nSTRUCT-COV"}
+    ASM --> GATES{"validation\nG1…G6 · constraints\ncompile oracle"}
     GATES -->|fail| REPAIR["bounded repair"] --> FLOWS
     GATES -->|pass| OUT["agent.jac"]
 ```
@@ -28,12 +32,13 @@ flowchart LR
   mechanically), three coverage critics hunt for dropped obligations, a deontic
   audit catches modality drift ("may" hardened into "must"). Loops until sound,
   complete, and drift-free.
-- **Workflow spine** — types every rule into the AG-IR alphabet (typed model
-  slots, code steps, routes, human gates), owner-tests each one (*is the output
-  a function of the inputs? then code owns it*), and wires the control-flow
-  graph. A validator enforces: every mandatory rule realized by a node, adaptive
-  tool-use never shredded into fixed calls, prohibitions become constraints —
-  never paths.
+- **Workflow spine** — gives every rule its AIS opcode: executable
+  (`COMPUTE`/`OBSERVE`/`ACT`) when the skill supplies an implementation or the
+  output is a function of the inputs, the tightest semantic opcode
+  (`SELECT`/`EXTRACT`/`MUTATE`/`GENERATE`) when it needs judgment, `DELEGATE`
+  for an open subprocedure — and wires the control-flow graph. A validator
+  enforces: every mandatory rule realized by an instruction, open subprocedures
+  never shredded into fixed calls, prohibitions become constraints — never paths.
 - **Annotator flows** (parallel) — dataflow (carries), knowledge scoping (which
   node sees which reference text), the snippet sort (runnable tool bodies vs
   grounding knowledge), and human-gate points.
@@ -43,27 +48,44 @@ flowchart LR
 
 ## The gates
 
-Each gate rejects a specific way an AG-IR can be unfaithful, with rule-level
-diagnostics:
+The checks are the paper's pre-lowering validation (Appendix A.2, Table 2).
+Each paper check has an id `G1`–`G6`; each Sigil check under it carries a
+suffix:
 
-| Gate | Rejects |
-|---|---|
-| G1 standalone | a tool or knowledge entry that *points* at content instead of embodying it ("see FORMS.md") |
-| G3 artifact boundary | a mandated deliverable that nothing actually writes to disk |
-| G4 compile oracle | an AG-IR that doesn't lower to a clean-compiling module (real `jac check`, every time) |
-| G5 STRUCT-COV | a mandate folded into some other slot's interior (*monolithic* — model-dependent, same risk as prose) |
-| G6 human gates | a route that consumes human feedback but leaves the decision to model judgment |
+| Paper check | Gate | Rejects | Severity |
+|---|---|---|---|
+| G1 source grounding | `G1_TRACE` | one instruction or tool claiming far more rules than it can realize | warn |
+| G2 requirement realization | `G2` | a mandate folded into some other slot's interior (*monolithic*) or missing | warn |
+| | `G2_ARTIFACT` | a mandated deliverable that nothing actually writes to disk | error |
+| | `G2_EMBODY` | a bundle artifact a rule names that the program never embodies | warn |
+| | `G2_OVERLOAD` | one semantic instruction carrying more than six mandates | error |
+| | `G2_FLOW` | a reachable data flow a `forbid_flow` constraint prohibits | error |
+| | `G2_ORDER` | a path to a step that skips the step a `require_before` constraint puts first | error |
+| G3 execution preservation | `G3_HIL` | a branch on human feedback whose decision is left to model judgment | error |
+| G4 type and data flow | `G4` | a carry whose type disagrees with the tool that consumes it | error |
+| | `G4_REACH` | an instruction unreachable from the entry | error |
+| | `G4_INPUT` | an external input mined from the task sentence instead of declared | error |
+| G5 reference resolution | `G5` | a tool or knowledge entry that *points* at content instead of embodying it ("see FORMS.md") | warn |
+| | `G5_BLOAT` | a slot prompt carrying the surrounding document rather than its mandate | warn |
+| G6 binding and control flow | `G6_ENV` | an import or binary the tools need that is missing here | warn |
+| | `G6_PAR` | claimed parallelism that is not real | error |
+| — | `COMPILE` | an AG-IR that doesn't lower to a clean-compiling module (real `jac check`, every time) | fatal |
 
-The gates diagnose rather than veto. What a failure triggers, in order:
-mechanical autofixes (each re-gated through G4), then scoped model repair with
-each flow fixing its own view, then faithful degradation. Whatever still remains
-rides the result as typed `{gate, severity, message}` findings — errors are
-runtime crashes or violated mandates, warnings are faithfulness audits. A compile
-fails only when no runnable module exists at all, and it fails with the gate
+What a failure triggers, in order: mechanical autofixes (each re-gated through
+COMPILE), then scoped model repair with each flow fixing its own view, then
+faithful degradation. Whatever still remains rides the result as typed
+`{gate, severity, message}` findings.
+
+**A compile fails when an `error` survives the repair ladder**, as the paper
+specifies — an error is a runtime crash or a violated mandate, so a module that
+carries one is not persisted even though it lowered. Warnings ride a runnable,
+`degraded` result. A compile with no runnable module fails with the COMPILE
 diagnostics attached rather than a bare error.
 
-`--strict` (or `SIGIL_STRICT=1`) restores fail-on-any-finding, which is what you
-want in CI.
+```bash
+SIGIL_GATE_FAIL_ON_ERROR=0   # keep a module whose errors survived repair (pre-paper behavior)
+SIGIL_STRICT=1               # also fail on warnings (or --strict) — what you want in CI
+```
 
 ### The per-slot output budget
 
@@ -98,14 +120,17 @@ cost is a skill that will not compile at all, so each has a way out that does no
 involve editing the compiler:
 
 ```bash
-SIGIL_GATE_G12=0                  # turn one gate off
-SIGIL_GATE_G13=0                  # ...prompt-bloat, reachability, any of them
-SIGIL_GATE_G9_REACH=0             # ...including one check inside a shared id
-SIGIL_GATES_OFF=G12,G9_REACH      # or several, in one variable
+SIGIL_GATE_G2_OVERLOAD=0          # turn one check off
+SIGIL_GATE_G2=0                   # ...or a whole paper check (G2 and every G2_*)
+SIGIL_GATES_OFF=G2_OVERLOAD,G4_REACH   # or several, in one variable
 ```
 
-Names are gate ids (`G12`) or `id_SUFFIX` where one id carries several distinct
-checks (`G9_REACH` is the reachability check inside G9). Values `0`, `false`,
+Names are the ids in the table above. The numbered ids from before the paper
+alignment still work where they are unambiguous: `G7`…`G14` map to `G6_ENV`,
+`G6_PAR`, `G4`, `G1_TRACE`, `G2_EMBODY`, `G2_OVERLOAD`, `G5_BLOAT` and
+`G4_INPUT` (and `G9_REACH` to `G4_REACH`); `G1`…`G6` now name the paper's
+checks. `SIGIL_G6_ENV_HARD=1` / `SIGIL_G2_EMBODY_HARD=1` (or the older
+`SIGIL_G7_HARD` / `SIGIL_G11_HARD`) make those warnings errors. Values `0`, `false`,
 `no` and `off` all disable; anything else, including unset, leaves the gate on.
 
 Reach for these when a gate is demonstrably wrong about your corpus — not to get
@@ -272,7 +297,7 @@ sigil compile ./SKILL.md --no-adjudicate # assume 'maybe' instead; no model-depe
 sigil register-skill ./SKILL.md          # same gated compile as `compile`
 sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
 sigil register-skill ./y.jac osp         # drop in a precompiled module
-sigil gate ./x.agir                      # run G4, the compile oracle, on its own
+sigil gate ./x.agir                      # run COMPILE, the compile oracle, on its own
 sigil relearn <signature>                # recompile a stored skill at a bumped version
 ```
 
@@ -282,7 +307,7 @@ source, so `relearn` re-enters the compiler with the original skill text.
 
 ## The standard tool library
 
-A code-owned node lowers through a tool, and a tool needs a body. Before, the author had
+An executable instruction lowers through a tool, and a tool needs a body. Before, the author had
 to hand-write Python for every mundane step — read this file, grep that directory, run
 that script — and when it didn't, the node lowered to a marker comment and the assemble
 gate killed the compile. The work was never hard; it was just never offered.
@@ -291,13 +316,13 @@ These always exist and can be bound by name:
 
 | Tool | Surface | |
 |---|---|---|
-| `read_file(path)` | SENSE | read a text file |
-| `list_dir(path)` | SENSE | one directory level |
-| `glob_files(pattern, path)` | SENSE | find files, recursively |
-| `grep(pattern, path)` | SENSE | regex over file contents |
+| `read_file(path)` | OBSERVE | read a text file |
+| `list_dir(path)` | OBSERVE | one directory level |
+| `glob_files(pattern, path)` | OBSERVE | find files, recursively |
+| `grep(pattern, path)` | OBSERVE | regex over file contents |
 | `write_file(path, content)` | ACT | write text, creating parents |
 | `run_command(command)` | ACT | shell, exit code + output |
-| `http_get(url)` | SENSE | fetch a public URL |
+| `http_get(url)` | OBSERVE | fetch a public URL |
 
 The names match the vocabulary a skill written for any agent runtime already uses —
 Anthropic's own skills declare `allowed-tools: Bash Read Grep Glob` — so a lift maps onto
@@ -306,7 +331,7 @@ them without translation. Binding one takes no body:
 ```yaml
 tools:
   read_file:
-    surface: SENSE
+    surface: OBSERVE
     serves: [n4_read_primer]
 ```
 

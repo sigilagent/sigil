@@ -8,6 +8,7 @@ import from .flows { ToolDef, KnowledgeItem, KnowledgeView, HILView, HILPoint }
 import from .spec_loop { RuleSet }
 import from .lift_types { Modality, RuleKind }
 import from .skeleton { skeleton_ir }
+import from .report { classify }
 
 glob GOOD_IR: str = """---
 name: note-writer
@@ -266,6 +267,154 @@ test "G3_HIL: a model-owned route consuming human feedback is flagged; code-owne
 
     bad_route.owner = Owner.CODE;
     assert gate_hil_gates(wf, vb) == [];
+}
+
+test "G3_HIL: a SELECT that judges human feedback for a BRANCH is flagged" {
+    # The AIS shape of the old failure: the BRANCH is code, but it tests a value a
+    # model step derived from the human's words.
+    wait_n = AgirNode(id="wait_review", ntype=NodeType.OBSERVE, owner=Owner.CODE,
+                      writes=["feedback"], traces_to=["r1"]);
+    judge = AgirNode(id="judge", ntype=NodeType.SELECT, owner=Owner.MODEL,
+                     reads=["feedback"], writes=["verdict"], traces_to=["r1"]);
+    route = AgirNode(id="route", ntype=NodeType.BRANCH, owner=Owner.CODE,
+                     reads=["verdict"], traces_to=["r1"]);
+    wf = WorkflowView(nodes=[wait_n, judge, route]);
+    vb = ViewBundle(hil=HILView(points=[HILPoint(`node="wait_review", kind="APPROVE", prompt="review the spec")]));
+    issues = gate_hil_gates(wf, vb);
+    assert len(issues) == 1, issues;
+    assert ("'route'" in issues[0]) and ("judge -> verdict" in issues[0]);
+
+    judge.ntype = NodeType.COMPUTE;
+    judge.owner = Owner.CODE;
+    assert gate_hil_gates(wf, vb) == [];
+}
+
+glob FLOW_IR: str = """---
+name: phi-note
+description: Summarize a record and log the summary.
+---
+agir_version: 0.2
+walker:
+  name: PhiAgent
+  carries:
+    task: {type: str, role: input}
+    record: {type: str, produced_by: read_record}
+    summary: {type: str, produced_by: summarize}
+    redacted: {type: str, produced_by: redact}
+nodes:
+  - {id: read_record, type: OBSERVE, tool: read_file, reads: [task], writes: [record]}
+  - {id: summarize, type: GENERATE, reads: [record], writes: [summary], doc: "Summarize the record."}
+  - {id: redact, type: COMPUTE, reads: [summary], writes: [redacted]}
+  - {id: write_log, type: ACT, reads: [summary]}
+  - {id: done, type: RETURN}
+edges:
+  - {from: read_record, to: summarize}
+  - {from: summarize, to: redact}
+  - {from: redact, to: write_log}
+  - {from: write_log, to: done}
+constraints:
+  - {id: no_phi_in_logs, kind: forbid_flow, from: [record], to: [write_log], through: [redact]}
+  - {id: summary_first, kind: require_before, before: summarize, after: write_log}
+""";
+
+test "G2_FLOW: a value derived from a prohibited source reaching its sink is an error" {
+    found = gate_constraints(FLOW_IR);
+    flows = [f for f in found if str(f[0]) == "G2_FLOW"];
+    assert len(flows) == 1, found;
+    assert ("'write_log'" in str(flows[0][1])) and ("summary" in str(flows[0][1]));
+    assert classify("G2_FLOW") == "error";
+    # reading the sanitized value instead satisfies the constraint
+    clean = FLOW_IR.replace("{id: write_log, type: ACT, reads: [summary]}", "{id: write_log, type: ACT, reads: [redacted]}");
+    assert [f for f in gate_constraints(clean) if str(f[0]) == "G2_FLOW"] == [];
+}
+
+test "G2_ORDER: a path that skips the required earlier step is an error" {
+    assert [f for f in gate_constraints(FLOW_IR) if str(f[0]) == "G2_ORDER"] == [];
+    bypass = FLOW_IR.replace("  - {from: write_log, to: done}", "  - {from: write_log, to: done}\n  - {from: read_record, to: write_log}");
+    order = [f for f in gate_constraints(bypass) if str(f[0]) == "G2_ORDER"];
+    assert len(order) == 1, order;
+    assert "'summarize'" in str(order[0][1]);
+}
+
+test "constraints: unknown kinds and dangling names are reported, not ignored" {
+    bad = FLOW_IR.replace("kind: require_before", "kind: sometimes").replace("to: [write_log]", "to: [nowhere]");
+    found = gate_constraints(bad);
+    assert [f for f in found if (str(f[0]) == "G2") and ("sometimes" in str(f[1]))];
+    assert [f for f in found if (str(f[0]) == "G2_FLOW") and ("nowhere" in str(f[1]))];
+}
+
+glob LEGACY_ROUTE_IR: str = """---
+name: router
+description: Answer briefly or at length.
+---
+agir_version: 0.1
+walker:
+  name: RouterAgent
+  carries:
+    task: {type: str, role: input}
+    answer: {type: str, produced_by: short}
+    long_answer: {type: str, produced_by: long}
+nodes:
+  - id: pick
+    type: ROUTE
+    owner: model
+    reads: [task]
+    doc: "Pick the short or the long answer."
+  - id: short
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [answer]
+    doc: "Answer briefly."
+  - id: long
+    type: GEN-RAW
+    owner: model
+    reads: [task]
+    writes: [long_answer]
+    doc: "Answer at length."
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: pick, to: short}
+  - {from: pick, to: long}
+  - {from: short, to: done}
+  - {from: long, to: done}
+""";
+
+test "a legacy model-chosen ROUTE lowers as SELECT + BRANCH and compiles" {
+    v = compile_gate(LEGACY_ROUTE_IR, "router");
+    assert v.ok, v.errors;
+    assert "PickRoute" in v.module_src;
+    assert "by llm(intent=" not in v.module_src;
+}
+
+test "the paper's CALL invokes a tool of the module by name" {
+    ir = GOOD_IR.replace("""  - id: done
+    type: TERMINAL""", """  - id: count
+    type: CALL
+    procedure: count_words
+    reads: [note]
+    writes: [words]
+  - id: done
+    type: TERMINAL""").replace("  - {from: draft, to: done, modality: mandatory}",
+        "  - {from: draft, to: count, modality: mandatory}\n  - {from: count, to: done, modality: mandatory}"
+    ).replace("""    report:
+      type: str
+      produced_by: done""", """    words:
+      type: str
+      produced_by: count
+    report:
+      type: str
+      produced_by: done""").replace("walker:", """tools:
+  count_words:
+    sig: "(note) -> str"
+    body: |
+      def count_words(note):
+          return str(len(str(note or "").split()))
+walker:""");
+    v = compile_gate(ir, "note_counter");
+    assert v.ok, v.errors;
+    assert "_count_words(" in v.module_src;
 }
 
 test "_diagnostic keeps the ERROR blocks, not just the tail of the output" {

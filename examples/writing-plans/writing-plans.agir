@@ -2,7 +2,7 @@
 name: writing_plans
 description: Create a detailed implementation plan with bite-sized TDD tasks for an engineer with zero codebase context.
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
@@ -57,7 +57,7 @@ tools:
           return head + "\n\n" + body + "\n"
   verify_has_tasks:
     sig: "(plan_md) -> bool"
-    surface: SENSE
+    surface: OBSERVE
     doc: "True when the plan actually contains task sections with code."
     body: |
       def verify_has_tasks(plan_md: str) -> bool:
@@ -105,40 +105,35 @@ walker:
 
 nodes:
   - id: draft_header
-    type: GEN-RAW
-    owner: model
+    type: GENERATE
     reads: [task]
     writes: [header_md]
     doc: "Write the plan's header for the requested feature: a real feature name, a one-sentence goal, a 2-3 sentence architecture, and the tech stack. Follow the header format exactly. Output only the header markdown."
   - id: write_tasks
-    type: GEN-RAW
-    owner: model
+    type: GENERATE
     reads: [task, header_md]
     writes: [tasks_md]
     doc: "Write the bite-sized, test-driven task sections that implement the feature. Follow the task format exactly: exact file paths, complete code, exact commands with expected output, and a commit per task. Output only the task-section markdown, no header."
   - id: assemble
     type: ACT
-    owner: code
     op: assemble_plan
     tool: assemble_plan
     reads: [header_md, tasks_md]
     writes: [plan_md]
   - id: verify
-    type: SENSE
-    owner: code
+    type: OBSERVE
     op: verify_has_tasks
     tool: verify_has_tasks
     reads: [plan_md]
     writes: [plan_ok]
   - id: save
     type: ACT
-    owner: code
     op: save_plan
     tool: save_plan
     reads: [plan_md]
     writes: [plan_file]
   - id: done
-    type: TERMINAL
+    type: RETURN
 
 edges:
   - {from: draft_header, to: write_tasks, modality: mandatory}

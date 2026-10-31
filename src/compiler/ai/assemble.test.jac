@@ -70,7 +70,7 @@ def _views() -> ViewBundle {
 test "a lossless join assembles with no issues" {
     res = assemble(_spec(), _wf(), _views(), "csv-toy");
     assert res.issues == [];
-    assert "GEN-RAW" in res.ir_text;
+    assert "GENERATE" in res.ir_text;
     assert "tools:" in res.ir_text;
     assert "knowledge:" in res.ir_text;
     assert "NEVER violate" in res.ir_text;   # the FORBIDDEN constraint rides the Mind node's doc

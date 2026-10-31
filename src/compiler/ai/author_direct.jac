@@ -40,13 +40,18 @@ def pin_direct_llm(m: any) -> None {
 # ---------------------------------------------------------------------------
 sem author_agir_direct = """You are the front-end of the Sigil AG-IR compiler.
 Author ONE AG-IR YAML document for the given SKILL, obeying the GUIDE exactly and
-grounded in the FROZEN RULE SET. Keep it minimal and idiomatic: one node per
-obligation, code tools where the work is mechanical (bind a builtin by name with
-no body), model slots only for genuine judgment, carries typed across every
-model->code boundary, never a carry named with a bare tool-parameter name.
+grounded in the FROZEN RULE SET. Every node is an Agent Instruction Set opcode
+(SELECT EXTRACT MUTATE GENERATE DELEGATE COMPUTE OBSERVE ACT BRANCH LOOP PARALLEL
+CALL RETURN); the opcode decides who executes it. Keep it minimal and idiomatic:
+one instruction per obligation, executable instructions with code tools where the
+work is mechanical (bind a builtin by name with no body), semantic instructions
+only for genuine judgment, DELEGATE for an open-ended activity the skill leaves
+to the agent, carries typed across every model->code boundary, never a carry
+named with a bare tool-parameter name. A prohibition on where a value may flow,
+or a required ordering, is ALSO stated under `constraints`.
 PROVENANCE IS MANDATORY: every node, tool and knowledge item MUST carry a
 `traces_to: [<rule ids>]` naming the frozen-set rule(s) it realizes — for EVERY
-kind, not only steps: a prohibition rides its slot's node (add the rule id to that
+kind, not only steps: a prohibition rides its semantic instruction (add the rule id to that
 node's traces_to and fold the 'never...' text into its doc), a knowledge item
 carries the rule id of the reference it embodies, a human gate the rule id of the
 gate. A node that realizes no rule must be removed, not left untraced. The

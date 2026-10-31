@@ -395,8 +395,8 @@ walker:
     task: { type: str, role: input }
 nodes:
   - id: explore
-    type: GEN-RAW
-    owner: model
+    type: DELEGATE
+    autonomy: {tools: [read_file]}
     traces_to: [r1]
 edges: []
 """;
@@ -432,8 +432,19 @@ test "an INVOKE_UNIT rule split across nodes is flagged as shredded" {
     assert "'r1'" in c[0].message;
 }
 
-test "an INVOKE_UNIT rule kept as one adaptive model node is clean" {
+test "an INVOKE_UNIT rule kept as one DELEGATE is clean" {
     assert check_cohesion(_invoke_spec(), parse_ir(_WHOLE_IR)) == [];
+}
+
+test "a legacy GEN-RAW with a tool belt reads as a DELEGATE and stays clean" {
+    legacy = _WHOLE_IR.replace("type: DELEGATE", "type: GEN-RAW\n    owner: model");
+    assert check_cohesion(_invoke_spec(), parse_ir(legacy)) == [];
+}
+
+test "an INVOKE_UNIT rule lowered to a tool-less GENERATE loses its loop" {
+    c = check_cohesion(_invoke_spec(), parse_ir(_WHOLE_IR.replace("type: DELEGATE", "type: GENERATE").replace("    autonomy: {tools: [read_file]}\n", "")));
+    assert len(c) == 1;
+    assert "DELEGATE" in c[0].message;
 }
 
 test "an INVOKE_UNIT rule lowered to a code node loses its loop" {

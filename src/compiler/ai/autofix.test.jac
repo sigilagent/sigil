@@ -79,7 +79,7 @@ test "an escape path never resolves" {
     assert _skill_file(d, "/etc/passwd") == "";
 }
 
-test "a hollow code node is re-owned to a model slot; a served one is not" {
+test "a hollow COMPUTE is made a GENERATE; a served one is not" {
     ir = _yaml({
         "walker": {"name": "T", "carries": {"task": {"type": "str", "role": "input"}}},
         "nodes": [
@@ -93,9 +93,10 @@ test "a hollow code node is re-owned to a model slot; a served one is not" {
     out = _load_ir(str(r["ir_text"]));
     by_id = {str(n["id"]): n for n in out["nodes"]};
     assert by_id["n_hollow"]["owner"] == "model";
-    assert by_id["n_hollow"]["type"] == "GEN-RAW";
+    assert by_id["n_hollow"]["type"] == "GENERATE";
     assert by_id["n_served"]["owner"] == "code";
-    assert len([f for f in r["fixes"] if "n_hollow" in str(f) and "re-owned" in str(f)]) == 1;
+    assert by_id["n_served"]["type"] == "COMPUTE";
+    assert len([f for f in r["fixes"] if "n_hollow" in str(f) and "made a GENERATE" in str(f)]) == 1;
 }
 
 test "a clean IR passes through byte-identical" {

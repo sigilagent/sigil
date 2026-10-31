@@ -26,7 +26,7 @@ import from src.compiler.mechanical.concurrency { extract_concurrency }
 import from src.compiler.mechanical.toolib { builtin }
 import from .lift_types { CompileVerdict, Modality, RuleKind }
 import from .spec_loop { RuleSet }
-import from .ir_views { NodeType, Owner, StructCov }
+import from .ir_views { NodeType, Owner, StructCov, MODEL_TYPES }
 import from .workflow { AgirNode, WorkflowView }
 import from .flows { ViewBundle }
 # same-package import; report.jac pulls in only .ir_views, so no cycle.
@@ -290,7 +290,7 @@ def gate_struct_cov(spec: RuleSet, wf: WorkflowView, module_src: str) -> StructC
 }
 
 # ---------------------------------------------------------------------------
-# G3_HIL — human-feedback gates are owner=code (slotted != gated)
+# G3_HIL — human-feedback gates bind on code, never on model judgment (slotted != gated)
 # ---------------------------------------------------------------------------
 
 def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
@@ -307,13 +307,31 @@ def gate_hil_gates(wf: WorkflowView, vb: ViewBundle) -> list[str] {
             for w in n.writes { if w not in hil_carries { hil_carries.append(w); } }
         }
     }
+    # In the AIS a BRANCH is always code, so the model judgment that converts a
+    # gate into a suggestion arrives one step earlier: a semantic instruction
+    # (typically a SELECT) reads the human's answer and the BRANCH tests ITS
+    # result. That is the shape a legacy model-owned approval route canonicalizes
+    # to, and the execution-type change the paper's G3 forbids.
+    judged: dict[str, str] = {};
+    for n in wf.nodes {
+        if n.id in gated_nodes { continue; }
+        if (n.owner != Owner.MODEL) and (n.ntype not in MODEL_TYPES) { continue; }
+        if not [rd for rd in n.reads if rd in hil_carries] { continue; }
+        for w in n.writes { judged[w] = n.id; }
+    }
     for n in wf.nodes {
         if n.ntype != NodeType.BRANCH { continue; }
         feeds = [rd for rd in n.reads if rd in hil_carries];
-        if not feeds { continue; }
-        if n.owner != Owner.CODE {
+        if feeds and (n.owner != Owner.CODE) {
             issues.append("G3_HIL: route '" + n.id + "' consumes human feedback ('" + ", ".join(feeds)
-                          + "') but is model-owned — make it owner=code with explicit guards (e.g. contains 'approved')");
+                          + "') but is model-owned — make it a BRANCH with explicit guards (e.g. contains 'approved')");
+        }
+        via = [rd for rd in n.reads if rd in judged];
+        if via {
+            src = ", ".join([judged[v] + " -> " + v for v in via]);
+            issues.append("G3_HIL: BRANCH '" + n.id + "' tests a value a model step derived from human feedback ("
+                          + src + ") — the human's words must bind the transition directly: guard on a"
+                          + " COMPUTE/OBSERVE that parses the answer (e.g. contains 'approved'), never on a SELECT");
         }
     }
     return issues;

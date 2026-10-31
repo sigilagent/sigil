@@ -1,5 +1,12 @@
 # Input provenance: making a compiled skill callable
 
+> **Names.** This log was written before Sigil adopted the SIGIL paper's
+> vocabulary. Opcodes and gate ids here are the old ones: GEN-RAW/GEN-EDIT/GEN-FILL/
+> GEN-ENUM are now GENERATE/MUTATE/EXTRACT/SELECT, SENSE is OBSERVE, ROUTE is BRANCH,
+> and G7/G10/G11/G14 are G6_ENV/G1_TRACE/G2_EMBODY/G4_INPUT. See
+> [ais-spec.md Appendix F](reference/ais-spec.md#appendix-f--the-version-01-encoding).
+
+
 A prose skill is *read* by an agent. A compiled skill is *called* by one. That
 difference is the whole of this document.
 

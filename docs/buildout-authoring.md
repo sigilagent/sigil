@@ -1,5 +1,12 @@
 # Skeleton-first build-out authoring
 
+> **Names.** This log was written before Sigil adopted the SIGIL paper's
+> vocabulary. Opcodes and gate ids here are the old ones: GEN-RAW/GEN-EDIT/GEN-FILL/
+> GEN-ENUM are now GENERATE/MUTATE/EXTRACT/SELECT, SENSE is OBSERVE, ROUTE is BRANCH,
+> and G7/G10/G11/G14 are G6_ENV/G1_TRACE/G2_EMBODY/G4_INPUT. See
+> [ais-spec.md Appendix F](reference/ais-spec.md#appendix-f--the-version-01-encoding).
+
+
 Status: design + implementation in progress on `buildout-authoring`.
 Motivation comes from measured v0.5.1 behavior on a 33-skill benchmark.
 

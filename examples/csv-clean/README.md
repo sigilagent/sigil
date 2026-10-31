@@ -56,22 +56,22 @@ model:
 
 ```
 read_input_csv ─▶ decide_column_meanings ─▶ apply_header_rename ─▶ drop_empty_rows
-   (SENSE)            (GEN-FILL, model)          (CODE)                (CODE)
+   (OBSERVE)            (EXTRACT, model)          (COMPUTE)                (COMPUTE)
                                                                          │
                                     ┌────────────────────────────────────┘
                                     ▼
                           write_cleaned_csv ─▶ re_read_output_csv ─▶ spawn_verifications
-                               (ACT)                (SENSE)               (SPAWN)
+                               (ACT)                (OBSERVE)               (PARALLEL)
                                                                              │
         ┌────────────────────────────────────────────────────────────────────┤
         ▼           ▼             ▼              ▼               ▼            ▼
    parses_ok   header_regex   uniqueness   column_count    row_count     header_order
-    (CODE)        (CODE)         (CODE)        (CODE)          (CODE)          (CODE)
+    (COMPUTE)        (COMPUTE)         (COMPUTE)        (COMPUTE)          (COMPUTE)          (COMPUTE)
         └───────────┴─────────────┴──────────────┴───────────────┴────────────┘
                                     ▼
                             verification_gate ──▶ done
-                                (ROUTE)      └──▶ fix_output ──▶ (back to rename)
-                                                  (GEN-EDIT, model)
+                                (BRANCH)      └──▶ fix_output ──▶ (back to rename)
+                                                  (MUTATE, model)
 ```
 
 - **`decide_column_meanings`** is the judgment slot, and it is typed:
@@ -79,8 +79,8 @@ read_input_csv ─▶ decide_column_meanings ─▶ apply_header_rename ─▶ d
   headers and must return names — it is not free-styling a CSV.
 - **Everything mechanical stayed mechanical.** Renaming, dropping empty rows and
   writing the file are `CODE`/`ACT` nodes. The model never touches the data rows.
-- **Six independent verifications** fan out from a `SPAWN` and converge on a
-  `ROUTE` gate: does it parse, is every header snake_case, are they unique, does
+- **Six independent verifications** fan out from a `PARALLEL` and converge on a
+  `BRANCH` gate: does it parse, is every header snake_case, are they unique, does
   the column count match, does the row count equal input-minus-empty, and did the
   written header match what was proposed.
 - **`fix_output`** is the repair path the gate takes when a check fails.
@@ -118,9 +118,9 @@ with the same prompt, `gemma4:e4b` returns the ideal answer in ~7s:
 **Two lowering bugs had to be fixed before this ran at all**, both found by
 building this demo and both model-independent:
 
-- a `SPAWN`'s fan-out only visited its *first* child, so five of the six
+- a `PARALLEL`'s fan-out only visited its *first* child, so five of the six
   verifications never executed;
-- a code-owned `ROUTE` never called the tool that computes its own guard, so
+- a code-owned `BRANCH` never called the tool that computes its own guard, so
   `all_checks_passed` stayed `False` forever.
 
 Before those fixes, every model — qwen2.5:1.5b, gemma3n:e4b, gemma4:e4b — failed

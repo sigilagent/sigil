@@ -8,12 +8,14 @@ OSP agent; deviating from these keys makes it fail to compile.
 - `types:` — typed data. Each is `{kind: object, fields: {...}}` or `{kind: enum, members: [...]}`.
 - `walker:` — `name` + `carries:` (the typed slots that flow through the run; each slot
   `{type, role?/produced_by?, doc}`).
-- `nodes:` — the pipeline steps. Each `{id, type, owner, reads:[...], writes:[...], doc, ...}`.
-  Node `type` ∈ {ROUTE, GEN-ENUM, GEN-FILL, GEN-RAW, SENSE, ACT (with `surface: artifact`),
-  TERMINAL}. `owner` ∈ {model, code}. GEN-* = a model slot; ACT/SENSE = a code tool.
-- `tools:` — only for deterministic code tools. Each `{surface: SENSE|ACT·artifact,
+- `nodes:` — the pipeline steps, as Agent Instruction Set (AIS) instructions. Each
+  `{id, type, reads:[...], writes:[...], doc, ...}`. Node `type` ∈ {SELECT, EXTRACT, MUTATE,
+  GENERATE, DELEGATE, COMPUTE, OBSERVE, ACT (with `surface: artifact`), BRANCH, LOOP,
+  PARALLEL, CALL, RETURN}. The opcode decides who executes it: SELECT/EXTRACT/MUTATE/
+  GENERATE/DELEGATE are model calls; COMPUTE/OBSERVE/ACT run a code tool. No `owner` field.
+- `tools:` — only for deterministic code tools. Each `{surface: OBSERVE|ACT·artifact,
   sig: "(a, b) -> t", serves: [OP_ENUM], body: | <python> }`. For "author code then run it"
-  tasks you do NOT need tools — use a GEN-RAW `write_code` node + an ACT `execute` node
+  tasks you do NOT need tools — use a GENERATE `write_code` node + an ACT `execute` node
   (the compiler emits the author→run→repair envelope automatically).
 - `edges:` — REQUIRED. The node chain, in order: `- { from: <id>, to: <id> }`. Without
   edges the walker stops after the first node.
@@ -21,9 +23,9 @@ OSP agent; deviating from these keys makes it fail to compile.
 ## Rules
 - Output MUST be valid YAML. Put code/snippets in `body: |` block scalars or quoted strings.
   Never emit a raw `::py::` block or an unescaped `:` in an unquoted value.
-- Prefer an embodied `command:`/`body:` code tool for deterministic steps; use a GEN-RAW
+- Prefer an embodied `command:`/`body:` code tool for deterministic steps; use a GENERATE
   `write_code` + ACT `execute` pair for open-ended "produce an artifact" tasks.
-- Bind any REGISTERED TOOLS (MCP) by their EXACT name as SENSE/ACT nodes — do not re-script them.
+- Bind any REGISTERED TOOLS (MCP) by their EXACT name as OBSERVE/ACT nodes — do not re-script them.
 
 ## COMPLETE WORKING EXAMPLE — mimic this shape exactly
 
@@ -47,19 +49,16 @@ walker:
     artifact: { type: str,  produced_by: execute }
 nodes:
   - id: activate
-    type: ROUTE
-    owner: model
+    type: BRANCH
     doc: Activation gate.
   - id: extract_args
-    type: GEN-FILL
-    owner: model
+    type: EXTRACT
     output: Args
     reads: [task]
     writes: [args]
     doc: Parse the output file path from the task.
   - id: write_code
-    type: GEN-RAW
-    owner: model
+    type: GENERATE
     output: "python source"
     reads: [task, args]
     writes: [script]
@@ -67,13 +66,11 @@ nodes:
   - id: execute
     type: ACT
     surface: artifact
-    owner: code
     reads: [script]
     writes: [artifact]
     doc: Run the generated script to produce the artifact at args.out.
   - id: finish
-    type: TERMINAL
-    owner: code
+    type: RETURN
     reads: [artifact]
     doc: Report the artifact path.
 edges:

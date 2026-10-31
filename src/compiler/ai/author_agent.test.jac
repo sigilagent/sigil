@@ -96,13 +96,21 @@ test "the parsed views drive the REAL gates, not a private copy of them" {
     assert "r9" not in sc.missing;    # DISCRETIONARY rules are not audited
 }
 
-test "every node type the compiler accepts round-trips — no silent GEN_RAW" {
-    # An unmapped type defaults to GEN_RAW, which would read a CODE node (gated by
-    # construction) back as a model slot. Cover the whole alphabet.
+test "every AIS opcode round-trips — no silent GENERATE" {
+    # An unmapped type defaults to GENERATE, which would read a COMPUTE node
+    # (gated by construction) back as a model call. Cover the whole alphabet.
+    for t in NodeType {
+        extra = "    procedure: p\n" if t == NodeType.CALL else "";
+        (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + t.name + "\n" + extra);
+        assert wf.nodes[0].ntype == t;
+    }
+}
+
+test "every legacy mnemonic reads as its AIS opcode" {
     for (name, want) in [("GEN-RAW", NodeType.GENERATE), ("GEN-ENUM", NodeType.SELECT),
                          ("GEN-FILL", NodeType.EXTRACT), ("GEN-EDIT", NodeType.MUTATE),
                          ("ROUTE", NodeType.BRANCH), ("LOOP", NodeType.LOOP),
-                         ("SPAWN", NodeType.PARALLEL), ("CALL", NodeType.CALL),
+                         ("SPAWN", NodeType.PARALLEL), ("CALL", NodeType.DELEGATE),
                          ("SENSE", NodeType.OBSERVE), ("ACT", NodeType.ACT),
                          ("CODE", NodeType.COMPUTE), ("TERMINAL", NodeType.RETURN)] {
         (wf, vb) = _views_from_ir("nodes:\n  - id: x\n    type: " + name + "\n");

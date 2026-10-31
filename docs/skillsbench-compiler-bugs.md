@@ -1,5 +1,12 @@
 # Compiler bugs found by running compiled artifacts on SkillsBench
 
+> **Names.** This log was written before Sigil adopted the SIGIL paper's
+> vocabulary. Opcodes and gate ids here are the old ones: GEN-RAW/GEN-EDIT/GEN-FILL/
+> GEN-ENUM are now GENERATE/MUTATE/EXTRACT/SELECT, SENSE is OBSERVE, ROUTE is BRANCH,
+> and G7/G10/G11/G14 are G6_ENV/G1_TRACE/G2_EMBODY/G4_INPUT. See
+> [ais-spec.md Appendix F](reference/ais-spec.md#appendix-f--the-version-01-encoding).
+
+
 A running log of the **compiler** defects behind each observed artifact failure.
 The point of the list is that none of these were visible in the IR, in
 `jac check`, or in any gate: every one of them only appears when the artifact is

@@ -67,3 +67,47 @@ test "explain: a degraded lift reads as runnable with findings, fixes first-clas
     # errors sort above warnings
     assert e.find("G4:") < e.find("G2:");
 }
+
+test "status: an error that survives the repair ladder fails the lift (paper §3.3)" {
+    prev = os.environ.get("SIGIL_GATE_FAIL_ON_ERROR", "");
+    err = [finding("G4", "G4: carry 'rows' is declared 'str' but tool 't' requires 'list'")];
+    os.environ["SIGIL_GATE_FAIL_ON_ERROR"] = "";
+    assert status_of(True, err, [], []) == "failed";
+    assert status_of(True, [finding("G2", "G2: rule 'r1' realized MONOLITHICALLY")], [], []) == "degraded";
+    os.environ["SIGIL_GATE_FAIL_ON_ERROR"] = "0";
+    assert status_of(True, err, [], []) == "degraded";
+    os.environ["SIGIL_GATE_FAIL_ON_ERROR"] = prev;
+}
+
+test "explain: a lift rejected for residual errors says a module lowered" {
+    lr = LiftResult(status="failed", module_src="walker X {}",
+                    findings=[finding("G2_FLOW", "G2_FLOW: constraint 'c' — instruction 'log' reads [x]")]);
+    e = explain(lr);
+    assert "1 error finding(s) remained" in e;
+    assert "SIGIL_GATE_FAIL_ON_ERROR=0" in e;
+    assert "COMPILE oracle rejected" not in e;
+}
+
+test "gate_enabled: a paper check covers its sub-checks; unambiguous legacy ids still work" {
+    keys = ["SIGIL_GATE_G2", "SIGIL_GATE_G12", "SIGIL_GATES_OFF"];
+    saved = {k: os.environ.get(k, "") for k in keys};
+    for k in keys { os.environ[k] = ""; }
+    os.environ["SIGIL_GATE_G2"] = "0";
+    assert not gate_enabled("G2_OVERLOAD");
+    assert not gate_enabled("G2");
+    assert gate_enabled("G4");
+    os.environ["SIGIL_GATE_G2"] = "";
+    os.environ["SIGIL_GATE_G12"] = "off";
+    assert not gate_enabled("G2_OVERLOAD");
+    assert gate_enabled("G2_ARTIFACT");
+    os.environ["SIGIL_GATE_G12"] = "";
+    os.environ["SIGIL_GATES_OFF"] = "G9_REACH";
+    assert not gate_enabled("G4_REACH");
+    assert gate_enabled("G4");
+    for k in keys { os.environ[k] = saved[k]; }
+}
+
+test "auto_gate reads suffixed and COMPILE prefixes" {
+    assert auto_gate("G4_REACH: 2 of 9 nodes unreachable") == "G4_REACH";
+    assert auto_gate("COMPILE: jac check failed") == "COMPILE";
+}
