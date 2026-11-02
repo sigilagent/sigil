@@ -24,6 +24,16 @@ test "the child environment drops the runtime wiring it must not inherit" {
     os.environ.pop("SIGIL_TEST_KEEP", None);
 }
 
+test "the child keeps where the jac install lives" {
+    # jaseci's image sets JAC_CACHE_HOME, and the graph's Postgres cluster lives
+    # under it: a child that lost it opened a second, empty cluster.
+    was = os.environ.get("JAC_CACHE_HOME");
+    os.environ["JAC_CACHE_HOME"] = "/opt/jac/state";
+    env = child_env();
+    assert str(env.get("JAC_CACHE_HOME")) == "/opt/jac/state", "the install layout must reach the child";
+    if was is None { os.environ.pop("JAC_CACHE_HOME", None); } else { os.environ["JAC_CACHE_HOME"] = was; }
+}
+
 test "the child is marked so a proxy cannot proxy to itself" {
     env = child_env();
     assert str(env.get(CHILD_ENV)) == "1";
