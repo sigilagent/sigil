@@ -1,14 +1,17 @@
 # Writing an AG-IR
 
-A comprehensive, standalone guide to hand-authoring the **AG-IR** — the typed
-intermediate representation Sigil lowers into a runnable object-spatial agent.
+A comprehensive, standalone guide to hand-authoring the **AG-IR** — the Agent
+Intermediate Representation Sigil lowers into a runnable object-spatial agent. An
+AG-IR is a program in the **Agent Instruction Set (AIS)**, as defined by the SIGIL
+paper (arXiv 2607.27309): thirteen opcodes, where the opcode decides whether code
+or a model executes the step.
 Read this whether you are a person writing an `.agir` by hand or a frontier model
 authoring one against the compile oracle.
 
-This guide describes the **fix-forward compiler** (the one shipped on the
-`compiler-fix-forward` line). If a claim here disagrees with the two legacy
-authoring contracts (`contracts/agir-template.md`, `contracts/writing-agir/SKILL.md`),
-those predate the fix-forward rearchitecture and this guide wins.
+This guide follows the SIGIL paper's AIS and the normative specification in
+`docs/reference/ais-spec.md`. If a claim here disagrees with the legacy authoring
+contracts under `contracts/`, those predate the paper alignment and this guide
+wins.
 
 ---
 
@@ -16,8 +19,9 @@ those predate the fix-forward rearchitecture and this guide wins.
 
 You are the front-end of a compiler. Your output is one YAML document — an
 `.agir` — that the mechanical back-end lowers, node for node, into a runnable Jac
-program. No model reads your AG-IR at run time; a model only fills the specific
-`GEN-*` slots you place. Everything else is code.
+program. No model reads your AG-IR at run time; a model only fills the semantic
+instructions (`SELECT` / `EXTRACT` / `MUTATE` / `GENERATE`) and the `DELEGATE`d
+subtasks you place. Everything else is code.
 
 The point of the AG-IR is that **it removes the model's discretion**. In a
 prompt-based harness a skill is advice the model may follow. Here every mandatory
@@ -35,16 +39,16 @@ IR — as a tool body, a knowledge item, or a node's `doc`.
 
 ## 2. The mental model: fix-forward, not fail-loud
 
-This is the one thing to internalize, and the one thing the legacy contracts get
-wrong. The gates **diagnose**; they do not veto. The compiler's job is not to
-reject your draft — it is to lower the most faithful runnable agent it can, and
-tell you exactly where it had to compromise.
+This is the one thing to internalize. The gates **diagnose first**: the compiler's
+job is to repair what it can, lower the most faithful runnable agent it can, and
+tell you exactly where it had to compromise. What it will not do is ship an agent
+whose *errors* survived the repair ladder.
 
 Concretely, when you hand the compiler an AG-IR it runs a ladder:
 
 1. **Mechanical autofix** — pure code, re-checked through the compile oracle. It
-   mints a missing lane, inlines a sibling file a node reads, re-owns a dead code
-   node to a model slot, adopts an agreeing carry type. A fix that fails to
+   mints a missing lane, inlines a sibling file a node reads, turns a dead
+   `COMPUTE` into a `GENERATE`, adopts an agreeing carry type. A fix that fails to
    compile is dropped; the original is kept.
 2. **Scoped repair** — a bounded model pass over just the failing view.
 3. **Faithful degradation** — when it can't fix, it takes the weaker-but-real
@@ -52,16 +56,18 @@ Concretely, when you hand the compiler an AG-IR it runs a ladder:
 4. **A typed report** — everything left over rides `findings`, each with a
    severity and the exact action to take.
 
-A lift **fails** only when no runnable module exists at all — the compile oracle
-still rejects the IR after the whole ladder. Everything runnable persists, with
-its findings attached. The four outcomes:
+A lift **fails** when no runnable module exists — the compile oracle still
+rejects the IR after the whole ladder — or when an `error` finding remains after
+it: an error is a runtime crash or a violated mandate, and an agent that carries
+one is not shipped. Everything else persists, with its findings attached. The
+four outcomes:
 
 | status | meaning |
 |---|---|
 | `clean` | runnable; nothing found, nothing needed |
 | `fixed` | runnable and clean, but only because autofixes/repairs landed |
-| `degraded` | runnable, with residual findings riding the report |
-| `failed` | no runnable module — the only real failure |
+| `degraded` | runnable, with residual *warnings* riding the report |
+| `failed` | no runnable module, or an error the ladder could not repair |
 
 What this means for you as an author: **you do not have to be perfect, you have
 to be lowerable — and then faithful.** Aim for `clean`. Accept `fixed`. Read
@@ -80,7 +86,7 @@ the whole shape, in the order it reads best:
 name: <slug>                # frontmatter — becomes the skill signature
 description: <trigger>      # "use when …" — becomes the MCP tool description
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}                   # named object/enum types (usually empty)
@@ -94,7 +100,7 @@ knowledge:                  # embodied reference material (optional)
 tools:                      # deterministic code tools (optional)
   <name>:
     sig: "(a, b) -> t"
-    surface: SENSE | ACT·artifact
+    surface: OBSERVE | ACT·artifact
     serves: [<node id>, ...]   # or bind 1:1 by naming the tool == node id
     doc: "..."
     body: |                 # python, OR:
@@ -111,17 +117,20 @@ walker:
       type: <t>
       produced_by: <node id>
 
-nodes:                      # the pipeline steps, in no required order here
+nodes:                      # the AIS instructions; the first one is the entry
   - id: <id>
-    type: GEN-RAW | GEN-ENUM | GEN-FILL | GEN-EDIT | SENSE | ACT | CODE | ROUTE | TERMINAL
-    owner: model | code
+    type: SELECT | EXTRACT | MUTATE | GENERATE | DELEGATE | COMPUTE | OBSERVE | ACT | BRANCH | LOOP | PARALLEL | CALL | RETURN
     reads:  [<lane>, ...]
     writes: [<lane>, ...]
     doc: "..."
-    # op/tool/surface/traces_to as needed
+    # op/tool/surface/autonomy/procedure/traces_to as needed
 
 edges:                      # REQUIRED — the visit order
   - {from: <id>, to: <id>, modality: mandatory}
+
+constraints:                # prohibitions and orderings the program must satisfy (optional)
+  - {id: <id>, kind: forbid_flow, from: [<lane>], to: [<node id>], traces_to: [<rule>]}
+  - {id: <id>, kind: require_before, before: <node id>, after: <node id>}
 ```
 
 Two keys are load-bearing and easy to forget:
@@ -137,52 +146,60 @@ The rest of this guide is about filling `nodes`, `tools`, `knowledge`, and
 
 ---
 
-## 4. The node alphabet
+## 4. The instruction set
 
-Every node has a `type` and an `owner`. The type says what kind of work it is;
-the owner says who does it — `model` (a slot the run fills with a generation) or
-`code` (a function of its inputs, run for free, guaranteed by construction).
+Every node is one AIS instruction, and its `type` — the opcode — decides who
+executes it. There is no separate owner to choose: the semantic opcodes and
+`DELEGATE` run on the model, everything else runs as code. (`owner:` may still
+appear in older documents; the compiler derives it from the opcode.)
 
-**Mind nodes — `owner: model`.** A model slot is *observable* but not guaranteed:
-the model executes it, and you can read the result, but nothing forces it to be
-correct. Use a model node only where the task genuinely needs a guess or open
-generation.
-
-| type | use it for |
-|---|---|
-| `GEN-ENUM` | choose from a fixed set — the tightest Mind form. "Classify the operation." |
-| `GEN-FILL` | fill a typed object from context (schema-validated) |
-| `GEN-EDIT` | mutate existing content, touching only what must change |
-| `GEN-RAW` | free-form generation — reserve for genuinely open-ended output |
-
-**Code nodes — `owner: code`.** A code node is *guaranteed by construction* — it
-is a pure function of its inputs and cannot be skipped or done wrong. Prefer code
-wherever the step is mechanical.
+**Semantic instructions — the model produces the result.** A semantic step is
+*observable* but not guaranteed: the model executes it, and you can read the
+result, but nothing forces it to be correct. Use one only where the skill leaves
+the result to judgment and supplies no implementation.
 
 | type | use it for |
 |---|---|
-| `SENSE` | pull world-state in — read a file, grep, fetch. Idempotent. |
-| `ACT` | push an effect out — write a file, emit the deliverable. Give it `surface: artifact` when it writes the deliverable. |
-| `CODE` | a pure function of inputs — no guess, runs for free |
+| `SELECT` | choose among a specified set of alternatives — the tightest semantic form. "Classify the operation." |
+| `EXTRACT` | derive typed or structured information (a declared object) from semantic input |
+| `MUTATE` | modify an existing value according to instructions, touching only what must change |
+| `GENERATE` | produce new open-ended content — reserve for genuinely open-ended output |
 
-**Flow and boundary nodes.**
+**Delegated — a bounded subtask whose inner steps the skill leaves open.**
 
 | type | use it for |
 |---|---|
-| `ROUTE` | a branch / applicability gate. `owner: code` when it consumes a decision that must be honored exactly (e.g. a human's answer). |
-| `LOOP` | iterate until a condition (advanced — see the primitives contract) |
-| `SPAWN` | fan out concurrent sub-runs (advanced) |
-| `TERMINAL` | the single exit node; serializes the produced carries into the report |
+| `DELEGATE` | an adaptive activity the skill deliberately does not decompose ("explore the data until…", "iterate until the tests pass"). Give it its tools in `autonomy: {tools: [...]}`, its context in `reads`, and its output contract in `writes`/`output`. It runs as one tool-using agent loop. Never shred it into fixed steps. |
 
-The compiler emits `GEN-ENUM` / `GEN-FILL` / `GEN-RAW` / `GEN-EDIT` with a hyphen,
-and `ACT` / `SENSE` / `CODE` / `ROUTE` / `TERMINAL` bare — write them exactly as
-shown. Every AG-IR ends in exactly one `TERMINAL`.
+**Executable instructions — a supplied implementation runs.** An executable step
+is *guaranteed by construction*: it runs code and cannot be skipped or done
+wrong. Prefer one wherever the skill or its resources supply an implementation,
+or the step is mechanical.
 
-**The gated-vs-slotted rule.** For any obligation, prefer `owner: code` — it is a
-gate, guaranteed. A model slot is only observable. Reserve slots for real
-judgment. A step realized by a code node is `gated`; the same step folded into a
-model slot is `slotted` (observable), and several steps folded into *one* slot is
-`monolithic` — the weakest realization, no better than prose. The G5 gate reports
+| type | use it for |
+|---|---|
+| `OBSERVE` | obtain a value from outside — read a file, grep, fetch, *check*. Idempotent. |
+| `ACT` | cause an externally visible effect — write a file, emit the deliverable. Give it `surface: artifact` when it writes the deliverable. |
+| `COMPUTE` | a local computation — a pure function of its inputs, no guess |
+
+**Control and termination.**
+
+| type | use it for |
+|---|---|
+| `BRANCH` | select an explicit successor from guards over a value an earlier instruction produced. A choice that needs judgment is a `SELECT` whose result the `BRANCH` tests. |
+| `LOOP` | repeat an explicitly represented region, with a verdict carry and a cap |
+| `PARALLEL` | run independent regions concurrently (advanced) |
+| `CALL` | invoke another named procedure: `procedure: <tool or compiled skill>` |
+| `RETURN` | the single exit; serializes the produced carries into the report |
+
+Write the opcodes exactly as shown. Every AG-IR ends in exactly one `RETURN`.
+
+**The gated-vs-slotted rule.** For any obligation, prefer an executable or
+control instruction — it is a gate, guaranteed. A semantic step is only
+observable. Reserve semantic steps for real judgment. A step realized by code is
+`gated`; the same step given its own semantic instruction is `slotted`
+(observable), and several steps folded into *one* semantic instruction is
+`monolithic` — the weakest realization, no better than prose. The G2 gate reports
 monolithic realizations so you can split them.
 
 ---
@@ -212,7 +229,7 @@ Two rules make the dataflow legible:
    carry lowers the walker field to `any`, and the compile oracle is then *blind*
    to a type mismatch. If a model slot writes a carry and a code tool then reads
    it, the tool's parameter type is ground truth: type the carry to match. This is
-   the G9 gate, and an untyped model→code carry is an **error** (a runtime crash
+   the G4 gate, and an untyped model→code carry is an **error** (a runtime crash
    with a green compile), not a warning.
 
 Types are `str`, `int`, `float`, `bool`, `list`, `dict`, `list[str]`, `any`, a
@@ -223,7 +240,7 @@ scalar, `str` is safe; for structured data flowing into code, match the tool.
 
 ## 6. Tools — the embodied code
 
-A code node (`SENSE` / `ACT` / `CODE`) lowers *through a tool*. A tool carries the
+An executable node (`OBSERVE` / `ACT` / `COMPUTE`) lowers *through a tool*. A tool carries the
 actual implementation, one of two forms:
 
 - **`body: |`** — a self-contained Python function whose name matches the tool
@@ -244,7 +261,7 @@ tools:
 
 Bind a tool to a node either by listing the node in the tool's `serves:`, or by
 naming the tool exactly the node's `op`/`tool` (as in §11's example). `surface` is
-`SENSE` for reads or `ACT·artifact` for writes.
+`OBSERVE` for reads or `ACT·artifact` for writes.
 
 ### The builtin tool library — bind by name, skip the body
 
@@ -257,13 +274,13 @@ the ladder's own rung and skip them.
 
 | builtin | signature | surface |
 |---|---|---|
-| `read_file` | `(path) -> str` | SENSE |
-| `list_dir` | `(path) -> str` | SENSE |
-| `glob_files` | `(pattern, path) -> str` | SENSE |
-| `grep` | `(pattern, path) -> str` | SENSE |
+| `read_file` | `(path) -> str` | OBSERVE |
+| `list_dir` | `(path) -> str` | OBSERVE |
+| `glob_files` | `(pattern, path) -> str` | OBSERVE |
+| `grep` | `(pattern, path) -> str` | OBSERVE |
 | `write_file` | `(path, content) -> str` | ACT·artifact |
 | `run_command` | `(command) -> str` | ACT·artifact |
-| `http_get` | `(url) -> str` | SENSE |
+| `http_get` | `(url) -> str` | OBSERVE |
 
 ```yaml
 tools:
@@ -272,7 +289,7 @@ tools:
     serves: [emit_report]
 ```
 
-Also bind any **registered MCP tool** by its exact name, as a `SENSE`/`ACT` node —
+Also bind any **registered MCP tool** by its exact name, as an `OBSERVE`/`ACT` node —
 do not re-script it.
 
 ---
@@ -301,11 +318,11 @@ Author to them.
    resolved from the **task string**:
    - an **ACT** (write) path → `_outname(self.task)` — the filename following a
      save/output/write verb ("save as `out.csv`"), else the first bare filename;
-   - a **SENSE** (read) path → `_inname(self.task)` — the filename following a
+   - an **OBSERVE** (read) path → `_inname(self.task)` — the filename following a
      read/open/load/parse/clean/from verb ("clean `data.csv`"), skipping any
      save-claimed name.
 
-   So for the task *"clean data.csv and save as out.csv"*, a SENSE reader binds
+   So for the task *"clean data.csv and save as out.csv"*, an OBSERVE reader binds
    `data.csv` and an ACT writer binds `out.csv`, automatically. You do not declare
    a carry for either filename — the task carries them.
 
@@ -361,57 +378,80 @@ self-contained regardless.
 
 Translate the source's obligations into structure, each in its strongest form:
 
-- **A step** ("summarize the data") → a node. Give it its own node when it is its
-  own obligation; do not fold three steps into one `GEN-RAW` slot (that is the
-  monolithic realization G5 flags).
+- **A step** ("summarize the data") → an instruction. Give it its own instruction
+  when it is its own obligation; do not fold three steps into one `GENERATE`
+  (that is the monolithic realization G2 flags).
 
-- **A prohibition** ("never modify the input", "always lowercase before counting")
-  is *not a step* — it is a property the run must have. Realize it, in order of
-  preference: (1) **in code**, inside the tool body where it cannot be skipped;
-  (2) **by construction**, e.g. a read-only read, and say so in the node's `doc`;
-  (3) **in the `doc`** of every model node it constrains — the compiler folds
-  `doc` into the slot's prompt, which is where a prohibition binds at run time.
+- **A prohibition on what flows where** ("never place PHI in logs", "never send
+  the raw record to the third party") → a `forbid_flow` **constraint**: the
+  carries holding the prohibited content in `from`, the instructions that must
+  never receive it in `to`, and any instruction that removes the content (a
+  redaction step) in `through`. The compiler checks every represented path; a
+  violation is an `error`. Then build the graph so no such path exists.
 
-- **A verification** ("check the output has a header row") → a `SENSE` code node
-  that returns a `bool`, written to a carry. A code gate is guaranteed; a model
-  "please double-check" is not.
+- **An ordering** ("check the BAA before transmitting") → put the check on every
+  path to the later step, and state it as a `require_before` constraint so the
+  compiler verifies it.
 
-- **A human-in-the-loop gate** ("confirm before proceeding") → an `owner: code`
-  `ROUTE` that consumes the human's answer with explicit guards. A model-owned
-  route that reads a human's "not approved" and decides for itself is the G6
-  failure — make it `owner: code`.
+- **Any other prohibition** ("never modify the input", "always lowercase before
+  counting") is *not a step* — it is a property the run must have. Realize it, in
+  order of preference: (1) **in code**, inside the tool body where it cannot be
+  skipped; (2) **by construction**, e.g. a read-only read, and say so in the
+  node's `doc`; (3) **in the `doc`** of every semantic instruction it constrains —
+  the compiler folds `doc` into the model call's prompt, which is where a
+  prohibition binds at run time.
 
-**The hollow-node trap.** An `owner: code` `CODE`/`SENSE`/`ACT` node with *no tool
-serving it and no inline body* has nothing to lower to. The mechanical half writes
-a marker comment: the walker visits the station and does nothing. The fix-forward
-compiler catches this and **re-owns the node to a `GEN-RAW` model slot** so the
-step at least executes — but that is a *degradation* it records, not a silent
-pass. Avoid it: bind a tool (a body, a `command`, or a builtin name) to every code
-node, or make it a model node deliberately.
+- **A verification** ("check the output has a header row") → an `OBSERVE` that
+  returns a `bool`, written to a carry a `BRANCH` tests. A code gate is
+  guaranteed; a model "please double-check" is not.
+
+- **A human-in-the-loop gate** ("confirm before proceeding") → a `BRANCH` whose
+  guards test a carry a `COMPUTE`/`OBSERVE` produced from the human's answer. A
+  `SELECT` that reads a human's "not approved" and decides for itself is the G3
+  failure — the human's words must bind the transition directly.
+
+- **An open-ended activity** ("explore…", "iterate until…") → one `DELEGATE` with
+  its tools. Splitting it into fixed steps destroys the adaptation the skill asked
+  for (G3).
+
+**The hollow-node trap.** A `COMPUTE`/`OBSERVE`/`ACT` with *no tool serving it and
+no inline body* has nothing to lower to. The mechanical half writes a marker
+comment: the walker visits the station and does nothing. The compiler catches
+this and **turns the node into a `GENERATE`** so the step at least executes — but
+that is a *degradation* it records, not a silent pass. Avoid it: bind a tool (a
+body, a `command`, or a builtin name) to every executable node, or make it a
+semantic instruction deliberately.
 
 ---
 
-## 10. The gate battery — feedback, not veto
+## 10. The gate battery — the paper's validation checks
 
-Each gate answers one question about your draft. Read them as a checklist, not a
-tribunal. Only G4 can make a lift `failed`; the rest attach findings.
+Each gate answers one question about your draft, filed under the check of the
+SIGIL paper it implements (G1 source grounding, G2 requirement realization, G3
+execution preservation, G4 type and data flow, G5 reference resolution and
+placement, G6 binding and control-flow validity). The compile oracle runs after
+them.
 
 | gate | question | severity of a residual finding |
 |---|---|---|
-| **G1** standalone | is every tool/knowledge embodied (not a pointer)? | warn |
-| **G3** artifact boundary | does every mandatory output actually get written by an ACT? | error |
-| **G4** compile oracle | does the IR lower and type-check with zero errors? | **fatal** (the only one) |
-| **G5** struct-cov | is each mandatory rule realized by a node (not monolithic/missing)? | warn |
-| **G6** HIL | are human-feedback routes `owner: code` with guards? | error |
-| **G7** env | do tool imports/binaries resolve in this runtime? | warn (advisory; `SIGIL_G7_HARD=1` to harden) |
-| **G8** concurrency | is any claimed parallelism real? | error (false parallelism); opportunities are advisory |
-| **G9** type unification | do carry types match the tools that consume them? — and is every node reachable from the entry? | error |
-| **G12** determinization | does any one `owner: model` node fold more than six mandates into a single slot? | error |
-| **G13** slot-prompt bloat | does a slot's prompt carry the surrounding document rather than its own mandate? | warn |
+| **G1_TRACE** | does any instruction claim far more rules than it can realize? | warn |
+| **G2** | is each mandatory rule realized by its own instruction (not monolithic/missing)? | warn |
+| **G2_ARTIFACT** | does every mandatory output actually get written by an ACT? | error |
+| **G2_OVERLOAD** | does any one semantic instruction fold more than six mandates into one call? | error |
+| **G2_FLOW** / **G2_ORDER** | do the `constraints` hold on every represented path? | error |
+| **G3_HIL** | does every human-feedback BRANCH test a code-produced carry with guards? | error |
+| **G4** | do carry types match the tools that consume them? — and is every node reachable from the entry? | error |
+| **G4_INPUT** | is every external input a declared carry, not mined from the task sentence? | error |
+| **G5** | is every tool/knowledge item embodied (not a pointer)? | warn |
+| **G5_BLOAT** | does a model call's prompt carry the surrounding document rather than its own mandate? | warn |
+| **G6_ENV** | do tool imports/binaries resolve in this runtime? | warn |
+| **G6_PAR** | is any claimed parallelism real? | error (false parallelism); opportunities are advisory |
+| **COMPILE** | does the IR lower and type-check with zero errors? | **fatal** |
 
 `error` findings are runtime crashes or violated mandates riding a green compile —
-fix them. `warn` findings are faithfulness/quality notes — worth addressing, but
-the agent runs. `fatal` (G4) means there is no agent.
+the lift fails if one survives the repair ladder, so fix them. `warn` findings are
+faithfulness/quality notes — worth addressing, but the agent runs. `fatal`
+(COMPILE) means there is no agent.
 
 ---
 
@@ -434,11 +474,12 @@ uses. It exits nonzero while the IR is broken and prints the exact diagnostic
    re-modalize any step, tool, or rule while fixing a compile error — this IR is a
    compiled skill, and changing its meaning is worse than failing to compile.
 4. **Repeat** until it prints `gate: ok`.
-5. Then read the **findings** (G1/G3/G5/G6/G7/G8/G9). Resolve the `error`s; decide
-   on the `warn`s. Aim to land on `clean` or `fixed`, not `degraded`.
+5. Then read the **findings** (G1–G6). Resolve every `error` — one that
+   survives fails the lift; decide on the `warn`s. Aim to land on `clean` or
+   `fixed`, not `degraded`.
 
-Here is a complete, gate-clean example — a plan writer that drafts with two model
-slots, then assembles / verifies / saves with code tools. Note that `save` reads
+Here is a complete, gate-clean example — a plan writer that drafts with two
+`GENERATE` instructions, then assembles / verifies / saves with code tools. Note that `save` reads
 only `[plan_md]`, so its `path` parameter falls to `_outname(self.task)` (§7):
 
 ```yaml
@@ -446,7 +487,7 @@ only `[plan_md]`, so its `path` parameter falls to `_outname(self.task)` (§7):
 name: writing_plans
 description: Create a detailed implementation plan with bite-sized TDD tasks.
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
@@ -469,7 +510,7 @@ tools:
           return (header_md or "").rstrip() + "\n\n" + (tasks_md or "").strip() + "\n"
   verify_has_tasks:
     sig: "(plan_md) -> bool"
-    surface: SENSE
+    surface: OBSERVE
     doc: "True when the plan actually contains task sections with code."
     body: |
       def verify_has_tasks(plan_md: str) -> bool:
@@ -502,40 +543,35 @@ walker:
 
 nodes:
   - id: draft_header
-    type: GEN-RAW
-    owner: model
+    type: GENERATE
     reads: [task]
     writes: [header_md]
     doc: "Write the plan's header: a real feature name, a one-sentence goal, a 2-3 sentence architecture, and the tech stack. Output only the header markdown."
   - id: write_tasks
-    type: GEN-RAW
-    owner: model
+    type: GENERATE
     reads: [task, header_md]
     writes: [tasks_md]
     doc: "Write the bite-sized, test-driven task sections. Follow the task format exactly. Output only the task markdown, no header."
   - id: assemble
     type: ACT
-    owner: code
     op: assemble_plan
     tool: assemble_plan
     reads: [header_md, tasks_md]
     writes: [plan_md]
   - id: verify
-    type: SENSE
-    owner: code
+    type: OBSERVE
     op: verify_has_tasks
     tool: verify_has_tasks
     reads: [plan_md]
     writes: [plan_ok]
   - id: save
     type: ACT
-    owner: code
     op: save_plan
     tool: save_plan
     reads: [plan_md]
     writes: [plan_file]
   - id: done
-    type: TERMINAL
+    type: RETURN
 
 edges:
   - {from: draft_header, to: write_tasks, modality: mandatory}
@@ -553,25 +589,27 @@ edges:
 |---|---|---|
 | Walker stops after the first node | no `edges` | add the edge chain in visit order |
 | `lowered module has no nodes` | empty/unparseable YAML, or an unquoted `:` in a value | quote the value or use a `body: |` block scalar |
-| A code node "does nothing" (marker comment) | `owner: code` node with no tool/body (**hollow**) | bind a tool (body/command/builtin name) or make it a model node |
+| An executable node "does nothing" (marker comment) | `COMPUTE`/`OBSERVE`/`ACT` with no tool/body (**hollow**) | bind a tool (body/command/builtin name) or make it a semantic instruction |
 | 0-byte file named after its own content | content carry misbound to a `path` param | name content and path carries by role (§7); don't pass one positional carry |
-| First node crashes: `'path' must be a non-empty string` | a SENSE read path with no source | let it fall to `_inname(self.task)` (name the file in the task), or add an input carry |
+| First node crashes: `'path' must be a non-empty string` | an OBSERVE read path with no source | let it fall to `_inname(self.task)` (name the file in the task), or add an input carry |
 | `node reads 'X' which is neither a carry nor knowledge` | dangling read | declare the carry (or knowledge key), or let §5's autofix mint it and accept the seed |
-| G9 error: carry crosses model→code untyped | a `GEN-*` writes a carry a tool reads, untyped | set the carry `type` to the tool parameter's type |
-| G5: rule realized MONOLITHICALLY | several obligations folded into one slot | split into one node per obligation, or add a code gate |
-| G1: knowledge is a prose-pointer | `body: "see FORMS.md"` | embody the referenced content verbatim |
-| G3: IO mandate has no embodied write | a deliverable authored into a carry, never written | add an ACT node served by a write tool (or a builtin `write_file`) |
+| G4 error: carry crosses model→code untyped | a semantic instruction writes a carry a tool reads, untyped | set the carry `type` to the tool parameter's type |
+| G2: rule realized MONOLITHICALLY | several obligations folded into one semantic instruction | split into one instruction per obligation, or add a code gate |
+| G5: knowledge is a prose-pointer | `body: "see FORMS.md"` | embody the referenced content verbatim |
+| G2_ARTIFACT: IO mandate has no embodied write | a deliverable authored into a carry, never written | add an ACT served by a write tool (or a builtin `write_file`) |
+| G2_FLOW: prohibited flow reachable | a constrained value reaches a forbidden sink | remove the read, or route it through a step listed in `through` |
 
 ---
 
 ## 13. Where to go next
 
 - **`docs/reference/agir-cookbook/`** — a small library of gate-clean golden
-  AG-IRs, one per archetype (a code pipeline, a model-judgment pipeline, a
-  SENSE→transform→ACT read/writer, an HIL gate, a tool-belt unit, a
+  AG-IRs, one per archetype (a code pipeline, a model-judgment pipeline, an
+  OBSERVE→transform→ACT read/writer, an HIL gate, a tool-belt unit, a
   knowledge-heavy skill). Each is a worked example you can copy and adapt, and
   each is registrable directly: `sigil register-skill <file>.agir agir`.
-- **`contracts/agir-primitives.md`** — the full node-type alphabet, including the
-  advanced flow primitives (`LOOP`, `SPAWN`, `CALL`) this guide only sketches.
+- **`docs/reference/ais-spec.md`** — the normative AIS specification, including
+  the advanced control instructions (`LOOP`, `PARALLEL`, `CALL`) this guide only
+  sketches.
 - **`examples/writing-plans/`** — the hand-authored AG-IR this guide's §11 example
   is drawn from, with its compiled `.jac` and a run trace.

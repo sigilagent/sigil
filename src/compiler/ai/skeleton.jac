@@ -108,7 +108,7 @@ def _run_tool(art):
 def _read_tool(art):
     """A code tool that genuinely reads a bundle reference/template."""
     return {
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "sig": "() -> str",
         "body": "with open(" + repr(art) + ") as f:\n    return f.read()\n",
         "doc": "Read " + art + " (bundle file named by the skill) verbatim.",
@@ -137,7 +137,7 @@ def emit_yaml(stubs, name, description, sub_resources):
         del pending_constraints[:]
 
     # NOTE: no untraced "activate" preamble node. check_soundness treats any
-    # non-TERMINAL node with an empty traces_to as ADDED behavior — a skeleton
+    # non-RETURN node with an empty traces_to as ADDED behavior — a skeleton
     # must not manufacture its own soundness violation.
     for s in stubs:
         rid, shape = s["rid"], s["shape"]
@@ -168,14 +168,14 @@ def emit_yaml(stubs, name, description, sub_resources):
         if shape == "LIVE_TOOL":
             tname = _safe("consult_" + rid, "t")
             tools[tname] = {
-                "surface": "SENSE",
+                "surface": "OBSERVE",
                 "sig": "(query) -> str",
                 "doc": "Consult the live source at run time (do NOT paraphrase from memory): "
                        + _short(s["quote"], 160),
                 "traces_to": [rid],
             }
             tools[tname]["doc"] = _todo(tools[tname]["doc"], "bind the live source call")
-            node = {"id": nid, "type": "SENSE", "owner": "code", "tool": tname,
+            node = {"id": nid, "type": "OBSERVE", "owner": "code", "tool": tname,
                     "doc": doc, "traces_to": [rid], "writes": [_safe(rid, "s") + "_out"]}
             carries[_safe(rid, "s") + "_out"] = {"type": "str", "produced_by": nid,
                                                  "doc": "live source result"}
@@ -197,7 +197,7 @@ def emit_yaml(stubs, name, description, sub_resources):
                                                   "doc": "written deliverable path"}
 
         elif shape == "CODE_GATE":
-            node = {"id": nid, "type": "ROUTE", "owner": "code",
+            node = {"id": nid, "type": "BRANCH", "owner": "code",
                     "doc": _todo(doc, "human gate: ask, then branch"), "traces_to": [rid]}
 
         else:  # NODE (a procedural STEP)
@@ -218,13 +218,13 @@ def emit_yaml(stubs, name, description, sub_resources):
                 tools.setdefault(tname, dict(_read_tool(art), traces_to=[]))
                 if rid not in tools[tname]["traces_to"]:
                     tools[tname]["traces_to"].append(rid)
-                node = {"id": nid, "type": "SENSE", "owner": "code", "tool": tname,
+                node = {"id": nid, "type": "OBSERVE", "owner": "code", "tool": tname,
                         "doc": doc, "traces_to": [rid],
                         "writes": [_safe(rid, "d") + "_text"]}
                 carries[_safe(rid, "d") + "_text"] = {"type": "str", "produced_by": nid,
                                                       "doc": "bundle file contents"}
             else:
-                node = {"id": nid, "type": "GEN-RAW", "owner": "model",
+                node = {"id": nid, "type": "GENERATE", "owner": "model",
                         "doc": _todo(doc, "write the slot prompt"), "traces_to": [rid],
                         "reads": ["task"], "writes": [_safe(rid, "g") + "_out"]}
                 carries[_safe(rid, "g") + "_out"] = {"type": "str", "produced_by": nid,
@@ -240,7 +240,7 @@ def emit_yaml(stubs, name, description, sub_resources):
                 edges.append({"from": last_node["id"], "to": node["id"]})
             last_node = node
 
-    terminal = {"id": "done", "type": "TERMINAL", "owner": "code",
+    terminal = {"id": "done", "type": "RETURN", "owner": "code",
                 "doc": "Report the deliverables.", "traces_to": []}
     _attach_constraints(terminal)          # any trailing prohibitions land here
     nodes.append(terminal)

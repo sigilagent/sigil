@@ -401,8 +401,8 @@ It is opt-in, and the reason is worth being precise about. What it keeps:
 
 - the spec loop, unchanged — every rule must quote your skill verbatim, so a
   hallucinated obligation is still dropped mechanically before authoring starts;
-- the gate battery — G1 (embodiment), G4 (compile oracle, with the same bounded
-  repair loop), G5 (every mandatory rule realized by a node).
+- the gate battery — G5 (embodiment), COMPILE (compile oracle, with the same bounded
+  repair loop), G2 (every mandatory rule realized by a node).
 
 What it drops: LIFT's staged authoring — the workflow spine, the annotator flows,
 the assemble step, the view repair that routes each issue back to the flow that
@@ -424,7 +424,7 @@ The session gets a workspace with four files and nothing else on its path:
 | `agir-template.md` | the compiler-exact YAML shape (plus the full reference files) |
 
 It writes `agent.ir` and runs `sigil gate agent.ir <name>` after every edit. Each
-node carries `traces_to: [r3, r7]` naming the rules it realizes, which is what G5
+node carries `traces_to: [r3, r7]` naming the rules it realizes, which is what G2
 audits, so "it compiles" is never mistaken for "it covers the skill".
 
 `SIGIL_CLAUDE_AUTHOR_TURNS` (default `80`) bounds the session.
@@ -437,7 +437,7 @@ CLI recent enough to support `--agents` / `--agent`.
 ## Optional: when a compile fails
 
 The compiler's repair loop is a bounded byLLM slot: it sees `(ir, diagnostic)`
-and proposes a fix, and the G4 compile oracle re-gates every attempt. When those
+and proposes a fix, and the COMPILE compile oracle re-gates every attempt. When those
 attempts are spent, `--claude` (or `SIGIL_CLAUDE_REPAIR=1`) escalates instead of
 giving up.
 
@@ -446,7 +446,7 @@ the failing `agent.ir` and the AG-IR authoring contract. It gets one verificatio
 command:
 
 ```bash
-sigil gate agent.ir <name>      # G4, exit nonzero while the IR is broken
+sigil gate agent.ir <name>      # COMPILE, exit nonzero while the IR is broken
 ```
 
 so it can edit, re-run the oracle, and iterate — the loop a single slot call

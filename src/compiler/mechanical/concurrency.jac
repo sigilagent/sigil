@@ -8,7 +8,7 @@ produced) and then extracts DLP / ILP / TLP. Up to 3.2x end-to-end.
 The AG-IR is a strictly better substrate for the same pass: the IO view
 already TYPES the dataflow (`reads` / `writes` / `produced_by` carries), so
 the DAG SkillRT must ask a model to guess is simply *read off the IR* — no
-LLM, no recovery error. What sigil lacked was the pass itself: the SPAWN
+LLM, no recovery error. What sigil lacked was the pass itself: the PARALLEL
 decision was model-judged (`spawn_note`) and validated only for being
 *stated*, never for being *right*.
 
@@ -16,21 +16,23 @@ extract_concurrency(ir) -> {
   "stages":        [[node ids]]   ILP: consecutive chain nodes with no mutual
                                   data dependency, packed into parallel stages
   "opportunities": [str]          stages of >=2 (missed parallelism) — advisory
-  "issues":        [str]          FALSE parallelism: a SPAWN whose branches
-                                  share moving data (hard G8 gate issues —
+  "issues":        [str]          FALSE parallelism: a PARALLEL whose branches
+                                  share moving data (hard G6_PAR gate issues —
                                   read-shared/write-isolated is the law, A.6)
   "dlp":           [str]          list-typed carry feeding one tool-backed
                                   code node: an item-parallel map candidate
 }
 
 Deterministic, judgment-free — it belongs to the MECHANICAL half. The ai gate
-(G8) wraps it; lowering stages to `flow`/`wait` is the natural next step (the
-generated modules' SPAWN lowering already uses that mechanism).
+(G6_PAR) wraps it; lowering stages to `flow`/`wait` is the natural next step (the
+generated modules' PARALLEL lowering already uses that mechanism).
 """
 
-# control-flow node types that end a linear chain (a ROUTE fans out to
-# EXCLUSIVE alternatives — never a parallel stage; SPAWN is already parallel)
-glob _BARRIERS: list[any] = ["ROUTE", "SPAWN", "LOOP", "TERMINAL"];
+import from ...sigil_ais { canonical_opcode }
+
+# control-flow node types that end a linear chain (a BRANCH fans out to
+# EXCLUSIVE alternatives — never a parallel stage; PARALLEL is already parallel)
+glob _BARRIERS: list[any] = ["BRANCH", "PARALLEL", "LOOP", "RETURN"];
 
 def _lst(v: any) -> list[any] {
     return list(v) if isinstance(v, list) else [];
@@ -53,7 +55,7 @@ def _edges(ir: any) -> list[any] {
 }
 
 def _ntype(n: any) -> str {
-    return str(_dct(n).get("type", "")).replace("_", "-").upper();
+    return canonical_opcode(_dct(n).get("type", ""));
 }
 
 def _is_hil(n: any) -> bool {
@@ -210,7 +212,7 @@ def extract_concurrency(ir: any) -> dict[str, any] {
             if len(stg) < 2 { continue; }
             acts = [x for x in stg if _ntype(by_id.get(x, {})) == "ACT"];
             caution = " (>=2 ACT nodes — verify write isolation before lowering)" if len(acts) >= 2 else "";
-            note: str = "G8: nodes [" + ", ".join(stg) + "] are sequential in the CFG but share no data dependency — parallelizable stage (flow/wait)";
+            note: str = "G6_PAR: nodes [" + ", ".join(stg) + "] are sequential in the CFG but share no data dependency — parallelizable stage (flow/wait)";
             if spawn_state == "none" {
                 why = (" spawn_note: '" + spawn_reason[:80] + "'") if spawn_reason else " (concurrency declared none)";
                 note = note + ";" + why;
@@ -226,7 +228,7 @@ def extract_concurrency(ir: any) -> dict[str, any] {
         succ[f] = _lst(succ.get(f)) + [str(_dct(e).get("to", ""))];
     }
     for n in nodes {
-        if _ntype(n) != "SPAWN" { continue; }
+        if _ntype(n) != "PARALLEL" { continue; }
         sid = str(_dct(n).get("id", ""));
         branches = _slist(succ.get(sid));
         if len(branches) < 2 { continue; }
@@ -252,7 +254,7 @@ def extract_concurrency(ir: any) -> dict[str, any] {
                     for bn in b_nodes {
                         for rd in _slist(_dct(by_id.get(str(bn))).get("reads")) {
                             if rd in aw {
-                                issues.append("G8: SPAWN '" + sid + "' branches share moving data — '" + str(rd)
+                                issues.append("G6_PAR: PARALLEL '" + sid + "' branches share moving data — '" + str(rd)
                                     + "' is written in branch '" + str(branches[i]) + "' (node '" + str(an)
                                     + "') and read in branch '" + str(branches[j]) + "' (node '" + str(bn)
                                     + "'). False parallelism: hoist the carry to the orchestrator or serialize the branches (A.6 read-shared/write-isolated).");
@@ -280,7 +282,7 @@ def extract_concurrency(ir: any) -> dict[str, any] {
             if cname not in _slist(_dct(n2).get("reads")) { continue; }
             if str(_dct(n2).get("owner", "")).lower() != "code" { continue; }
             if nid2 not in served { continue; }
-            dlp.append("G8-DLP: carry '" + cname + "' (list) feeds tool-backed code node '" + nid2
+            dlp.append("G6_PAR-DLP: carry '" + cname + "' (list) feeds tool-backed code node '" + nid2
                 + "' — item-parallel map candidate (language-level parallelism, no harness support needed)");
         }
     }

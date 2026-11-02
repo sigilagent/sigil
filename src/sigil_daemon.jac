@@ -46,6 +46,8 @@ import from .sigil_transports { supports_polling }
 import from .sigil_cron { now_ms, fmt_when, human_secs }
 import from .hooks { fire_hooks }
 
+# How long `daemon start` waits for the child to write its pidfile.
+glob DAEMON_READY_S: float = 90.0;
 glob DAEMON_PID: str = "daemon";        # pidfile name under $SIGIL_HOME/run
 glob SERVICE_LABEL: str = "com.sigilagent.sigil";
 glob _STOP: dict[str, any] = {"now": False};
@@ -414,9 +416,13 @@ def daemon_start(interval_s: int = 30) -> dict[str, any] {
         return {"ok": False, "error": "could not spawn: " + str(ex)[:200]};
     }
     # The child writes the pidfile; confirm it actually came up rather than
-    # reporting success at a process that died on import.
+    # reporting success at a process that died on import. A crash returns early
+    # through proc.poll() below, so a generous window costs nothing on failure;
+    # it only stops a slow-but-healthy start from being reported as dead. A cold
+    # CI runner spends ~35s restoring the compiled app before the daemon's first
+    # line, which a 30s window missed by a fraction of a second.
     waited = 0.0;
-    while waited < 30.0 {
+    while waited < DAEMON_READY_S {
         if daemon_running() {
             return {"ok": True, "pid": read_pid(DAEMON_PID), "log": log_path(),
                     "graph": graph_path(), "interval_s": interval_s};
@@ -428,7 +434,7 @@ def daemon_start(interval_s: int = 30) -> dict[str, any] {
         time.sleep(0.5);
         waited += 0.5;
     }
-    return {"ok": False, "error": "daemon did not report ready in 30s — see " + log_path()};
+    return {"ok": False, "error": "daemon did not report ready in " + str(int(DAEMON_READY_S)) + "s — see " + log_path()};
 }
 
 def daemon_stop(timeout_s: int = 30) -> dict[str, any] {

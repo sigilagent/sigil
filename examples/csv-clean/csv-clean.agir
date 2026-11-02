@@ -2,7 +2,7 @@
 name: clean_csv
 description: Compiled by the sigil AI compiler (LIFT front-end).
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
@@ -89,8 +89,7 @@ walker:
       produced_by: verification_gate
 nodes:
 - id: read_input_csv
-  type: SENSE
-  owner: code
+  type: OBSERVE
   doc: Read the input CSV file named in the task.
   reads:
   - task_input_path
@@ -104,8 +103,7 @@ nodes:
   - r1
   - r2
 - id: decide_column_meanings
-  type: GEN-FILL
-  owner: model
+  type: EXTRACT
   doc: 'Decide each column''s meaning and produce clean snake_case header names (one
     per input, original order). NEVER violate: No leading, trailing or doubled underscores.;
     Do not drop, add, merge or reorder columns.; do not just print it.'
@@ -117,8 +115,7 @@ nodes:
   - r3
   - r20
 - id: apply_header_rename
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Apply the proposed header names to the data without changing column order/count.
   reads:
   - input_rows
@@ -130,8 +127,7 @@ nodes:
   traces_to:
   - r3
 - id: drop_empty_rows
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Drop rows where every field is empty.
   reads:
   - renamed_rows
@@ -143,7 +139,6 @@ nodes:
   - r5
 - id: write_cleaned_csv
   type: ACT
-  owner: code
   doc: Write cleaned rows to cleaned.csv with header row first.
   reads:
   - clean_rows
@@ -156,8 +151,7 @@ nodes:
   - r6
   - r13
 - id: re_read_output_csv
-  type: SENSE
-  owner: code
+  type: OBSERVE
   doc: Re-read cleaned.csv to obtain written headers and rows.
   reads:
   - cleaned_csv_path
@@ -169,14 +163,12 @@ nodes:
   traces_to:
   - r15
 - id: spawn_verifications
-  type: SPAWN
-  owner: code
+  type: PARALLEL
   doc: Fan out independent verification checks.
   traces_to:
   - r7
 - id: check_parses_with_header
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm cleaned.csv parses as valid CSV with a header row.
   reads:
   - written_headers
@@ -186,8 +178,7 @@ nodes:
   traces_to:
   - r15
 - id: verify_header_regex
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm every header matches ^[a-z][a-z0-9]*(_[a-z0-9]+)*$.
   reads:
   - written_headers
@@ -197,8 +188,7 @@ nodes:
   - r8
   - r16
 - id: verify_header_uniqueness
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm header names are unique.
   reads:
   - written_headers
@@ -207,8 +197,7 @@ nodes:
   traces_to:
   - r12
 - id: verify_column_count_equal
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm output column count equals input column count.
   reads:
   - input_col_count
@@ -218,8 +207,7 @@ nodes:
   traces_to:
   - r17
 - id: verify_row_count_equals_input_minus_empty
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm output row count equals input row count minus removed empty rows.
   reads:
   - input_row_count
@@ -230,8 +218,7 @@ nodes:
   traces_to:
   - r18
 - id: verify_headers_match_proposed_order
-  type: CODE
-  owner: code
+  type: COMPUTE
   doc: Confirm written headers exactly equal the proposed headers (one per input,
     original order).
   reads:
@@ -242,8 +229,7 @@ nodes:
   traces_to:
   - r10
 - id: verification_gate
-  type: ROUTE
-  owner: code
+  type: BRANCH
   doc: Route on verification outcome.
   reads:
   - check_parse_ok
@@ -258,8 +244,7 @@ nodes:
   - r1
   - r7
 - id: fix_output
-  type: GEN-EDIT
-  owner: model
+  type: MUTATE
   doc: 'If verification fails, revise header names and try again. NEVER violate: No
     leading, trailing or doubled underscores.; Do not drop, add, merge or reorder
     columns.; do not just print it.'
@@ -276,8 +261,7 @@ nodes:
   traces_to:
   - r19
 - id: done
-  type: TERMINAL
-  owner: code
+  type: RETURN
   doc: All checks passed; report success.
   traces_to:
   - r7
@@ -350,7 +334,7 @@ edges:
 tools:
   read_input_csv:
     sig: (task_input_path) -> (input_csv_path,input_headers,input_rows,input_row_count,input_col_count)
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - read_input_csv
     body: "def read_input_csv(task_input_path):\n    import csv\n    input_csv_path\
@@ -363,7 +347,7 @@ tools:
       \ input_rows, input_row_count, input_col_count\n"
   apply_header_rename:
     sig: (input_rows,proposed_headers) -> (renamed_rows,renamed_headers,output_col_count)
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - apply_header_rename
     body: "def apply_header_rename(input_rows, proposed_headers):\n    renamed_headers\
@@ -372,7 +356,7 @@ tools:
       \ output_col_count\n"
   drop_empty_rows:
     sig: (renamed_rows) -> (clean_rows,removed_empty_row_count,clean_row_count)
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - drop_empty_rows
     body: "def drop_empty_rows(renamed_rows):\n    clean_rows = []\n    removed =\
@@ -392,7 +376,7 @@ tools:
       \            writer.writerow(list(row))\n    return path\n"
   re_read_output_csv:
     sig: (cleaned_csv_path) -> (written_headers,written_rows,written_row_count,written_col_count)
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - re_read_output_csv
     body: "def re_read_output_csv(cleaned_csv_path):\n    import csv\n    with open(cleaned_csv_path,\
@@ -405,7 +389,7 @@ tools:
       \ written_col_count\n"
   check_parses_with_header:
     sig: (written_headers,written_rows) -> check_parse_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - check_parses_with_header
     body: "def check_parses_with_header(written_headers, written_rows):\n    if not\
@@ -415,28 +399,28 @@ tools:
       \    return True\n"
   verify_header_regex:
     sig: (written_headers) -> check_regex_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verify_header_regex
     body: "def verify_header_regex(written_headers):\n    import re\n    pat = re.compile(r'^[a-z][a-z0-9]*(_[a-z0-9]+)*$')\n\
       \    return all(bool(pat.match(h)) for h in written_headers)\n"
   verify_header_uniqueness:
     sig: (written_headers) -> check_unique_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verify_header_uniqueness
     body: "def verify_header_uniqueness(written_headers):\n    return len(set(written_headers))\
       \ == len(written_headers)\n"
   verify_column_count_equal:
     sig: (input_col_count,written_col_count) -> check_colcount_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verify_column_count_equal
     body: "def verify_column_count_equal(input_col_count, written_col_count):\n  \
       \  return int(input_col_count) == int(written_col_count)\n"
   verify_row_count_equals_input_minus_empty:
     sig: (input_row_count,removed_empty_row_count,written_row_count) -> check_rowcount_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verify_row_count_equals_input_minus_empty
     body: "def verify_row_count_equals_input_minus_empty(input_row_count, removed_empty_row_count,\
@@ -444,7 +428,7 @@ tools:
       \ - int(removed_empty_row_count)\n"
   verify_headers_match_proposed_order:
     sig: (proposed_headers,written_headers) -> check_order_ok
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verify_headers_match_proposed_order
     body: "def verify_headers_match_proposed_order(proposed_headers, written_headers):\n\
@@ -452,7 +436,7 @@ tools:
   verification_gate:
     sig: (check_parse_ok,check_regex_ok,check_unique_ok,check_colcount_ok,check_rowcount_ok,check_order_ok)
       -> all_checks_passed
-    surface: SENSE
+    surface: OBSERVE
     serves:
     - verification_gate
     body: "def verification_gate(check_parse_ok, check_regex_ok, check_unique_ok,\

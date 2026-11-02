@@ -1275,15 +1275,19 @@ with entry:__main__ {
         }
     } elif cmd == "compile" {
         # compile <SKILL.md> [-e|--eject [out.jac]] — the gated AI lift: spec
-        # loop -> spine -> flows -> assemble -> G1/G4/G5 gates + repair. Sets
+        # loop -> spine -> flows -> assemble -> G5/COMPILE/G2 gates + repair. Sets
         # the skill on the graph; -e also ejects one runnable .jac program.
         path = _arg(argv, 1);
         if (not path) or path.startswith("-") {
-            print("usage: compile <SKILL.md> [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
+            print("usage: compile <SKILL.md> [--with <SKILL.md>]... [--task <task.md> [--task-bundle <dir>]] [-e|--eject [out.jac]] [--lint|--no-lint] [--clarify] [--no-adjudicate] [--strict] [--agent|--legacy]");
         } else {
             eject = False; eject_path = ""; agent_author = False; strict = False;
             clarify = False; frontend = ""; lint_force = False; no_lint = False;
             adjudicate = True;
+            # TASK-SCOPED compile (src/task_scope.jac): --task compiles the skill(s)
+            # FOR one task, so its named inputs/deliverables/format become the
+            # program's own IO; --with adds further skills into ONE program.
+            task_path = ""; task_bundle = ""; with_paths: list = [];
             i = 2;
             while i < len(argv) {
                 flg = _arg(argv, i);   # not `a` — the entry block is one scope and `a` is reused below as a list
@@ -1298,6 +1302,9 @@ with entry:__main__ {
                 elif flg == "--no-lint" { no_lint = True; }
                 elif flg == "--legacy" { frontend = "legacy"; }
                 elif flg == "--staged" { frontend = "staged"; }
+                elif flg == "--task" { task_path = _arg(argv, i + 1); i += 1; }
+                elif flg == "--task-bundle" { task_bundle = _arg(argv, i + 1); i += 1; }
+                elif flg == "--with" { with_paths.append(_arg(argv, i + 1)); i += 1; }
                 elif (flg == "-e") or (flg == "--eject") {
                     eject = True;
                     nxt = _arg(argv, i + 1);
@@ -1309,6 +1316,21 @@ with entry:__main__ {
             # project dir this process pinned itself to
             path = user_path(path);
             if eject_path { eject_path = user_path(eject_path); }
+            if with_paths and (not task_path) {
+                print("  (note: --with only composes skills together with --task; ignoring it)");
+            }
+            if task_path {
+                # Compose skill(s) + the task INSTRUCTION into one bundle and compile
+                # that; its directory is then the bundle every later stage reads.
+                import from src.task_scope { compose_task_skill, task_instruction }
+                tp = user_path(task_path);
+                tname = os.path.basename(os.path.dirname(os.path.abspath(tp))) or "task";
+                bdir = user_path(task_bundle) if task_bundle else os.path.join(
+                    os.path.dirname(eject_path) if eject_path else os.getcwd(), ".sigil-task-" + tname);
+                path = compose_task_skill([path] + [user_path(str(w)) for w in with_paths],
+                                          task_instruction(open(tp).read()), bdir, tname);
+                print("  task-scoped compile: " + path);
+            }
             _tty = False;
             try { _tty = bool(sys.stdout.isatty()); } except Exception {  }
             # --clarify asks inline; only meaningful with an interactive stdin.
@@ -1463,7 +1485,7 @@ with entry:__main__ {
         import from src.sigil_mcp_serve { serve_stdio }
         sys.exit(serve_stdio(library, run_task, solve_task, tool_allowed));
     } elif cmd == "gate" {
-        # gate <file.agir> [name] — run G4 (the compile oracle) + G9-TY (typed-
+        # gate <file.agir> [name] — run COMPILE (the compile oracle) + G4 (typed-
         # dataflow unification) over one AG-IR and exit nonzero if either fails.
         # This is the compiler's own ground truth exposed as a command, so
         # anything outside the process (a repair agent, a CI step, a human
@@ -1484,7 +1506,7 @@ with entry:__main__ {
             }
             g9 = gate_type_unification(ir_src);
             if g9 {
-                print("gate: FAILED  (G4 ok, G9-TY found " + str(len(g9)) + " issue(s))");
+                print("gate: FAILED  (COMPILE ok, G4 found " + str(len(g9)) + " issue(s))");
                 for i9 in g9 { print("  - " + str(i9)); }
                 sys.exit(1);
             }
@@ -1494,7 +1516,7 @@ with entry:__main__ {
             (_wfdet, _vbdet) = _views_from_ir(ir_src);
             _det = det_overloaded(_wfdet);
             if _det {
-                print("gate: FAILED  (G12-DET: mega-slot lumping, "
+                print("gate: FAILED  (G2_OVERLOAD: mega-slot lumping, "
                       + str(len(_det)) + " node(s))");
                 for _d in _det { print("  - " + str(_d)); }
                 sys.exit(1);
@@ -1749,7 +1771,7 @@ with entry:__main__ {
         print("  eval <sig> [probe]                  grounded-eval a skill — run it and judge the artifact");
         print("  relearn <sig> [hint]                recompile a skill fresh through the main compiler (task-born skills re-author via frontier)");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
-        print("  gate <file.agir> [name]             run G4 (compile oracle) + G9-TY (type unification) on one AG-IR (exits nonzero if either fails)");
+        print("  gate <file.agir> [name]             run COMPILE (compile oracle) + G4 (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
         print("connect a model (no API key needed for the first three)");
         print("  connect chatgpt [--new]             sign in with ChatGPT in your browser — your ChatGPT plan pays");

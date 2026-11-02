@@ -34,7 +34,7 @@ Python, so `run_command` grants nothing `import subprocess` did not.
 glob BUILTINS: dict[str, any] = {
     "read_file": {
         "sig": "(path: str) -> str",
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "doc": "Read a text file and return its contents.",
         "body": """
 import os
@@ -53,7 +53,7 @@ return _data if len(_data) <= 20000000 else (_data[:20000000] + "\\n... [truncat
     },
     "list_dir": {
         "sig": "(path: str) -> str",
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "doc": "List one directory level (names, with a / suffix on directories).",
         "body": """
 import os
@@ -72,7 +72,7 @@ return "\\n".join(_rows) if _rows else "(empty)"
     },
     "glob_files": {
         "sig": "(pattern: str, path: str) -> str",
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "doc": "Find files matching a glob pattern, recursively, under `path`.",
         "body": """
 import os, glob as _g
@@ -88,7 +88,7 @@ return "\\n".join(_hits) if _hits else "no files match %s under %s" % (_pat, _ro
     },
     "grep": {
         "sig": "(pattern: str, path: str) -> str",
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "doc": "Regex-search file contents under `path`; returns `file:line: text`.",
         "body": """
 import os, re as _re
@@ -325,7 +325,7 @@ return "exit=%d\\n%s" % (_p.returncode, _out if _out.strip() else "(no output)")
     },
     "http_get": {
         "sig": "(url: str) -> str",
-        "surface": "SENSE",
+        "surface": "OBSERVE",
         "doc": "Fetch a public http(s) URL and return the response body as text.",
         "body": """
 import urllib.request as _u

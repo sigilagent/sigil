@@ -16,12 +16,18 @@ viewer that parsed differently from the compiler would render a graph the compil
 never built, and the disagreement would show up as "the UI is wrong" rather than
 as the drift it is.
 
-This module is a leaf — `re` and `yaml`, nothing of Sigil's. That is what lets the
-compiler and the runtime both import it without either importing the other.
+It is also where a document becomes the paper's AIS (sigil_ais.canonicalize_ais):
+legacy mnemonics and model-owned executable/control forms are rewritten on read,
+so no consumer ever branches on which vocabulary the author used.
+
+This module is a near-leaf — `re`, `yaml` and the AIS vocabulary, nothing else of
+Sigil's. That is what lets the compiler and the runtime both import it without
+either importing the other.
 """
 
 import re;
 import yaml;
+import from src.sigil_ais { canonicalize_ais }
 
 def _j(sep: str, items: any) -> str {
     return sep.join([str(x) for x in items]);
@@ -128,6 +134,16 @@ def load_agir(text: str) -> dict[str, any] {
     }
     if not isinstance(ir, dict) { ir = {}; }
     if "_frontmatter" not in ir { ir["_frontmatter"] = fm; }
+    # `when:` is `guard:` (LIFT emits both); every consumer keys on `guard`
+    edges = ir.get("edges");
+    if isinstance(edges, list) {
+        for e in edges {
+            if isinstance(e, dict) and (not e.get("guard")) and e.get("when") { e["guard"] = e.get("when"); }
+        }
+    }
+    # The structural rewrites ride along for whoever wants to report them; keys
+    # starting with `_` are never written back (dump_agir).
+    ir["_ais_notes"] = canonicalize_ais(ir);
     return ir;
 }
 
@@ -175,7 +191,7 @@ def dump_agir(ir: any, block_scalars: bool = True) -> str {
     fm = ir.get("_frontmatter") if isinstance(ir.get("_frontmatter"), dict) else {};
     body: dict[str, any] = {};
     for k in ir {
-        if str(k) != "_frontmatter" { body[k] = ir[k]; }
+        if not str(k).startswith("_") { body[k] = ir[k]; }
     }
     out = str(yaml.dump(body, Dumper=dumper, sort_keys=False, allow_unicode=True, default_flow_style=False));
     if fm {

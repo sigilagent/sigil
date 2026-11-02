@@ -25,11 +25,11 @@ glob TAB_KEYS: list[str] = ["overview", "source", "gates", "runs", "versions"];
 
 # [group, label, mark]: the AG-IR canvas's colours and shapes, as a legend.
 glob LEGEND: list[any] = [
-    ["mind", "Model slot", "inline-block w-2.5 h-2.5 shrink-0 rotate-45 bg-[#a78bfa]"],
-    ["code", "Code", "inline-block w-2.5 h-2.5 shrink-0 rounded-sm bg-[#22d3ee]"],
-    ["boundary", "Sense or act", "inline-block w-2.5 h-2.5 shrink-0 rounded-full bg-[#38bdf8]"],
-    ["flow", "Control flow", "inline-block w-2.5 h-2.5 shrink-0 rounded-full bg-[#f5c451]"],
-    ["terminal", "Terminal", "inline-block w-2.5 h-2.5 shrink-0 rounded-full bg-[#4ade80]"]
+    ["semantic", "Semantic", "inline-block w-2.5 h-2.5 shrink-0 rotate-45 bg-[#a78bfa]"],
+    ["delegated", "Delegated", "inline-block w-2.5 h-2.5 shrink-0 rotate-45 bg-[#f472b6]"],
+    ["executable", "Executable", "inline-block w-2.5 h-2.5 shrink-0 rounded-sm bg-[#22d3ee]"],
+    ["control", "Control", "inline-block w-2.5 h-2.5 shrink-0 rounded-full bg-[#f5c451]"],
+    ["termination", "Return", "inline-block w-2.5 h-2.5 shrink-0 rounded-full bg-[#4ade80]"]
 ];
 
 glob CLOSE_BTN: str = "ml-auto inline-flex items-center justify-center w-7 h-7 rounded-md text-muted hover:text-fg hover:bg-ink-3 bg-transparent border-0 cursor-pointer";

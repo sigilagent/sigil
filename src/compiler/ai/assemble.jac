@@ -10,7 +10,7 @@ AG-IR YAML document for the MECHANICAL half, and audits the join:
 - Cross-references: carries' producers exist, node reads/writes have a lane
   (carry / knowledge / task), residency + serves + HIL targets name real nodes.
 - Prose-pointer precheck: a tool with neither body nor command, or a knowledge
-  item with no content, is flagged here (G1 hardens this later).
+  item with no content, is flagged here (G5 hardens this later).
 
 Issues never block emission — assemble returns the IR WITH its issue list, and
 the caller (lift) decides. Honest output, never a silent success.
@@ -21,12 +21,12 @@ import yaml;
 import from src.compiler.mechanical.toolib { builtin }
 import from .lift_types { Modality, RuleKind }
 import from .spec_loop { RuleSet }
-import from .ir_views { NodeType, Owner, AssembleResult }
+import from .ir_views { NodeType, Owner, AssembleResult, MODEL_TYPES }
 import from .workflow { WorkflowView }
 import from .flows { ViewBundle }
 
 def _ntype_str(t: NodeType) -> str {
-    return t.name.replace("_", "-");
+    return t.name;
 }
 
 def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> AssembleResult {
@@ -91,7 +91,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     }
 
     # ---- lowering completeness: no hollow code stations ---------------------
-    # A code-owned CODE/SENSE/ACT node lowers through a tool. With no tool
+    # An executable COMPUTE/OBSERVE/ACT node lowers through a tool. With no tool
     # serving it the mechanical half has nothing to emit and writes a marker
     # comment: the walker visits the station and does nothing. That is the
     # worst realization in the system — it looks like a gate in the graph, it
@@ -100,14 +100,14 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     # it reach a green compile.
     served: list = [];
     for td in vb.kn.tools { for sv in td.serves { served.append(sv); } }
-    tool_lowered = [NodeType.CODE, NodeType.SENSE, NodeType.ACT];
+    tool_lowered = [NodeType.COMPUTE, NodeType.OBSERVE, NodeType.ACT];
     for n in wf.nodes {
         if (n.owner != Owner.CODE) or (n.ntype not in tool_lowered) { continue; }
         if n.id in served { continue; }
         issues.append("node '" + n.id + "' (" + _ntype_str(n.ntype)
             + ", owner=code) has NO tool serving it — it lowers to a marker comment and enforces nothing."
             + " Add a tool with a body/command whose serves includes '" + n.id
-            + "', or re-own the step to MODEL if it genuinely needs a guess.");
+            + "', or make it a semantic instruction (SELECT/EXTRACT/MUTATE/GENERATE) if it genuinely needs model judgment.");
     }
     for hp in vb.hil.points {
         if hp.node not in node_ids { issues.append("HIL point targets unknown node '" + hp.node + "'"); }
@@ -144,7 +144,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
         `static = (hp0.kind + ": " + hp0.prompt).replace('"', "'").rstrip();
         kind = hp0.kind.replace('"', "'");
         hil_extra_tools.append({"name": tname,
-            "sig": "(prompt) -> str", "surface": "SENSE", "serves": [hp0.node],
+            "sig": "(prompt) -> str", "surface": "OBSERVE", "serves": [hp0.node],
             "body": 'q = str(prompt or "").strip()\n'
                     + 'return _ask_user(("' + kind + ': " + q) if q else "' + `static + '")'});
     }
@@ -161,7 +161,7 @@ def assemble(spec: RuleSet, wf: WorkflowView, vb: ViewBundle, name: str) -> Asse
     #   3. neither    — the constraint cannot be placed. Keep it global so the
     #      prohibition is never silently dropped, and SAY SO, because an
     #      unplaceable constraint is a gap the front-end should close.
-    mind = [NodeType.GEN_RAW, NodeType.GEN_ENUM, NodeType.GEN_FILL, NodeType.GEN_EDIT];
+    mind = MODEL_TYPES;
     mind_ids: list[str] = [n0.id for n0 in wf.nodes
                            if (n0.owner == Owner.MODEL) and (n0.ntype in mind)];
     reads_of: dict[str, list[str]] = {};

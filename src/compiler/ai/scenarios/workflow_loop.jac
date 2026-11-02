@@ -36,16 +36,16 @@ def _spec() -> RuleSet {
 def _good_view() -> WorkflowView {
     return WorkflowView(
         nodes=[
-            AgirNode(id="parse", ntype=NodeType.SENSE, owner=Owner.CODE,
+            AgirNode(id="parse", ntype=NodeType.OBSERVE, owner=Owner.CODE,
                      doc="Parse the input file.", reads=["task"], writes=["data"], traces_to=["r1"]),
-            AgirNode(id="explore", ntype=NodeType.GEN_RAW, owner=Owner.MODEL,
+            AgirNode(id="explore", ntype=NodeType.GENERATE, owner=Owner.MODEL,
                      doc="Explore the data until the schema is clear.",
                      reads=["data"], writes=["schema"],
                      autonomy_tools=["read_rows", "sample_column"], traces_to=["r2"]),
             AgirNode(id="emit", ntype=NodeType.ACT, owner=Owner.CODE, surface="artifact",
                      doc="Write the output as CSV with a header row.",
                      reads=["data", "schema"], writes=["artifact"], traces_to=["r3"]),
-            AgirNode(id="done", ntype=NodeType.TERMINAL)
+            AgirNode(id="done", ntype=NodeType.RETURN)
         ],
         edges=[
             AgirEdge(src="parse", dst="explore", modality=Modality.MANDATORY, traces_to="r1"),

@@ -72,7 +72,7 @@ def _strip_fences(code):
     return c
 
 def _exec_script(script, args=None):
-    # The GEN-RAW author writes a self-contained script that creates its own
+    # The GENERATE author writes a self-contained script that creates its own
     # output file; we just run it. `args` (if present) only supplies a nicer
     # return path — the real artifact is whatever the script wrote to cwd.
     with open("op.py", "w") as f:
@@ -218,7 +218,7 @@ def _scoped_author_run(context, out_path=None, tries=3):
     return out_path if (out_path and os.path.exists(out_path)) else ""
 
 def _clean_path(p):
-    # GEN-FILL slots (byLLM) occasionally leak JSON structure into a string field,
+    # EXTRACT slots (byLLM) occasionally leak JSON structure into a string field,
     # e.g. output_spec.path == 'out.txt},' or 'out.txt},"format":"txt"'. Trusting it
     # verbatim writes the artifact to a garbage filename and the deliverable is lost.
     # Strip trailing structural junk and cut at the first filename-illegal char after
@@ -260,7 +260,7 @@ def _emit(data, args):
     return path
 
 def _outname(task, fallback="output.txt"):
-    # GEN-RAW deliverables must land on the filename the TASK asks for (e.g. "save as
+    # GENERATE deliverables must land on the filename the TASK asks for (e.g. "save as
     # artifact.html", "Output to issues_out.json"), not a generic <carry>.out. Pull the
     # filename that follows a save/output/write verb; else the first bare filename; else fallback.
     import re
@@ -316,7 +316,7 @@ obj Args {
 }
 sem Args.out = "output file path parsed from the task";
 
-# ===== COGNITIVE SLOTS (GEN-*) =====
+# ===== COGNITIVE SLOTS (SELECT/EXTRACT/MUTATE/GENERATE) =====
 def extract_args(task: str) -> Args by llm;
 sem extract_args = "Parse the output file path from the task.";
 def write_code(task: str, args: Args) -> str by llm;

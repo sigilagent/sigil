@@ -215,7 +215,7 @@ def _in_skill(skill_norm: str, span: any) -> bool {
 # Security Policy" — with no must/always wording. Two things then lose them:
 #   (1) the modality detector flags them `?`, and with no adjudicator
 #       resolve_ambiguous_default ASSUMES MAYBE (optional); a DISCRETIONARY rule
-#       gets no mandatory node, G5 never enforces it, and the compiled agent
+#       gets no mandatory node, G2 never enforces it, and the compiled agent
 #       deterministically skips the step. iso27001 lost 99 rules this way — its
 #       whole audit procedure — and compiled to a 13-node graph.
 #   (2) occasionally the extractor folds such steps into the deliverable rule as

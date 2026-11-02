@@ -2,14 +2,14 @@
 name: md_to_plaintext
 description: Read a Markdown file named in the task, strip Markdown formatting to plain text, and save to the output file named in the task.
 ---
-agir_version: 0.1
+agir_version: 0.2
 standalone: true
 shape: pipeline
 types: {}
 
 tools:
   read_file:
-    surface: SENSE
+    surface: OBSERVE
     serves: [read_md]
   write_file:
     surface: ACT·artifact
@@ -63,16 +63,14 @@ walker:
 
 nodes:
   - id: read_md
-    type: SENSE
-    owner: code
+    type: OBSERVE
     op: read_file
     tool: read_file
     reads: []
     writes: [md_text]
     doc: "Read the Markdown source file named in the task (path bound from the task)."
   - id: convert
-    type: CODE
-    owner: code
+    type: COMPUTE
     op: md_to_text
     tool: md_to_text
     reads: [md_text]
@@ -80,14 +78,13 @@ nodes:
     doc: "Strip Markdown syntax to readable plain text while preserving content."
   - id: write_out
     type: ACT
-    owner: code
     op: write_file
     tool: write_file
     reads: [plain_text]
     writes: [out_file]
     doc: "Write the plain text to the output file named in the task (path bound from the task)."
   - id: done
-    type: TERMINAL
+    type: RETURN
 
 edges:
   - {from: read_md,  to: convert,   modality: mandatory}

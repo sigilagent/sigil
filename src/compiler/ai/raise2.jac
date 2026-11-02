@@ -6,7 +6,7 @@ The pipeline, faithfulness-first:
                         ▲                                │
                         └──── rule-scoped repair ◀───────┘  (same author, close exactly the gaps)
                                                          │
-                                       coherence gate (G4) ── a typed PROOF, not just a module
+                                       coherence gate (COMPILE) ── a typed PROOF, not just a module
 
 Two things that differ from `lift()`:
 
@@ -61,7 +61,7 @@ def pin_raise2_llms(m: any) -> None {
 
 # AUTHORING STRATEGY. Both front-ends satisfy the same
 # (skill, spec, name, gaps) -> {"ir_text","notes"} contract, so everything below
-# — faithfulness closure, mechanical rungs, repair ladder, G4 — is unchanged.
+# — faithfulness closure, mechanical rungs, repair ladder, COMPILE — is unchanged.
 #   SIGIL_AUTHOR=buildout   skeleton-first, region-scoped build-out
 #   (default)               single-pass direct author
 def _author(skill: str, spec: RuleSet, name: str, gaps: str = "") -> dict[str, any] {

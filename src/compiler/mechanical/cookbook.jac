@@ -2,7 +2,7 @@
 
 docs/reference/agir-cookbook/*.agir is a curated library of hand-reviewed golden
 AG-IRs. This module resolves the directory and validates every file through the
-compile oracle (G4) + type unification (G9), so both the test annex and any CLI
+compile oracle (COMPILE) + type unification (G4), so both the test annex and any CLI
 check share one implementation."""
 
 import os;

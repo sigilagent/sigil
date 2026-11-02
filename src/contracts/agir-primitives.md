@@ -1,5 +1,12 @@
 # AG-IR — Components & Primitives (the reference card)
 
+> **AIS vocabulary.** This document predates the alignment with the SIGIL paper
+> (arXiv 2607.27309). Its opcode names and gate ids have been updated; where its
+> design rationale still describes an instruction's unit as chosen separately from
+> its opcode, the normative [ais-spec.md](../../docs/reference/ais-spec.md) (and its
+> Appendix F) wins.
+
+
 > The single catalog of *what an `agent.ir` is made of*. The **concepts** live in
 > [agir-methodology.md](agir-methodology.md), the **how-to** in
 > [skill-to-agent-pipeline.md](skill-to-agent-pipeline.md), the **byLLM/OSP patterns** in
@@ -44,29 +51,29 @@ intent allows.**
 
 | Node | Meaning | Output shape | Jac form |
 |------|---------|--------------|----------|
-| `GEN-ENUM` | choose from a fixed set | one enum member | `def f(x) -> SomeEnum by llm();` |
-| `GEN-FILL` | fill a typed object from context | schema-validated struct | `def f(x) -> SomeObj by llm();` |
-| `GEN-EDIT` | mutate existing content, touching only what must change | diff over prior state | typed `Diff` slot + `verify_diff` + `apply_diff` |
-| `GEN-RAW` | free-form generation (last resort) | string / stream | `def f(x) -> str by llm();` |
+| `SELECT` | choose from a fixed set | one enum member | `def f(x) -> SomeEnum by llm();` |
+| `EXTRACT` | fill a typed object from context | schema-validated struct | `def f(x) -> SomeObj by llm();` |
+| `MUTATE` | mutate existing content, touching only what must change | diff over prior state | typed `Diff` slot + `verify_diff` + `apply_diff` |
+| `GENERATE` | free-form generation (last resort) | string / stream | `def f(x) -> str by llm();` |
 
-> Tightening preference: `GEN-ENUM > GEN-FILL > GEN-EDIT > GEN-RAW`. "Classify the
-> operation" is `GEN-ENUM` over a taxonomy, **not** `GEN-RAW`. Reserve `GEN-RAW`
+> Tightening preference: `SELECT > EXTRACT > MUTATE > GENERATE`. "Classify the
+> operation" is `SELECT` over a taxonomy, **not** `GENERATE`. Reserve `GENERATE`
 > for genuinely open-ended output (a created document body, the NL reply).
 
 ### Flow — direct what happens next (owner: **code or model**)
 
 | Node | Meaning | Jac form |
 |------|---------|----------|
-| `ROUTE` | branch on a condition | code: `if … { visit [-->][?:Target]; }` · model: `visit [-->] by llm(intent=…, incl_info=…)` |
+| `BRANCH` | branch on a condition | code: `if … { visit [-->][?:Target]; }` · model: `visit [-->] by llm(intent=…, incl_info=…)` |
 | `LOOP` | repeat/pipeline until a guard holds | walker `while` + an `EXTRACT` verdict + revise body |
-| `SPAWN` | launch a subagent in an independent context (parallel) | `spawn` additional walkers; `flow … spawn …` + `wait task` |
+| `PARALLEL` | launch a subagent in an independent context (parallel) | `spawn` additional walkers; `flow … spawn …` + `wait task` |
 | `CALL` | expand another AG-IR inline, same context (composition) | same walker visiting a sub-region / a named sub-walker |
 
 ### Boundary — move information across the context/world line (owner: **code or model**)
 
 | Node | Meaning | Semantics |
 |------|---------|-----------|
-| `SENSE` | pull world-state in (read file, grep, query, fetch) | idempotent, reversible, retry-safe |
+| `OBSERVE` | pull world-state in (read file, grep, query, fetch) | idempotent, reversible, retry-safe |
 | `ACT·artifact` | push out a **deliverable the user interacts with** (named file, stdout, email, PR) | **must be a tool**; modality + confirmation gates live here; params usually **task-variant** |
 | `ACT·workspace` | scratch inside the sandbox (temp files, intermediates) | **free & ungated** — disposable |
 
@@ -78,11 +85,11 @@ intent allows.**
 
 | Node | Meaning |
 |------|---------|
-| `CODE` | output is a pure function of inputs: parse, route-key, math, bind a value onto the graph |
+| `COMPUTE` | output is a pure function of inputs: parse, route-key, math, bind a value onto the graph |
 
-`CODE` is the `owner=code` counterpart to the `GEN-*` family — the thing the Mind
-taxonomy deliberately excludes. A non-deterministic `CODE` node (clock, network,
-`random()`) is a *smell*: either make it deterministic or admit it's a `SENSE`/model node.
+`COMPUTE` is the `owner=code` counterpart to the `GEN-*` family — the thing the Mind
+taxonomy deliberately excludes. A non-deterministic `COMPUTE` node (clock, network,
+`random()`) is a *smell*: either make it deterministic or admit it's a `OBSERVE`/model node.
 
 ---
 
@@ -108,8 +115,8 @@ absent path. That is the whole point of lowering modality to OSP.
 A node is fully specified by `(action-type, owner, payload)` + the modality of its
 in/out edges.
 
-- **`owner`** — `code` or `model`. `GEN-*` is always model; `CODE` is always code;
-  `SENSE`/`ACT`/`ROUTE`/`LOOP`/`SPAWN`/`CALL` can be either. Set by the **Owner test**
+- **`owner`** — `code` or `model`. `GEN-*` is always model; `COMPUTE` is always code;
+  `OBSERVE`/`ACT`/`BRANCH`/`LOOP`/`PARALLEL`/`CALL` can be either. Set by the **Owner test**
   (§4, P1).
 - **`modality`** — on the node's edges (§2).
 
@@ -150,11 +157,11 @@ A prose skill is *mostly code snippets*; each is dual-use, sorted by the Owner t
 
 - **snippet → `tool`** (`owner=code`): the op is a function of its inputs (merge,
   split, rotate, encrypt — only args vary). The **body becomes the tool**, run
-  verbatim. *More* faithful than `GEN-RAW` (runs the prescribed code, can't drift),
+  verbatim. *More* faithful than `GENERATE` (runs the prescribed code, can't drift),
   and it **collapses the library map** (the tool *is* the library choice).
 - **snippet → `knowledge`** (resident on a node): a *pattern that grounds a judgment*
   (build-a-report with reportlab; content open-ended). Stays reference text a
-  surviving `GEN-RAW` node reads.
+  surviving `GENERATE` node reads.
 
 ---
 
@@ -168,10 +175,10 @@ For each datum the graph touches: **does it sit still or travel?**
 | **Moving** (produced at one node, consumed downstream) | carried by the **walker** | `walker.carries` with a `produced_by` | the chosen op, the plan, the script, verifier results |
 
 This is what decides the OSP layout. **Concurrency is just "more than one walker":**
-wherever two branches share no moving data, a `SPAWN` forks subagent-walkers that
+wherever two branches share no moving data, a `PARALLEL` forks subagent-walkers that
 traverse in parallel and rejoin.
 
-### SPAWN isolation — read-shared, write-isolated
+### PARALLEL isolation — read-shared, write-isolated
 
 Parallel siblings share a race surface. The rule:
 
@@ -179,8 +186,8 @@ Parallel siblings share a race surface. The rule:
 - siblings may freely **read** fork-immutable shared state;
 - any multi-writer state is hoisted to the **orchestrator** and applied **at the barrier**.
 
-Declare it on the SPAWN node: `isolation: { private_write, shared_read, orchestrator_owned }`.
-A SPAWN with shared *writable* state and no isolation is a bug, not a design.
+Declare it on the PARALLEL node: `isolation: { private_write, shared_read, orchestrator_owned }`.
+A PARALLEL with shared *writable* state and no isolation is a bug, not a design.
 
 ---
 
@@ -197,7 +204,7 @@ fixed top-level sections, produced by running the phases in order.
 | `walker` | moving state the agent carries (the dataflow view) | Phase 4 |
 | `nodes` | one entry per action (the flowchart view) | Phase 1/2 |
 | `edges` | control flow + modality + guards (the CFG view) | Phase 3 |
-| `concurrency` | SPAWN points, or `spawn: none` **with a reason** | Phase 4 |
+| `concurrency` | PARALLEL points, or `spawn: none` **with a reason** | Phase 4 |
 | `faithfulness` | the C1 audit record + deviations/extensions | Phase 5 |
 | `standalone` / `shape` | self-containment flag; topology label (flat-router / dispatch-router / pipeline / …) | header |
 
@@ -205,7 +212,7 @@ fixed top-level sections, produced by running the phases in order.
 
 Every load-bearing artifact is embodied **verbatim** in the IR — tool bodies →
 `tools[].body`, sub-agent prompts → `knowledge.<x>.template`, exact commands /
-endpoints / user-facing strings → embedded, patterns grounding a `GEN-RAW` →
+endpoints / user-facing strings → embedded, patterns grounding a `GENERATE` →
 `knowledge.<x>.pattern`. A `prose:`/`library:`/`doc:` pointer *in place of* content
 is the **prose-pointer anti-pattern**: the graph looks complete but the bytes still
 live in `SKILL.md`, forcing LOWER to re-derive them (reintroducing the per-run cost
@@ -236,12 +243,12 @@ the IR exists to remove).
 These are not new atoms — they are load-bearing *shapes* over the alphabet, each
 earned from a measured failure.
 
-### `EDIT` (the safe-edit primitive) — `GEN-EDIT` lowered with code-owned safety
+### `EDIT` (the safe-edit primitive) — `MUTATE` lowered with code-owned safety
 
 Cognitive output is a typed `Diff`; `verify_diff` (BASIC) rejects diffs that exceed
 a deletion budget or break byte-identity of untouched ranges; `apply_diff` (BASIC)
 applies deterministically. **Its value is in what it makes impossible:** a
-`(source, intent) -> new_source` `GEN-RAW` slot can silently truncate / drop
+`(source, intent) -> new_source` `GENERATE` slot can silently truncate / drop
 siblings / collapse a multi-component file; EDIT cannot.
 
 - **Rule:** if a slot's signature is `(existing_artifact, intent) -> new_artifact`,
@@ -257,7 +264,7 @@ Don't lower a big multi-file authoring step as one open `INVOKE` ReAct loop (the
 mcp-builder negative result). Lower it as:
 
 ```
-plan_skeleton  GEN-FILL : task/plan -> typed Skeleton (decl-only scaffold + per-part stubs)
+plan_skeleton  EXTRACT : task/plan -> typed Skeleton (decl-only scaffold + per-part stubs)
 GATE 1 (code)           : write scaffold, compile/type-check it ALONE  (cheap structural red-check)
 fill_part  LOOP         : per stub, GENERATE ONE part bound to (its signature + its slice) — localized
 GATE 2 (code)           : assemble + compile, capped repair
@@ -266,7 +273,7 @@ GATE 2 (code)           : assemble + compile, capped repair
 Two paired moves make it pay: **owned-research** (stable reference is a
 deterministic owned read, not a live-web ReAct loop — only world-varying data stays
 a single bounded `WebFetch`) and **localized fills** (each fill sees only its
-stub + the immutable scaffold + its data slice → a natural `SPAWN`,
+stub + the immutable scaffold + its data slice → a natural `PARALLEL`,
 read-shared/write-isolated). Measured: **2.9× cheaper than the original OSP at
 parity correctness** on mcp-builder t0. **Mandatory companion:** the 5d gate (tight
 scoping silently drops un-typed deliverables).
@@ -306,7 +313,7 @@ calls during LOWER, the IR was underspecified; fix the IR, not the Jac.
 | `walker.carries` | `walker { has <field>: <T> = <default>; }` |
 | node action / `mandatory` edge | `can <n> with <Node> entry { … visit [-->]; }` ability |
 | `route` (code / model) | `if … { visit [-->][?:Target]; }` / `visit [-->] by llm(intent=…, incl_info=…)` |
-| `SPAWN` | `spawn` additional walkers |
+| `PARALLEL` | `spawn` additional walkers |
 | `autonomy.tools` | `by llm(tools=[…])` on the slot |
 | the agent / entrypoint | a `walker`; `def run(task, model, skill) -> str { global llm; llm = model; … }` |
 
@@ -334,7 +341,7 @@ What OSP's win actually covers: mechanical coordination ✓, mandatory steps mad
 structural ✓, verification grounding ✓. What it does **not**: delegated judgment
 (when to stop, what's "good enough") stays model-dependent — OSP makes it *typed,
 observable, governable* but cannot make it *correct*; artifact quality on
-authoring-bottlenecked tasks is dominated by the `GEN-RAW` slot OSP delegates
+authoring-bottlenecked tasks is dominated by the `GENERATE` slot OSP delegates
 identically to prose. And the whole win is **contingent on faithful encoding of
 external probes** — an OSP rewrite that drops a `WebFetch` is strictly worse than
 prose.
