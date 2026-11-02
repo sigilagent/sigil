@@ -64,6 +64,10 @@ RUN apt-get update \
         '# is gone, and PIDs restart from 1, so an old pid matches a live process here.' \
         '# Clear them the way a host clears /run, then run the command as usual.' \
         'rm -rf "${SIGIL_HOME:-$HOME/.sigil}/run"' \
+        '# The same goes for the graph cluster: a killed container leaves postmaster.pid' \
+        '# in the volume, and when its pid is taken here Postgres refuses to start.' \
+        '# Nothing can be running on this volume yet: one container per volume.' \
+        'rm -f "$JAC_CACHE_HOME"/pg/*/postmaster.pid' \
         'exec sigil "$@"' \
         > /usr/local/bin/sigil-boot \
     && chmod 0755 /usr/local/bin/sigil /usr/local/bin/sigil-boot
