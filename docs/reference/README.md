@@ -18,6 +18,7 @@ schedule a job?") and it answers from these pages. Or read them directly:
 | [automation-and-cron](automation-and-cron.md) | Scheduling work the agent runs later |
 | [ejecting-agents](ejecting-agents.md) | Taking a compiled skill out: one-shot program, or a whole agent |
 | [daemon](daemon.md) | Running headless: the background scheduler, one graph, start-at-login |
+| [windows](windows.md) | Running on Windows: the Docker and WSL2 pathways, paths, memory, updating |
 | [channels](channels.md) | Connecting Discord / Telegram / WhatsApp / Slack |
 | [memory-and-skills](memory-and-skills.md) | Durable memory and the compiled-skill library |
 | [connections](connections.md) | Connecting a model: ChatGPT sign-in, Claude Code, OpenRouter, Ollama, API keys, and the setup that requires one |

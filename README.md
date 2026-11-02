@@ -59,6 +59,15 @@ macOS and Linux. Both land the same release in `~/.sigil/app`: the npm package i
 launcher whose first run performs that install, pinned to the package's version, so
 `npm update -g @sigilagent/sigil` is how an npm install moves to the next release.
 
+On Windows, run this in PowerShell:
+
+```powershell
+irm https://github.com/sigilagent/sigil/releases/latest/download/install.ps1 | iex
+```
+
+jac has no Windows build yet, so Sigil runs in Docker Desktop or WSL2, and you get a
+`sigil` command that forwards to it. See [docs/reference/windows.md](docs/reference/windows.md).
+
 The installer compiles Sigil once, so the first command starts warm. On a fresh
 install at a terminal it then connects a model (`sigil setup`), asks whether Sigil
 should start when you log in, and starts it: the scheduler plus the Observatory

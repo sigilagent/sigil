@@ -20,6 +20,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  packages: write
 
 # Never release the same tag twice concurrently.
 concurrency:
@@ -30,6 +31,10 @@ jobs:
   release:
     name: publish release
     runs-on: ubuntu-latest
+    # The image jobs below build exactly the commit this one releases.
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      target: ${{ steps.sync.outputs.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -133,6 +138,13 @@ jobs:
           grep -q "^DEFAULT_REF=\"$TAG\"\$" install.sh \
             || { echo "::error::pin substitution failed"; exit 1; }
           echo "release asset pinned: DEFAULT_REF=$TAG"
+          # The Windows installer pins the same way (its image tag follows the ref).
+          grep -q "^\$DefaultRef = 'main'\$" install.ps1 \
+            || { echo "::error::install.ps1 lost its \$DefaultRef = 'main' anchor — cannot pin the release asset"; exit 1; }
+          sed -i "s|^\$DefaultRef = 'main'\$|\$DefaultRef = '$TAG'|" install.ps1
+          grep -q "^\$DefaultRef = '$TAG'\$" install.ps1 \
+            || { echo "::error::install.ps1 pin substitution failed"; exit 1; }
+          echo "release asset pinned: \$DefaultRef = '$TAG'"
 
       # Never ship a broken pipe-to-bash installer: fail the release if it won't
       # parse. Runs AFTER the pin so the checksum covers the shipped bytes.
@@ -142,6 +154,10 @@ jobs:
           bash -n install.sh
           shasum -a 256 install.sh | awk '{print $1"  install.sh"}' > install.sh.sha256
           echo "checksum: $(cat install.sh.sha256)"
+          # Same for the irm|iex one: the runner's pwsh parses it as Windows would.
+          pwsh -NoProfile -Command '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$e) | Out-Null; if ($e) { $e | ForEach-Object { "::error::install.ps1: $_" }; exit 1 }'
+          shasum -a 256 install.ps1 | awk '{print $1"  install.ps1"}' > install.ps1.sha256
+          echo "checksum: $(cat install.ps1.sha256)"
 
       - name: Create or update the release
         env:
@@ -160,6 +176,12 @@ jobs:
           curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash
           # or
           npm install -g @sigilagent/sigil
+          \`\`\`
+
+          Windows (PowerShell; runs Sigil in Docker Desktop or WSL2):
+
+          \`\`\`powershell
+          irm https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.ps1 | iex
           \`\`\`
 
           The npm package (\`@sigilagent/sigil@${TAG#v}\`) is a launcher: the first time you
@@ -188,10 +210,10 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists — refreshing assets."
-            gh release upload "$TAG" install.sh install.sh.sha256 --clobber
+            gh release upload "$TAG" install.sh install.sh.sha256 install.ps1 install.ps1.sha256 --clobber
           else
             echo "Creating release $TAG at $TARGET."
-            gh release create "$TAG" install.sh install.sh.sha256 \
+            gh release create "$TAG" install.sh install.sh.sha256 install.ps1 install.ps1.sha256 \
               --target "$TARGET" \
               --title "Sigil $TAG" \
               --notes-file "$notes"
@@ -225,3 +247,69 @@ jobs:
           cp ../install.sh .
           npm version "$v" --no-git-tag-version --allow-same-version
           npm publish --access public --provenance
+
+  # The container image (docker/Dockerfile): what install.ps1's Docker pathway pulls,
+  # ghcr.io/<repo>:<version> and :latest. Each architecture builds natively on its
+  # own runner (jac's install under QEMU is slow enough to time out), pushes an
+  # arch-suffixed tag, and the manifest job joins them under the version tag.
+  image:
+    name: image (${{ matrix.arch }})
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout the released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ./docker/build.sh "$repo:${TAG#v}-$ARCH"
+          docker push "$repo:${TAG#v}-$ARCH"
+
+  image-manifest:
+    name: image manifest
+    needs: [release, image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # :latest only moves forward: an older tag (asset refresh, backport) gets its
+      # version tag and leaves :latest on the newest release.
+      - name: Join the architectures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          v="${TAG#v}"
+          tags=(-t "$repo:$v")
+          newest="$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')"
+          [ "$newest" = "$TAG" ] && tags+=(-t "$repo:latest")
+          docker buildx imagetools create "${tags[@]}" "$repo:$v-amd64" "$repo:$v-arm64"
+          docker buildx imagetools inspect "$repo:$v"

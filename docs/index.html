@@ -523,10 +523,11 @@
         </div>
         <div class="hero-install" data-installer>
           <div class="inst-head">
-            <span class="hero-install-label">Install · macOS &amp; Linux</span>
+            <span class="hero-install-label">Install · macOS, Linux &amp; Windows</span>
             <div class="inst-tabs" role="group" aria-label="Install with">
               <button type="button" data-inst="curl" aria-pressed="true">curl</button>
               <button type="button" data-inst="npm" aria-pressed="false">npm</button>
+              <button type="button" data-inst="windows" aria-pressed="false">Windows</button>
             </div>
           </div>
           <div class="oneliner" data-code data-inst-panel="curl">
@@ -537,6 +538,11 @@
           <div class="oneliner" data-code data-inst-panel="npm" hidden>
             <span class="pr">$</span>
             <div class="ol-scroll"><pre><code>npm install -g @sigilagent/sigil</code></pre></div>
+            <button class="copy-btn">Copy</button>
+          </div>
+          <div class="oneliner" data-code data-inst-panel="windows" hidden>
+            <span class="pr">PS&gt;</span>
+            <div class="ol-scroll"><pre><code>irm https://github.com/sigilagent/sigil/releases/latest/download/install.ps1 | iex</code></pre></div>
             <button class="copy-btn">Copy</button>
           </div>
         </div>
@@ -910,10 +916,11 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
 
     <div data-installer>
       <div class="inst-head">
-        <span class="hero-install-label">macOS &amp; Linux</span>
+        <span class="hero-install-label">macOS, Linux &amp; Windows</span>
         <div class="inst-tabs" role="group" aria-label="Install with">
           <button type="button" data-inst="curl" aria-pressed="true">curl</button>
           <button type="button" data-inst="npm" aria-pressed="false">npm</button>
+          <button type="button" data-inst="windows" aria-pressed="false">Windows</button>
         </div>
       </div>
       <div data-inst-panel="curl">
@@ -931,6 +938,14 @@ claude mcp add sigil <span class="p">--</span> <span class="k">sigil</span> mcp-
           <button class="copy-btn">Copy</button>
         </div>
         <p class="oneliner-note">first <code style="color:var(--muted)">sigil</code> run installs the matching release to <code style="color:var(--muted)">~/.sigil/app</code> · upgrade with <code style="color:var(--muted)">npm update -g @sigilagent/sigil</code></p>
+      </div>
+      <div data-inst-panel="windows" hidden>
+        <div class="oneliner" data-code>
+          <span class="pr">PS&gt;</span>
+          <div class="ol-scroll"><pre><code>irm https://github.com/sigilagent/sigil/releases/latest/download/install.ps1 | iex</code></pre></div>
+          <button class="copy-btn">Copy</button>
+        </div>
+        <p class="oneliner-note">runs Sigil in Docker Desktop or WSL2 and adds a <code style="color:var(--muted)">sigil</code> command · <a href="https://github.com/sigilagent/sigil/blob/main/docs/reference/windows.md" style="color:var(--muted)">details</a></p>
       </div>
     </div>
 
@@ -1114,7 +1129,7 @@ jac run --no-serve src/main.jac -- setup</code></pre>
       });
     });
   });
-  // curl | npm install switch: picking one flips every switch on the page
+  // curl | npm | Windows install switch: picking one flips every switch on the page
   document.querySelectorAll('[data-installer] [data-inst]').forEach(function(tab){
     tab.addEventListener('click', function(){
       var pick = tab.getAttribute('data-inst');
