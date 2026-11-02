@@ -13,14 +13,19 @@ Root alignment alone does not fix it: a server booted with `__guest__` already
 pointing at the superroot still reads an empty Soul. The server's graph is simply
 not the CLI's graph.
 
-So the endpoints stop trying to own a graph and become a *view* of the one that
-exists. `api_call` runs the request in a fresh `jac run` process — the execution
-mode that demonstrably reads and writes the real store — and returns its JSON.
-The same fresh-subprocess seam the scheduler and the channel bridges already use,
-for the same reason.
+So the endpoints stopped trying to own a graph and became a *view* of the one
+that exists. `api_call` ran each request in a fresh `jac run` process, the
+execution mode that demonstrably read and wrote the real store, at the cost of
+loading all of Sigil per request: about 12 seconds, four of them to open a page.
 
-The cost is one process start per request. The benefit is that the web UI, the
-CLI, the TUI, the daemon and every fired job are finally the same agent.
+On jac 0.37 the server shares the CLI's store, and the split was only ever the
+root: an anonymous request runs as `__guest__`, whose root is an empty graph of
+its own. So `report_for` now answers in the server's own request context
+(`api_local`), on the superroot every CLI command uses, through the same table
+the CLI's `sigil api` runs (src/sigil_api_dispatch.jac). jac commits the request's
+writes when it ends, and the next request reads what any other process wrote
+since. A request takes milliseconds. `api_call` stays for SIGIL_API_SUBPROCESS=1,
+the escape hatch if a store ever disagrees again.
 """
 
 import os;
@@ -112,6 +117,40 @@ def api_call(name: str, args: dict[str, any], timeout_s: int = 900) -> dict[str,
             "error": str(body.get("error") or "")};
 }
 
+def in_process() -> bool {
+    # Endpoints answer in the server's own request context, on the graph it
+    # shares with the CLI (see src/sigil_api_dispatch.jac). SIGIL_API_SUBPROCESS=1
+    # brings back the old fresh-process-per-request path, for a store where the
+    # server and the CLI turn out not to agree.
+    v = str(os.environ.get("SIGIL_API_SUBPROCESS") or "").strip().lower();
+    return v not in ["1", "true", "yes", "on"];
+}
+
+def api_local(name: str, args: dict[str, any]) -> dict[str, any] {
+    # api_call's answer without the process: the same table, run here, and put
+    # through the same JSON encoding, so a client sees exactly what the CLI's
+    # `sigil api` would have printed.
+    #
+    # It runs on the superroot, the root every CLI command uses. A request from
+    # the browser arrives as jac's anonymous `__guest__` user, whose root is a
+    # fresh, empty graph of its own: src/main.jac once re-pointed it in the
+    # SQLite users.db, but jac 0.37 keeps users in its embedded Postgres, so that
+    # no longer happens. The request's context already holds the superroot as
+    # `system_root`; the dispatch borrows it and hands the guest's back.
+    import from jaclang.runtime.runtime { JacRuntime }
+    import from .sigil_api_dispatch { api_dispatch, api_json }
+    ctx: any = JacRuntime.get_context();
+    was = str(ctx.user_root.id);
+    ctx.set_user_root(str(ctx.system_root.id));
+    try {
+        body = json.loads(api_json(api_dispatch(name, dict(args or {}))));
+    } finally {
+        ctx.set_user_root(was);
+    }
+    return {"ok": bool(body.get("ok", True)), "data": body.get("data"),
+            "error": str(body.get("error") or "")};
+}
+
 # ---------------------------------------------------------------------------
 # Only this machine's own pages may drive the agent.
 #
@@ -181,7 +220,7 @@ def report_for(name: str, args: dict[str, any]) -> any {
         respond(status=403);
         return {"ok": False, "error": refusal};
     }
-    r = api_call(name, args);
+    r = api_local(name, args) if in_process() else api_call(name, args);
     if r["ok"] { return r["data"]; }
     return {"ok": False, "error": str(r["error"]),
             "hint": "the endpoint runs the request against the agent's own graph; "

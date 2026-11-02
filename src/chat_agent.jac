@@ -47,6 +47,7 @@ glob CHAT_HISTORY: list[any] = [];
 glob CHAT_INFO: dict[str, any] = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
 glob _WEB_UI: bool = False;   # this turn came from the web console, which can show a Build button
+glob _WEB_TURN: any = threading.Lock();   # the server runs requests on threads; a web turn owns the chat state
 
 def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
 
@@ -621,10 +622,20 @@ def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
     # the conversation and hands it back each turn. Same agent, same tools, same
     # approvals: a shell command that needs one is queued, and the console shows
     # it beside the reply.
-    CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
-    _WEB_UI = True;
-    out = chat_turn(message);
-    out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
-    out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
+    #
+    # The Observatory answers in its own long-lived process, so turns share this
+    # module's conversation state: one turn at a time, and the web-only Build
+    # proposal is switched back off before a channel's turn can run here.
+    with _WEB_TURN {
+        CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
+        _WEB_UI = True;
+        try {
+            out = chat_turn(message);
+        } finally {
+            _WEB_UI = False;
+        }
+        out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
+        out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
+    }
     return out;
 }

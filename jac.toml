@@ -81,6 +81,11 @@ default_model = "gpt-4o-mini"
 # The listening address (loopback only) is set where the server is started:
 # src/main.jac, SIGIL_SERVE_HOST to override.
 [serve]
+# The endpoints answer in this process (src/sigil_api.jac), and some of them act
+# on the world: a chat turn calls models and runs shell commands, a solve runs a
+# skill. jac's default answer to a write conflict is to run the request again,
+# which would do all of that twice. Fail the request instead and say so.
+on_conflict = "fail"
 cors_origins = []
 docs_enabled = false
 graph_enabled = false

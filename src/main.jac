@@ -318,19 +318,6 @@ def _to_int(s: str, dflt: int) -> int {
     try { return int(str(s).strip()); } except Exception { return dflt; }
 }
 
-def _json_text(payload: dict[str, any]) -> str {
-    # One JSON line for the `api` command. Anything the encoder cannot represent
-    # becomes its string form rather than an exception — an endpoint returning a
-    # slightly lossy answer beats one returning a 500 because a value was a node.
-    import json;
-    try { return str(json.dumps(payload, `default=_stringify)); }
-    except Exception { return "{\"ok\": false, \"data\": null, \"error\": \"unencodable result\"}"; }
-}
-
-def _stringify(o: any) -> str {
-    return str(o);
-}
-
 def _warn_no_ticker() -> None {
     # A schedule with nothing ticking it is the failure mode this release exists
     # to end. Say so at the moment the job is written, not after a week of runs=0.
@@ -1139,129 +1126,20 @@ with entry:__main__ {
         print("daemon    : " + ("running" if daemon_running() else "not running"));
         print("errors    : " + error_log_path());
     } elif cmd == "api" {
-        # api <name> <json-args> — the machine-readable face of the CLI, and the
-        # ONLY thing the HTTP endpoints run. Prints one JSON object behind a
-        # marker so a caller can find it past jac's startup chatter. Every
-        # endpoint therefore answers from this graph, in this process, which is
-        # the whole reason the Observatory can now see the agent.
+        # api <name> <json-args> — the machine-readable face of the CLI. Prints
+        # one JSON object behind a marker so a caller can find it past jac's
+        # startup chatter. The table lives in src/sigil_api_dispatch.jac, which
+        # the Observatory's server also calls in-process, so the CLI and the
+        # endpoints answer every name the same way.
         import json;
+        import from src.sigil_api_dispatch { api_dispatch, api_json }
         name = _arg(argv, 1);
         raw = _arg(argv, 2) if len(argv) > 2 else "{}";
-        if raw == "-" { raw = sys.stdin.read(); }   # api_call sends a large payload this way
+        if raw == "-" { raw = sys.stdin.read(); }   # a large payload comes on stdin
         a: dict[str, any] = {};
         try { a = dict(json.loads(raw or "{}")); } except Exception { a = {}; }
-        payload: dict[str, any] = {"ok": True, "data": None, "error": ""};
-        try {
-            if name == "soul" { payload["data"] = describe_soul(); }
-            elif name == "graph" {
-                # Serialize the typed view-model to plain dicts HERE: the payload
-                # crosses the subprocess seam through json.dumps(default=str), which
-                # would otherwise flatten VGraph to its repr string — and the
-                # Observatory would read `nodes: undefined` forever.
-                import from src.sigil { graph_snapshot }
-                _vg = graph_snapshot();
-                payload["data"] = {
-                    "nodes": [{"id": _n.id, "label": _n.label, "group": _n.group, "detail": _n.detail}
-                              for _n in _vg.nodes],
-                    "edges": [{"src": _e.src, "dst": _e.dst, "kind": _e.kind} for _e in _vg.edges],
-                    "skills": _vg.skills, "memories": _vg.memories, "mcp": _vg.mcp
-                };
-            }
-            elif name == "library" { payload["data"] = library(); }
-            elif name == "mcp" { payload["data"] = mcp_status(); }
-            elif name == "observability" {
-                # Same seam rule as "graph": VObs must leave as plain dicts.
-                import from src.sigil { observability_tail }
-                _vo = observability_tail(int(a.get("n", 120)));
-                payload["data"] = {
-                    "calls": [{"model": _c.model, "signature": _c.signature,
-                               "prompt_tokens": _c.prompt_tokens,
-                               "completion_tokens": _c.completion_tokens,
-                               "reasoning_tokens": _c.reasoning_tokens,
-                               "cache_read_tokens": _c.cache_read_tokens,
-                               "cost_usd": _c.cost_usd, "content": _c.content,
-                               "reasoning": _c.reasoning, "tools": _c.tools}
-                              for _c in _vo.calls],
-                    "tin": _vo.tin, "tout": _vo.tout, "treason": _vo.treason,
-                    "cost": _vo.cost, "n": _vo.n
-                };
-            }
-            elif name == "recall" { payload["data"] = recollect(str(a.get("query", "")), int(a.get("k", 8))); }
-            elif name == "teach" { payload["data"] = teach(str(a.get("fact", "")), str(a.get("kind", "fact"))); }
-            elif name == "configure" { payload["data"] = configure(str(a.get("key", "")), str(a.get("value", ""))); }
-            elif name == "solve" { payload["data"] = run_task(str(a.get("task", "")), str(a.get("skill", ""))); }
-            elif name == "register_skill" { payload["data"] = register_skill(str(a.get("source", "")), str(a.get("kind", "md"))); }
-            elif name == "add_mcp" {
-                payload["data"] = add_mcp(str(a.get("name", "")), str(a.get("transport", "stdio")),
-                                          str(a.get("target", "")), list(a.get("args") or []));
-            }
-            elif name == "eval" { payload["data"] = eval_skill(str(a.get("signature", "")), str(a.get("probe", ""))); }
-            elif name == "relearn" { payload["data"] = relearn(str(a.get("signature", "")), str(a.get("hint", ""))); }
-            elif name == "forget" { payload["data"] = forget(str(a.get("signature", ""))); }
-            elif name == "chat" {
-                _r = run_task(str(a.get("text", "")), "");
-                payload["data"] = {
-                    "id": "sigil-chatcmpl", "object": "chat.completion",
-                    "model": str(a.get("model", "sigil")),
-                    "choices": [{"index": 0, "finish_reason": "stop",
-                                 "message": {"role": "assistant", "content": str(_r["result"])}}]
-                };
-            }
-            elif name == "models" {
-                _data: list[any] = [];
-                for tier in ["frontier", "small", "router"] {
-                    _data.append({"id": "sigil-" + tier, "object": "model", "owned_by": "sigil"});
-                }
-                for e in list(library()) {
-                    _sk = dict(e);
-                    _data.append({"id": "sigil-skill/" + str(_sk["signature"]),
-                                  "object": "model", "owned_by": "sigil"});
-                }
-                payload["data"] = {"object": "list", "data": _data};
-            }
-            elif name == "tools_invoke" {
-                import from src.sigil_mcp { dispatch }
-                _res = dispatch(str(a.get("name", "")), [dict(a.get("arguments") or {})]);
-                if _res is None {
-                    payload["ok"] = False;
-                    payload["error"] = "no registered tool '" + str(a.get("name", "")) + "'";
-                } else { payload["data"] = _res; }
-            }
-            elif name == "inbound" {
-                payload["data"] = inbound(str(a.get("channel", "webhook")), str(a.get("peer", "anon")),
-                                          str(a.get("text", "")), str(a.get("thread_id", "")));
-            }
-            elif name == "cron_tick" { payload["data"] = cron_tick(); }
-            elif name == "cron_list" { payload["data"] = cron_list(); }
-            elif name == "cron_runs" { payload["data"] = cron_runs(str(a.get("name", ""))); }
-            elif name == "cron_enable" {
-                payload["data"] = cron_enable(str(a.get("name", "")), bool(a.get("on", True)));
-            }
-            elif name == "cron_remove" { payload["data"] = cron_remove(str(a.get("name", ""))); }
-            elif name == "skill_agir" {
-                import from src.sigil_agir_view { skill_agir }
-                payload["data"] = skill_agir(str(a.get("signature", "")));
-            }
-            elif name == "tasks" { payload["data"] = tasks_list(int(a.get("n", 20))); }
-            elif name == "hooks" { payload["data"] = hook_list(); }
-            elif name == "channels" { payload["data"] = channel_list(); }
-            elif name == "approvals" { payload["data"] = approvals_get(); }
-            elif name == "console" {
-                # Everything the web console adds, behind one name: see
-                # src/sigil_console.jac for the ops and what each returns.
-                import from src.sigil_console { console_dispatch }
-                payload["data"] = console_dispatch(str(a.get("op", "")), dict(a.get("args") or {}));
-            }
-            else {
-                payload["ok"] = False;
-                payload["error"] = "unknown api '" + str(name) + "'";
-            }
-        } except Exception as _apierr {
-            payload["ok"] = False;
-            payload["error"] = str(_apierr)[:600];
-        }
         print(JSON_MARKER);
-        print(_json_text(payload));
+        print(api_json(api_dispatch(name, a)));
     } elif cmd == "register-skill" {
         # register-skill <path> [md|agir|osp]  (kind auto-detected from extension)
         path = _arg(argv, 1); kind = _arg(argv, 2);

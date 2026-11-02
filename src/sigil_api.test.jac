@@ -64,3 +64,25 @@ test "a real endpoint answers from the project's graph, not the caller's" {
     assert "skills" in got;
     assert int(got["skills"]) >= 0;
 }
+
+test "endpoints answer in-process unless SIGIL_API_SUBPROCESS asks otherwise" {
+    was = os.environ.get("SIGIL_API_SUBPROCESS");
+    os.environ.pop("SIGIL_API_SUBPROCESS", None);
+    assert in_process();
+    os.environ["SIGIL_API_SUBPROCESS"] = "1";
+    assert not in_process();
+    if was is None { os.environ.pop("SIGIL_API_SUBPROCESS", None); }
+    else { os.environ["SIGIL_API_SUBPROCESS"] = was; }
+}
+
+test "api_local answers like the CLI's table, and leaves the caller's root as it found it" {
+    import from jaclang.runtime.runtime { JacRuntime }
+    before = str(JacRuntime.get_context().user_root.id);
+    r = api_local("soul", {});
+    assert r["ok"], f"expected a soul, got {r}";
+    assert "name" in dict(r["data"]);
+    assert str(JacRuntime.get_context().user_root.id) == before;
+    bad = api_local("_t_no_such_api", {});
+    assert not bad["ok"];
+    assert "unknown api" in str(bad["error"]);
+}

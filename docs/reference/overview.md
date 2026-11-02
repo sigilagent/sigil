@@ -78,3 +78,9 @@ The web console has three places, in its top bar:
   behaviour, tool policy, workspace and sandbox, and the system.
 
 ⌘K searches all of it, and asks Sigil whatever you type.
+
+The console answers from the running server itself, on the same graph as the CLI,
+so pages load in milliseconds and what the CLI or the daemon writes shows up on the
+next request. A compile still runs as its own background job, so a long compile
+never holds the server. `SIGIL_API_SUBPROCESS=1` (set where the server starts) goes
+back to answering each request in a fresh `sigil api` process.
