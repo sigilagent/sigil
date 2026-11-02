@@ -45,12 +45,30 @@ def _tooltip(n: any) -> str {
     return "\n".join(bits);
 }
 
+def _wrapId(nid: str, width: int) -> str {
+    # A long snake_case id, broken at underscores into lines of about `width`
+    # characters: in a top-down layout a fan-out of long ids is what makes the
+    # graph too wide to read once it is fitted to a narrow pane.
+    if len(nid) <= width { return nid; }
+    lines: list[str] = [];
+    cur = "";
+    for part in nid.split("_") {
+        piece = part if (cur == "") else ("_" + part);
+        if (len(cur) + len(piece) > width) and cur {
+            lines.append(cur + "_");
+            cur = part;
+        } else { cur = cur + piece; }
+    }
+    if cur { lines.append(cur); }
+    return "\n".join(lines);
+}
+
 def:pub AgirCanvas(nodes: list[any], edges: list[any], dark: bool,
-                   onSelect: Callable[[str], None]) -> JsxElement {
+                   onSelect: Callable[[str], None], direction: str = "LR") -> JsxElement {
     has containerRef: Ref[any] = Ref();
     has netRef: Ref[any] = Ref();
 
-    can draw with (nodes, edges, dark) entry {
+    can draw with (nodes, edges, dark, direction) entry {
         cr: any = containerRef;
         el = cr.current;
         if not el { return; }
@@ -61,7 +79,7 @@ def:pub AgirCanvas(nodes: list[any], edges: list[any], dark: bool,
 
         ns = nodes if nodes else [];
         es = edges if edges else [];
-        vn = [{"id": str(n.id), "label": str(n.id),
+        vn = [{"id": str(n.id), "label": (_wrapId(str(n.id), 16) if (direction == "UD") else str(n.id)),
                "color": _acolor(str(n.group)),
                # a model-executed instruction is a diamond, an executable one is a
                # box, the rest are dots: the shape says who decides, before you
@@ -85,17 +103,23 @@ def:pub AgirCanvas(nodes: list[any], edges: list[any], dark: bool,
                       "shadow": {"enabled": True, "color": "rgba(0,0,0,0.25)", "size": 5}},
             "edges": {"width": 1.4,
                       "arrows": {"to": {"enabled": True, "scaleFactor": 0.55}},
-                      "smooth": {"type": "cubicBezier", "forceDirection": "horizontal",
+                      "smooth": {"type": "cubicBezier",
+                                 "forceDirection": ("vertical" if (direction == "UD") else "horizontal"),
                                  "roundness": 0.45}},
             "interaction": {"hover": True, "tooltipDelay": 120,
                             "zoomView": True, "dragView": True, "dragNodes": True},
-            # A contract has a direction; physics would hide it.
-            "layout": {"hierarchical": {"enabled": True, "direction": "LR",
+            # A contract has a direction; physics would hide it. Left-to-right
+            # on a wide page, top-down ("UD") in a tall, narrow pane.
+            "layout": {"hierarchical": {"enabled": True, "direction": direction,
                                         "sortMethod": "directed",
-                                        "levelSeparation": 170, "nodeSpacing": 110}},
+                                        "levelSeparation": (90 if (direction == "UD") else 170),
+                                        "nodeSpacing": (130 if (direction == "UD") else 110)}},
             "physics": {"enabled": False}
         };
         nr: any = netRef;
+        # The Studio switches skills in place: drop the last network before
+        # drawing into the same container, or both keep listening.
+        if nr.current { nr.current.destroy(); }
         dn: any = makeDataSet(vn);
         de: any = makeDataSet(ve);
         nr.current = makeNetwork(el, {"nodes": dn, "edges": de}, options);

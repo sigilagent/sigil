@@ -55,4 +55,32 @@ so a `configure` change takes effect on the next turn with no restart.
 - `sigil <command>` — one-shot CLI (`solve`, `soul`, `configure`, `cron`, `channel`,
   `docs`, `models`, `teach`, `recall`, …). Run `sigil` with no args for the full list.
 - `sigil serve` (= `jac start observatory.jac`) — the full-stack server: REST API + the Observatory web UI
-  (live agent-graph + token observability), plus the `api_inbound` webhook for channels.
+  (see below), plus the `api_inbound` webhook for channels.
+
+## The Observatory
+
+The web console has three places, in its top bar:
+
+- **Studio** (the home page) — a chat with Sigil beside the shelf of compiled
+  agents and a viewer that draws the selected agent's AG-IR as a graph. The chat is
+  a general one. Ask for an agent and Sigil scopes it with you; once it is confident,
+  it proposes the agent with a **Build** button, which compiles the SKILL.md it wrote
+  and shows every compile stage in the conversation. The paperclip compiles a skill
+  folder you already have. Each shelf entry shows its steps as marks: diamonds are
+  steps the model decides, squares run as code, dots route or return. In the viewer,
+  click a step to inspect it, and **Ask Sigil about this step** frames your next
+  message around it. Set `SIGIL_CHAT_PROPOSE=0` to turn the Build proposal off.
+- **Dashboard** — what needs you (approvals, failing skills or schedules, unfaithful
+  compiles) and a tile for every other page: runs, usage, memory, automations,
+  approvals, model providers, channels, MCP & tools, compile reports, the full skill
+  library, settings and docs.
+- **Settings** — model providers, models, keys and secrets, the agent's persona,
+  behaviour, tool policy, workspace and sandbox, and the system.
+
+⌘K searches all of it, and asks Sigil whatever you type.
+
+The console answers from the running server itself, on the same graph as the CLI,
+so pages load in milliseconds and what the CLI or the daemon writes shows up on the
+next request. A compile still runs as its own background job, so a long compile
+never holds the server. `SIGIL_API_SUBPROCESS=1` (set where the server starts) goes
+back to answering each request in a fresh `sigil api` process.

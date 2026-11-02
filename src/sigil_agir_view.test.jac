@@ -83,3 +83,11 @@ test "parse_agir: an IR with no nodes says so" {
     assert g["nodes"] == [];
     assert "no nodes" in str(g["warning"]);
 }
+
+test "agir_marks: one instruction class per node, in declaration order" {
+    marks = agir_marks(_cookbook("word_frequency"));
+    assert marks == ["executable", "executable", "executable", "termination"];
+    # model-decided steps show up as `semantic`, so a strip can count them
+    assert "semantic" in agir_marks(_cookbook("contact_to_csv"));
+    assert agir_marks("   ") == [];
+}

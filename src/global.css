@@ -89,3 +89,18 @@ html, body, #root { min-height: 100%; margin: 0; }
 body { background: var(--sg-ink-0); }
 textarea { font-family: inherit; }
 .vis-network:focus { outline: none; }
+
+/* Studio's first open: the Sigil glyph draws itself, then the greeting rises.
+   Off for anyone who asked their system for less motion. */
+@keyframes sg-draw { from { stroke-dashoffset: 140; } to { stroke-dashoffset: 0; } }
+@keyframes sg-pop { 0%, 55% { opacity: 0; transform: scale(.3); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes sg-ring { 0%, 100% { opacity: .25; } 50% { opacity: .7; } }
+@keyframes sg-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.sg-draw { stroke-dasharray: 140; animation: sg-draw 1.6s ease-out both; }
+.sg-draw-late { stroke-dasharray: 140; animation: sg-draw 1.3s .7s ease-out both; }
+.sg-pop { transform-box: fill-box; transform-origin: center; animation: sg-pop 2.1s ease-out both; }
+.sg-ring { animation: sg-ring 4s 2s ease-in-out infinite; }
+.sg-rise { animation: sg-rise .7s 1.6s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .sg-draw, .sg-draw-late, .sg-pop, .sg-ring, .sg-rise { animation: none; }
+}

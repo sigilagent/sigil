@@ -85,7 +85,10 @@ glob:pub ICONS: dict[str, list[str]] = {
     "chevron": ["m9 6 6 6-6 6"],
     "copy": ["M8 8h11v11H8z", "M5 16V5h11"],
     "play": ["M7 5v14l11-7z"],
-    "stop": ["M7 7h10v10H7z"]
+    "stop": ["M7 7h10v10H7z"],
+    "grid": ["M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"],
+    "back": ["m15 6-6 6 6 6"],
+    "external": ["M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"]
 };
 
 def:pub Icon(name: str, size: int = 16, cls: str = "", fill: bool = False) -> JsxElement {
@@ -207,4 +210,49 @@ def:pub Bar(pct: float, tone: str = "ok") -> JsxElement {
     return <span className="block h-1.5 w-full rounded-full bg-ink-4 overflow-hidden">
         <span className={"block h-full rounded-full " + fill} style={{"width": str(p) + "%"}}></span>
     </span>;
+}
+
+# A skill's steps as a strip of marks, one per AG-IR node, shaped and coloured
+# by instruction class like the AG-IR canvas: diamonds are steps the model
+# decides, squares run as code, dots route or return.
+glob MARK_SEM: str = "inline-block w-[7px] h-[7px] shrink-0 rotate-45 bg-[#a78bfa]";
+glob MARK_DEL: str = "inline-block w-[7px] h-[7px] shrink-0 rotate-45 bg-[#f472b6]";
+glob MARK_EXE: str = "inline-block w-[7px] h-[7px] shrink-0 rounded-[1px] bg-[#22d3ee]";
+glob MARK_CTL: str = "inline-block w-[7px] h-[7px] shrink-0 rounded-full bg-[#f5c451]";
+glob MARK_RET: str = "inline-block w-[7px] h-[7px] shrink-0 rounded-full bg-[#4ade80]";
+glob MARK_OTHER: str = "inline-block w-[7px] h-[7px] shrink-0 rounded-full border border-faint";
+
+def:pub markCls(group: str) -> str {
+    if group == "semantic" { return MARK_SEM; }
+    if group == "delegated" { return MARK_DEL; }
+    if group == "executable" { return MARK_EXE; }
+    if group == "control" { return MARK_CTL; }
+    if group == "termination" { return MARK_RET; }
+    return MARK_OTHER;
+}
+
+def:pub modelSteps(marks: list[any]) -> int {
+    return len([m for m in marks if str(m) in ["semantic", "delegated"]]);
+}
+
+def:pub Marks(marks: list[any]) -> JsxElement {
+    ms: list[any] = list(marks) if marks else [];
+    n = modelSteps(ms);
+    label = str(len(ms)) + " steps, " + str(n) + " decided by the model";
+    return <span role="img" aria-label={label} title={label} className="flex flex-wrap items-center gap-1 min-h-[7px]">
+        {[<span key={str(i)} className={markCls(str(m))}></span> for (i, m) in enumerate(ms)]}
+    </span>;
+}
+
+# The Studio's greeting: the Logo, drawn stroke by stroke (src/global.css).
+def:pub Glyph(size: int = 112) -> JsxElement {
+    return <svg viewBox="0 0 32 32" width={size} height={size} role="img" aria-label="Sigil" className="shrink-0 text-line-2">
+        <circle className="sg-ring" cx="16" cy="16" r="15.4" fill="none" stroke="currentColor" strokeWidth="0.3"></circle>
+        <g fill="none" stroke="#a78bfa" strokeWidth="1.1" strokeLinejoin="round">
+            <polygon className="sg-draw" points="16,3 27.3,9.5 27.3,22.5 16,29 4.7,22.5 4.7,9.5"></polygon>
+            <path className="sg-draw" d="M16 3 L16 29 M4.7 9.5 L27.3 22.5 M27.3 9.5 L4.7 22.5" opacity="0.5" strokeWidth="0.6"></path>
+        </g>
+        <polygon className="sg-draw-late" points="16,9.5 22,20 10,20" fill="none" stroke="#38bdf8" strokeWidth="1.1" strokeLinejoin="round"></polygon>
+        <circle className="sg-pop" cx="16" cy="16" r="2.2" fill="#22d3ee"></circle>
+    </svg>;
 }

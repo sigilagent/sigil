@@ -14,17 +14,18 @@ import from .ui {
     PageHead, Icon, Note, Spinner, Empty, CARD, BTN, BTN2, BTN_SM, BTN2_SM, BTN_GHOST_SM, BTN_BAD_SM,
     INP, LABEL, LINK, chip, dotCls, tagCls
 }
+import from .markdown { Markdown }
 import from "./console_interop.js" { readFiles, storeGet, storeSet, fmtAgo, secs, navTo, nowMs }
 import from react { useEffect }
 
-glob MODES: list[any] = [
+glob:pub MODES: list[any] = [
     ["ask", "Ask me", "The compile pauses on each one until you answer Do, Maybe or Don't"],
     ["decide", "Let Sigil decide", "A second model answers each from the skill's own text, citing the line it relied on"],
     ["optional", "Treat as optional", "Each unclear rule becomes a Maybe; no model is involved"]
 ];
 
 # raise2's stages, in the order they run.
-glob STAGES: list[any] = [
+glob:pub STAGES: list[any] = [
     ["spec", "Spec loop", "Read the skill into rules"],
     ["clarify", "Unclear rules", "Settle what the skill leaves open"],
     ["author", "Author", "Write the AG-IR"],
@@ -33,7 +34,7 @@ glob STAGES: list[any] = [
     ["gates", "Gates", "Lower it, type-check it, run the gate battery"]
 ];
 
-glob ANSWERS: list[any] = [
+glob:pub ANSWERS: list[any] = [
     ["do", "Do", "always"],
     ["maybe", "Maybe", "when the task calls for it"],
     ["dont", "Don't", "never"]
@@ -43,14 +44,14 @@ def _isEntry(p: str) -> bool {
     return str(p).lower().endswith("skill.md");
 }
 
-def _statusTone(s: str) -> str {
+def:pub statusTone(s: str) -> str {
     if s in ["faithful", "clean", "fixed"] { return "ok"; }
     if s in ["degraded"] { return "warn"; }
     if s in ["unfaithful", "uncompilable", "failed"] { return "bad"; }
     return "";
 }
 
-def _stageRows(events: list[any], state: str, mode: str, done: bool) -> list[any] {
+def:pub stageRows(events: list[any], state: str, mode: str, done: bool) -> list[any] {
     # One row per stage: [key, name, about, status, line, took] where status is
     # wait | run | done | skip.
     started: dict[str, any] = {};
@@ -207,7 +208,7 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
     state = str(st.state) if st else "";
     events: list[any] = list(st.events) if (st and st.events) else [];
     jmode = str(meta.mode) if meta else mode;
-    rows = _stageRows(events, state, jmode, state in ["done", "stopped"]);
+    rows = stageRows(events, state, jmode, state in ["done", "stopped"]);
     elapsed = 0;
     if meta {
         endms = int(result.finished_ms) if (result and result.finished_ms) else int(st.now_ms);
@@ -284,7 +285,7 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
                     {for jb in jobs {
                         <a key={str(jb.job)} href={"#/compile/" + str(jb.job)}
                             className={"flex items-center gap-2.5 px-4 py-2.5 border-b border-line no-underline text-fg hover:bg-ink-3" + (" bg-violet-500/10" if (str(jb.job) == job) else "")}>
-                            <span className={dotCls(_statusTone(str(jb.status)) if jb.status else ("live" if (str(jb.state) in ["running", "waiting"]) else ""))}></span>
+                            <span className={dotCls(statusTone(str(jb.status)) if jb.status else ("live" if (str(jb.state) in ["running", "waiting"]) else ""))}></span>
                             <span className="flex-1 min-w-0 flex flex-col">
                                 <span className="font-mono text-[12.5px] truncate">{str(jb.signature or jb.name)}</span>
                                 <span className="text-[11.5px] text-muted">{(str(jb.status) if jb.status else str(jb.state)) + " · " + fmtAgo(jb.created_ms)}</span>
@@ -306,7 +307,7 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
                             <h2 id="runh" className="m-0 font-mono text-base font-semibold">{str(result.signature) if (result and result.signature) else str(meta.name)}</h2>
                             {if state == "waiting" { <span className={chip("warn")}>waiting for you</span> }
                              elif state == "running" { <span className={chip("live")}>compiling</span> }
-                             elif status { <span className={chip(_statusTone(status))}>{status}</span> }
+                             elif status { <span className={chip(statusTone(status))}>{status}</span> }
                              elif state == "stopped" { <span className={chip("bad")}>stopped</span> }}
                             <span className="ml-auto text-[12.5px] text-muted">{secs(elapsed) + " · " + MODES_LABEL(jmode)}</span>
                         </div>
@@ -353,12 +354,12 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
                         <section aria-labelledby="resh" className={CARD + " p-4.5 flex flex-col gap-3"}>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                 <h2 id="resh" className="m-0 text-[15px] font-semibold">Result</h2>
-                                {(<span className={chip(_statusTone(status))}>{status}</span>) if status else None}
+                                {(<span className={chip(statusTone(status))}>{status}</span>) if status else None}
                                 {(<span className="text-[12.5px] text-muted">{"saved as v" + str(result.version)}</span>) if result.version else None}
                                 {(<a href={"#/skills/" + str(result.signature)} className={BTN_SM + " ml-auto no-underline"}>Open the skill</a>) if (result.signature and result.ok) else None}
                             </div>
                             {(<Note text={str(result.error)} tone="bad"/>) if result.error else None}
-                            {(<p className="m-0 text-[13px] leading-relaxed text-fg-2 whitespace-pre-wrap">{str(result.explain)}</p>) if result.explain else None}
+                            {(<Markdown text={str(result.explain)}/>) if result.explain else None}
                             {if findings {
                                 <div className="flex flex-col gap-1.5">
                                     <span className={LABEL}>Gate findings</span>
@@ -398,7 +399,7 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
     </div>;
 }
 
-def MODES_LABEL(m: str) -> str {
+def:pub MODES_LABEL(m: str) -> str {
     for x in MODES { if x[0] == m { return str(x[1]); } }
     return m;
 }

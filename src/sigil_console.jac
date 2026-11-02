@@ -247,15 +247,26 @@ def _skills() -> list[any] {
 
 def skills_view() -> list[any] {
     # The library with what its page shows beside each skill: whether MCP
-    # clients and the chat agent can call it.
-    import from .sigil_core { tool_allowed }
+    # clients and the chat agent can call it, and the instruction class of each
+    # of its steps (the Studio shelf draws them as a strip of marks).
+    import from .sigil_core { tool_allowed, Registry, TaskGraph, latest_by_sig }
     import from .sigil_skill_tools { tool_name }
+    import from .sigil_agir_view { agir_marks }
+    marks: dict[str, list[str]] = {};
+    regs = [root -->[?:Registry]];
+    if regs {
+        for tg in latest_by_sig([regs[0] -->[?:TaskGraph]]) {
+            marks[str(tg.signature)] = agir_marks(tg.agir);
+        }
+    }
     out: list[any] = [];
     for s in _skills() {
-        t = tool_name(str(s["signature"]));
+        sig = str(s["signature"]);
+        t = tool_name(sig);
         row = dict(s);
         row["tool"] = t;
         row["exposed"] = tool_allowed(t);
+        row["marks"] = marks.get(sig, []);
         out.append(row);
     }
     return out;

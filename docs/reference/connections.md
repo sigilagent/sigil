@@ -200,8 +200,8 @@ conversations run in a process that ends before a browser sign-in could finish.
 
 ## In the Observatory
 
-**Model providers**, under Connect in the sidebar beside Channels and MCP & tools
-(the same page as Settings → Model providers), lists every route with its status, and
+**Settings → Model providers** (Settings is in the top bar, and the page is also a
+tile on the Dashboard) lists every route with its status, and
 a row for each tier showing whether it can run:
 
 - **Continue with ChatGPT** and **Sign in to OpenRouter** open the sign-in in a

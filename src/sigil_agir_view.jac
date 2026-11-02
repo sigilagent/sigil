@@ -132,6 +132,13 @@ def parse_agir(text: str) -> dict[str, any] {
     return out;
 }
 
+def agir_marks(text: str) -> list[str] {
+    # The instruction class of each node, in the order the AG-IR declares them:
+    # the strip of marks the console draws beside a skill, so you can see how
+    # much of it the model decides before opening its graph.
+    return [str(n["group"]) for n in parse_agir(text)["nodes"]];
+}
+
 def skill_agir(signature: str) -> dict[str, any] {
     # The drawable AG-IR for one compiled skill, latest version.
     sig: str = str(signature or "").strip();

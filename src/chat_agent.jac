@@ -46,6 +46,8 @@ glob chat_llm: any = Model(model_name="gpt-4o-mini");
 glob CHAT_HISTORY: list[any] = [];
 glob CHAT_INFO: dict[str, any] = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
+glob _WEB_UI: bool = False;   # this turn came from the web console, which can show a Build button
+glob _WEB_TURN: any = threading.Lock();   # the server runs requests on threads; a web turn owns the chat state
 
 def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
 
@@ -145,6 +147,39 @@ def recall_memory(query: str) -> str {
     ms = recollect(query, 6);
     if not ms { return "(nothing relevant in memory)"; }
     return "\n".join(["(" + str(m["kind"]) + ") " + str(m["content"]) for m in ms]);
+}
+
+sem propose_agent = """Offer the user an agent to build: the web console shows it as a
+card with a Build button. Use this, not learn_skill, when the user asks you to build an
+agent from a description. SCOPE IT FIRST: before calling this, be confident you know what
+the agent takes in, what it must produce and where, the rules it must follow (what it must
+always do, must never do, and do only in some cases), and how it handles the edge cases
+the user cares about. If any of that is unclear, ask the user, a few questions at a time,
+and call this only once you could defend every rule in the SKILL.md. Do not compile it
+yourself: pressing Build compiles it and shows every stage.""";
+sem propose_agent.name = "A short snake_case name for the agent, e.g. clean_csv.";
+sem propose_agent.summary = "One sentence saying what the agent does.";
+sem propose_agent.skill_md = """The complete SKILL.md: YAML frontmatter with `name` and
+`description`, then the procedure as numbered steps, naming its inputs and outputs, with
+each rule stated as MUST, MUST NOT or SHOULD and the edge cases agreed with the user.""";
+def propose_agent(name: str = "", summary: str = "", skill_md: str = "") -> str {
+    # Defaulted for the same reason as learn_skill: a missing argument is a normal
+    # model mistake and gets an answer it can act on, not a traceback.
+    if not str(skill_md).strip() {
+        _trace("propose", "(no SKILL.md given)", False);
+        return "propose_agent needs `skill_md`: the complete SKILL.md to compile. Nothing was proposed.";
+    }
+    _trace("propose", str(name or "agent"));
+    return ("Proposed '" + str(name or "agent") + "' to the user as a card with a Build button. "
+            + "Do not compile it yourself. In your reply, say in a sentence or two what it will do "
+            + "and that they can press Build, or tell you what to change.");
+}
+
+def _propose_on() -> bool {
+    # Offered only to web-console turns (the REPL has no button to press), and
+    # switchable off with SIGIL_CHAT_PROPOSE=0.
+    v = str(os.environ.get("SIGIL_CHAT_PROPOSE", "1")).strip().lower();
+    return _WEB_UI and (v not in ["0", "false", "no", "off"]);
 }
 
 sem learn_skill = """Author a NEW reusable skill from a DESCRIPTION, when no skill
@@ -434,6 +469,9 @@ Guidance:
   look them up.
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
 - Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
+  When propose_agent is among your tools (the web console), building an agent from a
+  description goes through it instead: scope the agent with the user until you are
+  confident, then propose it, and the user presses Build.
 - External tools: mcp_call for connected MCP servers.
 - Model providers: model_connections says what is connected and whether each tier can run;
   connect_model starts a connection (it opens a browser sign-in, or explains the safe way to
@@ -462,7 +500,7 @@ def chat_agent(message: str) -> str by chat_llm(
         model_connections, connect_model, use_model_provider,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
         doc_index, read_docs, spawn_subagent, spawn_parallel
-    ] + skill_tools(),
+    ] + skill_tools() + ([propose_agent] if _propose_on() else []),
     conversation=CHAT_HISTORY,
     incl_info=CHAT_INFO,
     max_react_iterations=14,
@@ -584,9 +622,20 @@ def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
     # the conversation and hands it back each turn. Same agent, same tools, same
     # approvals: a shell command that needs one is queued, and the console shows
     # it beside the reply.
-    CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
-    out = chat_turn(message);
-    out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
-    out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
+    #
+    # The Observatory answers in its own long-lived process, so turns share this
+    # module's conversation state: one turn at a time, and the web-only Build
+    # proposal is switched back off before a channel's turn can run here.
+    with _WEB_TURN {
+        CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
+        _WEB_UI = True;
+        try {
+            out = chat_turn(message);
+        } finally {
+            _WEB_UI = False;
+        }
+        out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
+        out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
+    }
     return out;
 }
