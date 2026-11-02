@@ -47,6 +47,12 @@ def in_child() -> bool {
     return str(os.environ.get(CHILD_ENV) or "") == "1";
 }
 
+# Where this jac install lives, as opposed to what one server is doing. Every jac
+# process on the machine has to agree on these: jaseci's image (docker/Dockerfile)
+# sets JAC_CACHE_HOME, the graph's Postgres cluster lives under it, and a child
+# that lost it opened a second, empty cluster under XDG_CACHE_HOME instead.
+glob KEEP_JAC_ENV: list[str] = ["JAC_CACHE_HOME", "JAC_PG_DIST"];
+
 def child_env() -> dict[str, any] {
     # The server exports its own jac runtime settings into the environment, and a
     # child that inherited them resolved the SERVER's store instead of the
@@ -55,7 +61,7 @@ def child_env() -> dict[str, any] {
     out: dict[str, any] = {};
     for (k, v) in os.environ.items() {
         key = str(k);
-        if key.startswith("JAC") or key.startswith("JACLANG") { continue; }
+        if (key.startswith("JAC") or key.startswith("JACLANG")) and (key not in KEEP_JAC_ENV) { continue; }
         out[key] = str(v);
     }
     out[CHILD_ENV] = "1";

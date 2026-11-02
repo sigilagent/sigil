@@ -288,3 +288,60 @@ jobs:
           done
           sigil daemon stop || true
           sigil serve stop || true
+
+  # The container image (docker/Dockerfile) behind the Windows Docker pathway and
+  # tools/sandbox. Builds it from this commit, runs it the way install.ps1 does, and
+  # checks what a container changes: one graph across `docker exec` and the
+  # Observatory (a child that lost JAC_CACHE_HOME opened a second, empty one), the
+  # Host check on a 0.0.0.0 bind, and a graph that outlives its container. Also
+  # parses install.ps1, which nothing else here runs.
+  docker:
+    name: docker image & windows installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: install.ps1 parses
+        run: |
+          pwsh -NoProfile -Command '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$e) | Out-Null; if ($e) { $e | ForEach-Object { "::error::install.ps1: $_" }; exit 1 }'
+
+      - name: Build the image
+        run: ./docker/build.sh sigil:ci
+
+      - name: Run it as install.ps1 does
+        run: |
+          docker run -d --name sigil --init -p 127.0.0.1:8199:8199 \
+            -v sigil-state:/home/jac/.sigil -v sigil-graph:/opt/jac/state/pg \
+            -v sigil-skills:/opt/sigil/app/src/crystallized sigil:ci
+          for i in $(seq 1 100); do curl -fs -o /dev/null http://127.0.0.1:8199/ && break; sleep 3; done
+          curl -fs -o /dev/null http://127.0.0.1:8199/ || { echo "::error::the Observatory never came up"; exit 1; }
+
+      - name: One graph for docker exec and the Observatory
+        run: |
+          docker exec sigil sigil teach "the ci container fact is plum-42"
+          out="$(curl -s -X POST http://127.0.0.1:8199/walker/api_recall \
+            -H 'Content-Type: application/json' -d '{"query":"ci container fact"}')"
+          grep -q plum-42 <<<"$out" || { echo "::error::the Observatory answered from another graph: $out"; exit 1; }
+
+      - name: The Host check survives the 0.0.0.0 bind
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8199/walker/api_soul \
+            -H 'Host: evil.example:8199' -H 'Content-Type: application/json' -d '{}')"
+          [ "$code" = 403 ] || { echo "::error::a foreign Host got $code, not 403"; exit 1; }
+
+      - name: The graph outlives the container
+        run: |
+          docker rm -f sigil
+          docker run -d --name sigil --init -p 127.0.0.1:8199:8199 \
+            -v sigil-state:/home/jac/.sigil -v sigil-graph:/opt/jac/state/pg \
+            -v sigil-skills:/opt/sigil/app/src/crystallized sigil:ci
+          docker exec sigil sigil recall "ci container fact" | tee "$RUNNER_TEMP/recall.txt"
+          grep -q plum-42 "$RUNNER_TEMP/recall.txt"
+
+      - name: Container logs
+        if: always()
+        run: |
+          docker logs sigil 2>&1 | tail -n 60 || true
+          docker exec sigil sh -c 'for f in ~/.sigil/log/*; do echo "===== $f"; tail -n 60 "$f"; done' || true

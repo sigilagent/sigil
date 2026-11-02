@@ -1,0 +1,22 @@
+# Exclude list for `docker build -f docker/Dockerfile .`. The context is the repo
+# root, but BuildKit reads `<dockerfile>.dockerignore` first, so this lives next to
+# the Dockerfile instead of at the repo root.
+#
+# An ALLOWLIST: a working checkout carries untracked weight (skillsbench/, pilot/,
+# _site/) and a live graph in .jac/, and none of it belongs in an image.
+*
+!sigil
+!jac.toml
+!observatory.jac
+!src
+!docs
+!web
+!examples
+!LICENSE
+!README.md
+
+**/.jac
+**/__pycache__
+**/*.session
+**/*.session.*
+web/node_modules

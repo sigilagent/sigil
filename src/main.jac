@@ -584,9 +584,14 @@ def serve_observatory(port: str) {
     # on every network this machine joins. SIGIL_SERVE_HOST=0.0.0.0 opts back in.
     # The server process inherits the variable, so src/sigil_api.jac knows which
     # Host headers are its own (see _foreign_request).
+    # SIGIL_SERVE_BIND moves only the listening socket. A container must listen on
+    # 0.0.0.0 to be reachable through its published port, yet the browser still
+    # arrives as localhost — so the Host check keeps answering to loopback, which
+    # opting in through SIGIL_SERVE_HOST=0.0.0.0 would switch off.
     host = os.getenv("SIGIL_SERVE_HOST") or "127.0.0.1";
     os.environ["SIGIL_SERVE_HOST"] = host;
-    cmdline = [_jac_bin(), "run", "--serve", "--no-dev", "--host", host, "--port", port,
+    bind = os.getenv("SIGIL_SERVE_BIND") or host;
+    cmdline = [_jac_bin(), "run", "--serve", "--no-dev", "--host", bind, "--port", port,
                os.path.join(proj, "observatory.jac")];
     print("Sigil Observatory → " + embed_url(port) + "   (or http://localhost:" + port + ")");
     sys.stdout.flush();

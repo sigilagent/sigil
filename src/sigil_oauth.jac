@@ -96,6 +96,12 @@ class Callback:
 
     Binds an ephemeral port unless one is named. Requests to any other path (a
     favicon, a prefetch) get a 404 and the wait goes on.
+
+    In a container (docker/Dockerfile) the browser is on the other side of a
+    published port, so it can reach neither an ephemeral port nor the
+    container's own loopback: SIGIL_OAUTH_PORT fixes the port the image
+    publishes and SIGIL_OAUTH_BIND=0.0.0.0 listens where that port arrives.
+    The redirect URI still names localhost, which is where the browser is.
     """
 
     def __init__(self, path: str, port: int = 0):
@@ -133,7 +139,9 @@ class Callback:
             def log_message(self, *args):
                 pass  # the terminal belongs to Sigil, not to an access log
 
-        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", int(port)), Handler)
+        port = int(port or os.environ.get("SIGIL_OAUTH_PORT") or 0)
+        bind = os.environ.get("SIGIL_OAUTH_BIND") or "127.0.0.1"
+        self._server = http.server.ThreadingHTTPServer((bind, port), Handler)
         self._server.daemon_threads = True
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
