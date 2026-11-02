@@ -1,23 +1,31 @@
 """Sigil's web console: the shell.
 
-A sidebar, one page at a time, and the ⌘K palette over all of it. The pages live
-in their own modules (web/<page>.jac) and fetch their own data through
-`api_console`; the shell owns only what more than one page shows: the overview
-behind the sidebar's badges, the route, the theme, and a message waiting to be
-asked in Chat.
+A top bar, one page at a time, and the ⌘K palette over all of it. The bar has
+three places: the Studio (web/studio.jac), where you chat with Sigil, build agents
+and see their graphs; the Dashboard (web/dashboard.jac), which holds what needs
+you and a tile for every other page; and Settings, with its sections (model
+providers, models, keys, agent, behaviour, tool policy, workspace, system). The
+other pages (runs, usage, memory, automations, approvals, channels, tools, docs,
+the library, compile reports, a skill's full page) live in their own modules and
+keep their routes, so old links still land; while one is open the bar shows
+Dashboard as current.
 
-Routes are hash paths (#/skills/clean_csv) so a page can be bookmarked and the
+The pages fetch their own data through `api_console`; the shell owns only what
+more than one page shows: the overview behind the bar's approval count and
+status, the route, the theme, and a message waiting to be asked in the Studio.
+
+Routes are hash paths (#/studio/clean_csv) so a page can be bookmarked and the
 browser's back button works, with no server routing to configure.
 
 Every request answers by running against the agent's real graph in a fresh
 `jac run` process (see src/sigil_api.jac), so each fetch costs a process start:
-the shell refreshes its overview every 20 seconds, and pages fetch when opened.
+the shell refreshes its overview every 45 seconds, and pages fetch when opened.
 """
 
 import from src.sigil_console { api_console }
 import from .ui { Icon, Logo }
-import from .home { HomePage }
-import from .chat { ChatPage }
+import from .studio { StudioPage }
+import from .dashboard { DashboardPage }
 import from .library { LibraryPage }
 import from .skill { SkillPage }
 import from .compile { CompilePage }
@@ -34,33 +42,8 @@ import from .palette { Palette }
 import from "./console_interop.js" { routeNow, onRoute, navTo, storeGet, storeSet, onShortcut, pageVisible }
 import from react { useEffect }
 
-# [page, label, path, icon], or ["", heading] for a group heading.
-glob NAV: list[any] = [
-    ["home", "Home", "/", "home"],
-    ["chat", "Chat", "/chat", "chat"],
-    ["", "Skills"],
-    ["skills", "Library", "/skills", "library"],
-    ["compile", "Compile", "/compile", "compile"],
-    ["", "Activity"],
-    ["runs", "Runs", "/runs", "runs"],
-    ["usage", "Usage", "/usage", "usage"],
-    ["", "Agent"],
-    ["memory", "Memory", "/memory", "memory"],
-    ["automations", "Automations", "/automations", "clock"],
-    ["approvals", "Approvals", "/approvals", "shield"],
-    ["", "Connect"],
-    ["models", "Model providers", "/settings/connections", "key"],
-    ["channels", "Channels", "/channels", "channels"],
-    ["tools", "MCP & tools", "/tools", "plug"]
-];
-
-glob FOOT: list[any] = [
-    ["settings", "Settings", "/settings", "settings"],
-    ["docs", "Docs", "/docs", "docs"]
-];
-
-glob NAV_ON: str = "flex items-center gap-2.5 h-9 px-2.5 rounded-lg no-underline text-[13.5px] font-medium text-fg bg-violet-500/15";
-glob NAV_OFF: str = "flex items-center gap-2.5 h-9 px-2.5 rounded-lg no-underline text-[13.5px] text-fg-2 hover:bg-ink-3 hover:text-fg";
+glob TOP_ON: str = "inline-flex items-center h-[38px] px-4 rounded-[9px] no-underline text-[13.5px] font-medium text-fg bg-ink-4";
+glob TOP_OFF: str = "inline-flex items-center h-[38px] px-4 rounded-[9px] no-underline text-[13.5px] font-medium text-muted hover:text-fg";
 
 def:pub App() -> JsxElement {
     has route: str = "/";
@@ -100,7 +83,9 @@ def:pub App() -> JsxElement {
     }, []);
 
     def go(p: str) { navTo(p); }
-    def ask(text: str) { draft = text; navTo("/chat"); }
+    # A question asked anywhere (a page's "Ask Sigil" box, the palette) is sent
+    # from the Studio's chat.
+    def ask(text: str) { draft = text; navTo("/"); }
     def clearDraft() { draft = ""; }
     def refresh() { loadOverview(); }
     def closePalette() { palette = False; }
@@ -108,81 +93,59 @@ def:pub App() -> JsxElement {
     def flipTheme(e: MouseEvent) { light = not light; storeSet("sigil.light", light); }
 
     parts: list[str] = [x for x in route.split("/") if x];
-    page = parts[0] if parts else "home";
-    # Model providers live in Settings, and are listed under Connect beside
-    # Channels and MCP: that entry, not Settings, is current on that section.
-    navOn = "models" if ((page == "settings") and ((len(parts) < 2) or (parts[1] == "connections"))) else page;
+    page = parts[0] if parts else "studio";
+    studio = page in ["studio", "chat"];
+    settings = page == "settings";
+    dash = (not studio) and (not settings);
     pending = len(ov.pending) if (ov and ov.pending) else 0;
-    nskills = len(ov.skills) if (ov and ov.skills) else 0;
     daemonUp = bool(ov.daemon) if ov else False;
-    nchan = len(ov.channels) if (ov and ov.channels) else 0;
+    chatModel = str(ov.soul.chat_model) if (ov and ov.soul and ov.soul.chat_model) else "";
+    onConnections = (page == "settings") and ((len(parts) < 2) or (parts[1] == "connections"));
 
-    return <div className={("light " if light else "") + "min-h-screen flex flex-wrap items-stretch bg-ink-0 text-fg font-sans text-sm leading-normal"}>
-        <nav aria-label="Main" className="flex-[1_1_232px] lg:max-w-[232px] bg-ink-1 border-r border-line px-3 py-4 flex flex-col gap-0.5 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto">
-            <a href="#/" className="flex items-center gap-2.5 px-2 pt-1 pb-3.5 no-underline text-fg">
-                <Logo size={26}/>
+    return <div className={("light " if light else "") + "flex flex-col bg-ink-0 text-fg font-sans text-sm leading-normal " + ("h-screen overflow-hidden" if studio else "min-h-screen")}>
+        <header className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-2.5 border-b border-line bg-ink-1 shrink-0">
+            <a href="#/" className="flex items-center gap-2.5 min-h-11 no-underline text-fg">
+                <Logo size={24}/>
                 <span className="text-[17px] font-semibold tracking-tight">sigil</span>
             </a>
+            <nav aria-label="Main" className="flex gap-0.5 p-[3px] rounded-xl bg-ink-2 border border-line-2">
+                <a href="#/" aria-current={"page" if studio else None} className={TOP_ON if studio else TOP_OFF}>Studio</a>
+                <a href="#/dashboard" aria-current={"page" if dash else None} className={TOP_ON if dash else TOP_OFF}>Dashboard</a>
+                <a href="#/settings" aria-current={"page" if settings else None} className={TOP_ON if settings else TOP_OFF}>Settings</a>
+            </nav>
             <button type="button" onClick={openPalette}
-                className="flex items-center gap-2 h-9 px-2.5 mb-2.5 rounded-lg border border-line-2 bg-ink-2 text-muted text-[13px] cursor-pointer hover:text-fg">
+                className="ml-auto flex items-center gap-2.5 h-11 min-w-[220px] px-3 rounded-[10px] border border-line-2 bg-ink-2 text-muted text-[13px] cursor-pointer hover:text-fg">
                 <Icon name="search" size={15}/>
-                <span>Search or ask</span>
-                <span className="ml-auto font-mono text-[11px] text-muted border border-line-2 rounded px-1.5">⌘K</span>
+                <span>Search agents, runs, settings</span>
+                <span className="ml-auto font-mono text-[11px] border border-line-2 rounded px-1.5">⌘K</span>
             </button>
-            {for item in NAV {
-                if not item[0] {
-                    <div key={"h-" + str(item[1])} className="px-2.5 pt-3.5 pb-1 text-[11px] font-medium tracking-wider uppercase text-faint">{item[1]}</div>
-                } else {
-                    <a key={str(item[0])} href={"#" + str(item[2])}
-                        aria-current={"page" if (navOn == item[0]) else None}
-                        className={NAV_ON if (navOn == item[0]) else NAV_OFF}>
-                        <Icon name={str(item[3])} cls={"text-violet-400" if (navOn == item[0]) else ""}/>
-                        <span>{item[1]}</span>
-                        {(<span className="ml-auto font-mono text-[11.5px] text-faint">{str(nskills)}</span>) if ((item[0] == "skills") and nskills) else None}
-                        {(<span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-[#f5c451] text-[#1a1406] text-[11.5px] font-semibold inline-flex items-center justify-center"
-                            aria-label={str(pending) + " waiting"}>{str(pending)}</span>) if ((item[0] == "approvals") and pending) else None}
-                    </a>
-                }
-            }}
-            <div className="grow min-h-5"></div>
-            {for item in FOOT {
-                <a key={str(item[0])} href={"#" + str(item[2])}
-                    aria-current={"page" if (navOn == item[0]) else None}
-                    className={NAV_ON if (navOn == item[0]) else NAV_OFF}>
-                    <Icon name={str(item[3])} cls={"text-violet-400" if (navOn == item[0]) else ""}/>
-                    <span>{item[1]}</span>
-                </a>
-            }}
-            <button type="button" onClick={flipTheme} className={NAV_OFF + " w-full cursor-pointer bg-transparent border-0"}>
+            {(<a href="#/approvals" className="inline-flex items-center gap-2 h-11 px-3 rounded-[10px] bg-[#f5c451]/10 border border-[#f5c451]/30 text-warn no-underline text-[12.5px] font-medium">
+                <Icon name="shield" size={15}/>{str(pending) + (" approval waiting" if (pending == 1) else " approvals waiting")}
+            </a>) if pending else None}
+            <span className="inline-flex items-center gap-2 h-11 px-1 text-[12.5px] text-muted">
+                <span className={"inline-block w-[7px] h-[7px] rounded-full " + ("bg-[#4ade80]" if daemonUp else "border border-faint")}></span>
+                {(<a href="#/settings/models" className="text-muted no-underline hover:text-fg" title="Change the models Sigil uses">{chatModel}</a>) if chatModel else None}
+                {(<span aria-hidden="true">·</span>) if chatModel else None}
+                <a href="#/settings/system" className="text-muted no-underline hover:text-fg"
+                    title={"Daemon running" if daemonUp else "Daemon not running: schedules will not fire"}>{"daemon running" if daemonUp else "daemon stopped"}</a>
+            </span>
+            <button type="button" onClick={flipTheme} aria-label={"Switch to dark theme" if light else "Switch to light theme"}
+                className="inline-flex items-center justify-center w-11 h-11 rounded-[10px] border border-line-2 bg-transparent text-muted cursor-pointer hover:text-fg">
                 <Icon name={"moon" if light else "sun"}/>
-                <span>{"Dark theme" if light else "Light theme"}</span>
             </button>
-            <a href="#/settings/system" className="mt-2.5 p-3 rounded-[10px] border border-line bg-ink-2 text-xs text-muted flex flex-col gap-1.5 no-underline">
-                <span className="flex items-center gap-2">
-                    <span className={"inline-block w-[7px] h-[7px] rounded-full " + ("bg-[#4ade80]" if daemonUp else "border border-faint")}></span>
-                    {"Daemon running" if daemonUp else "Daemon not running"}
-                </span>
-                <span className="flex items-center gap-2">
-                    <span className={"inline-block w-[7px] h-[7px] rounded-full " + ("bg-[#4ade80]" if nchan else "border border-faint")}></span>
-                    {(str(nchan) + (" channel" if nchan == 1 else " channels")) if nchan else "No channels"}
-                </span>
-                <span className="flex items-center gap-2">
-                    <span className="inline-block w-[7px] h-[7px] rounded-full bg-[#22d3ee]"></span>
-                    <span className="font-mono">{window.location.host}</span>
-                </span>
-            </a>
-        </nav>
+        </header>
 
-        <main className="flex-[999_1_560px] min-w-0 flex flex-col">
-            {(<div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-7 py-2.5 border-b border-warn/30 bg-warn/10 text-[13px] text-warn">
-                <span className="font-medium">No model is connected.</span>
-                <span className="text-fg-2">{"Sigil cannot compile or chat until one is" + ((" (" + str(ov.connected.why) + ")") if ov.connected.why else "") + "."}</span>
-                <a href="#/settings/connections" className="ml-auto font-medium text-warn no-underline hover:underline">Connect a model →</a>
-            </div>) if (ov and ov.connected and (not ov.connected.ok) and (not ((page == "settings") and ((len(parts) < 2) or (parts[1] == "connections"))))) else None}
-            {if page == "home" {
-                <HomePage ov={ov} go={go} ask={ask} refresh={refresh}/>
-            } elif page == "chat" {
-                <ChatPage route={parts} go={go} draft={draft} clearDraft={clearDraft} refresh={refresh}/>
+        {(<div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 py-2.5 border-b border-warn/30 bg-warn/10 text-[13px] text-warn shrink-0">
+            <span className="font-medium">No model is connected.</span>
+            <span className="text-fg-2">{"Sigil cannot compile or chat until one is" + ((" (" + str(ov.connected.why) + ")") if ov.connected.why else "") + "."}</span>
+            <a href="#/settings/connections" className="ml-auto font-medium text-warn no-underline hover:underline">Connect a model →</a>
+        </div>) if (ov and ov.connected and (not ov.connected.ok) and (not onConnections)) else None}
+
+        <main className={"min-w-0 flex flex-col " + ("flex-1 min-h-0" if studio else "")}>
+            {if studio {
+                <StudioPage route={parts} draft={draft} clearDraft={clearDraft} refresh={refresh} dark={not light}/>
+            } elif page in ["dashboard", "home"] {
+                <DashboardPage ov={ov} go={go} ask={ask} refresh={refresh}/>
             } elif (page == "skills") and (len(parts) > 1) {
                 <SkillPage route={parts} go={go} ask={ask} refresh={refresh}/>
             } elif page == "skills" {
@@ -208,7 +171,7 @@ def:pub App() -> JsxElement {
             } elif page == "docs" {
                 <DocsPage route={parts} go={go} ask={ask} refresh={refresh}/>
             } else {
-                <HomePage ov={ov} go={go} ask={ask} refresh={refresh}/>
+                <DashboardPage ov={ov} go={go} ask={ask} refresh={refresh}/>
             }}
         </main>
 

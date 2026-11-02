@@ -10,10 +10,10 @@ import from "./console_interop.js" { focusId, fmtAgo, money }
 
 # [label, path, sub]
 glob PAGES: list[any] = [
-    ["Home", "/", "What needs you, what ran, what it cost"],
-    ["Chat", "/chat", "Hand Sigil a task"],
-    ["Library", "/skills", "Every compiled skill"],
-    ["Compile", "/compile", "SKILL.md in, a typed agent out"],
+    ["Studio", "/", "Chat with Sigil, build agents, see their graphs"],
+    ["Dashboard", "/dashboard", "What needs you, what ran, what it cost"],
+    ["Library", "/skills", "Every compiled skill, as a list"],
+    ["Compile", "/compile", "Compile a SKILL.md folder, and past compile reports"],
     ["Runs", "/runs", "What ran and how it went"],
     ["Usage", "/usage", "Tokens and spend by model"],
     ["Memory", "/memory", "What Sigil remembers"],
@@ -37,7 +37,7 @@ glob SETTINGS: list[any] = [
 
 glob ACTIONS: list[any] = [
     ["Compile a skill", "/compile", "Upload a SKILL.md and compile it into a typed procedure"],
-    ["New chat", "/chat", "Hand Sigil a task"],
+    ["New chat", "/", "Hand Sigil a task, or describe an agent to build"],
     ["Teach Sigil something", "/memory", "A fact, preference or rule to remember"],
     ["New schedule", "/automations", "Run a task on a timer"]
 ];
@@ -103,7 +103,7 @@ def _groups(ov: any, q: str) -> list[any] {
     acts = [_item("Actions", str(a[0]), str(a[2]), str(a[1]), "acc", "action", False) for a in ACTIONS];
     if actionsOnly { return [["Actions", _pick(acts, words, 0)]]; }
 
-    sk = [_item("Skills", str(s.signature), _skillSub(s), "/skills/" + str(s.signature), _skillTone(s), "skill", True)
+    sk = [_item("Skills", str(s.signature), _skillSub(s), "/studio/" + str(s.signature), _skillTone(s), "skill", True)
           for s in sorted(skills, key=_byRuns, reverse=True)];
     rn = [_item("Runs", str(t.detail or t.label), str(t.label) + " · " + str(t.kind), "/runs/" + str(i),
                 "ok" if t.ok else "bad", fmtAgo(t.at_ms), False) for (i, t) in enumerate(tasks)];
@@ -159,7 +159,7 @@ def:pub Palette(ov: any, go: Callable[[str], None], ask: Callable[[str], None], 
 
     def askNow() {
         if askText { ask(askText); }
-        else { go("/chat"); }
+        else { go("/"); }
         onClose();
     }
 

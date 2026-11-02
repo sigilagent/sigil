@@ -1,4 +1,4 @@
-"""Home: what needs you, what ran, what it cost.
+"""Dashboard: what needs you, what ran, what it cost, and every page but the Studio.
 
 Everything here comes from the shell's overview (one request), plus the recent
 compile jobs. "Needs you" is built in the browser from what the overview holds:
@@ -6,13 +6,18 @@ a pending approval, a skill that keeps failing or graded below the threshold, a
 schedule whose last run failed, a schedule that cannot fire because the daemon
 is down, a compile that came out unfaithful. Each item carries the button that
 fixes it.
+
+Below it, one tile per page that used to sit in the sidebar (runs, usage, memory,
+schedules, approvals, connections, settings, docs), each with the one line of the
+overview that says whether it needs a look. Building and opening agents is the
+Studio's job (web/studio.jac), so it has no tile here.
 """
 
 import from src.sigil_console { api_console }
 import from src.sigil { api_relearn }
 import from .ui {
-    PageHead, Stat, Bar, Icon, Empty, Note, Spinner, CARD, BTN, BTN2, BTN_SM, BTN2_SM, BTN_BAD_SM,
-    BTN_GHOST_SM, chip, tagCls, dotCls, LINK
+    PageHead, Stat, Icon, Note, Spinner, CARD, BTN, BTN_SM, BTN2_SM, BTN_BAD_SM,
+    BTN_GHOST_SM, chip, tagCls, dotCls, LINK, LABEL
 }
 import from "./console_interop.js" { fmtAgo, money, compact }
 import from react { useEffect }
@@ -23,15 +28,6 @@ def _okPct(s: any) -> float {
     return (float(s.successes) * 100.0) / float(r);
 }
 
-def _tone(p: float) -> str {
-    if p < 0 { return ""; }
-    if p >= 90 { return "ok"; }
-    if p >= 60 { return "warn"; }
-    return "bad";
-}
-
-def _byRuns(s: any) -> int { return int(s.runs) if s.runs else 0; }
-
 def _routeTag(summary: str) -> str {
     s = str(summary or "");
     if "MUTATE" in s { return "MUTATE"; }
@@ -40,7 +36,7 @@ def _routeTag(summary: str) -> str {
     return "";
 }
 
-def:pub HomePage(ov: any, go: Callable[[str], None], ask: Callable[[str], None],
+def:pub DashboardPage(ov: any, go: Callable[[str], None], ask: Callable[[str], None],
                  refresh: Callable[[], None]) -> JsxElement {
     has jobs: list[any] = [];
     has busy: str = "";
@@ -103,15 +99,31 @@ def:pub HomePage(ov: any, go: Callable[[str], None], ask: Callable[[str], None],
             if (next_job is None) or (int(j.next_run_ms) < int(next_job.next_run_ms)) { next_job = j; }
         }
     }
-    ranked = sorted(skills, key=_byRuns, reverse=True)[:8];
     ok_runs = len([t for t in tasks if t.ok]);
+    chans: list[any] = list(ov.channels) if (ov and ov.channels) else [];
+    connected: any = ov.connected if ov else None;
+    nmem = int(soul.memories) if (soul and soul.memories) else 0;
+    # [label, path, icon, one line, needs a look]
+    tiles: list[any] = [
+        ["Runs", "/runs", "runs", ((str(ok_runs) + " of the last " + str(len(tasks)) + " finished ok") if tasks else "Nothing has run yet"), bool(tasks) and (ok_runs < len(tasks))],
+        ["Usage", "/usage", "usage", ((money(today.cost) + " today · " + compact(today.tokens) + " tokens") if today else "Tokens and spend by model"), False],
+        ["Memory", "/memory", "memory", (str(nmem) + (" thing remembered" if (nmem == 1) else " things remembered")), False],
+        ["Automations", "/automations", "clock", ((str(len(armed)) + " of " + str(len(cron)) + " schedules armed" + ((" · next " + str(next_job.name) + " " + fmtAgo(next_job.next_run_ms)) if next_job else "")) if cron else "No schedules yet"), (len(broken_cron) > 0) or daemon_down],
+        ["Approvals", "/approvals", "shield", ((str(len(pending)) + " waiting on you") if pending else "Nothing waiting · the allowlist"), len(pending) > 0],
+        ["Model providers", "/settings/connections", "key", (("chat " + str(soul.chat_model)) if soul else "ChatGPT, Claude Code, OpenRouter, Ollama or a key"), bool(connected) and (not connected.ok)],
+        ["Channels", "/channels", "channels", ((str(len(chans)) + (" channel connected" if (len(chans) == 1) else " channels connected")) if chans else "Where Sigil can be messaged"), False],
+        ["MCP & tools", "/tools", "plug", "MCP servers, and which skills MCP clients may call", False],
+        ["Compiles", "/compile", "compile", ((str(len(jobs)) + " recent compiles" + ((" · " + str(len(bad_jobs)) + " unfaithful") if bad_jobs else "")) if jobs else "Compile reports, newest first"), len(bad_jobs) > 0],
+        ["All skills", "/skills", "library", (str(len(skills)) + (" compiled skill" if (len(skills) == 1) else " compiled skills") + " · the full library"), len(failing) > 0],
+        ["Settings", "/settings", "settings", "Model providers, models, keys, agent, behaviour, workspace, system", False],
+        ["Docs", "/docs", "docs", "How Sigil works: AG-IR, the gates, the CLI", False]
+    ];
 
     return <div className="flex flex-col">
-        <PageHead title="Home"
+        <PageHead title="Dashboard"
             kicker={("frontier " + str(soul.frontier_model) + " · small " + str(soul.small_model)) if soul else "connecting to Sigil…"}
-            onAsk={ask} askHint="Ask Sigil about anything here" tag="home">
-            <a href="#/chat" className={BTN2 + " no-underline"}>New chat</a>
-            <a href="#/compile" className={BTN + " no-underline"}><Icon name="plus" size={15}/>Compile a skill</a>
+            onAsk={ask} askHint="Ask Sigil about anything here" tag="dashboard">
+            <a href="#/" className={BTN + " no-underline"}><Icon name="chat" size={15}/>Open the Studio</a>
         </PageHead>
 
         <div className="px-7 pt-6 pb-10 flex flex-col gap-5">
@@ -138,8 +150,8 @@ def:pub HomePage(ov: any, go: Callable[[str], None], ask: Callable[[str], None],
                     </div>
                     {if needs == 0 {
                         <div className="px-4.5 py-6 text-[13px] text-muted">
-                            {"Nothing is waiting on you." if skills else "Nothing yet. Compile a skill to give Sigil something to run."}
-                            {(<a href="#/compile" className={LINK + " ml-1.5"}>Compile a skill →</a>) if (not skills) else None}
+                            {"Nothing is waiting on you." if skills else "Nothing yet. Build an agent in the Studio to give Sigil something to run."}
+                            {(<a href="#/" className={LINK + " ml-1.5"}>Build one in the Studio →</a>) if (not skills) else None}
                         </div>
                     }}
                     {for p in pending {
@@ -228,26 +240,16 @@ def:pub HomePage(ov: any, go: Callable[[str], None], ask: Callable[[str], None],
                 </section>
             </div>
 
-            <section aria-labelledby="health" className={CARD + " px-4.5 py-4 flex flex-col gap-3.5"}>
-                <div className="flex items-center gap-2.5">
-                    <h2 id="health" className="m-0 text-[15px] font-semibold">Skill health</h2>
-                    <span className="text-xs text-faint">runs that finished ok</span>
-                    <a href="#/skills" className={LINK + " ml-auto text-[12.5px] no-underline"}>Library →</a>
-                </div>
-                {(<Empty title="No compiled skills yet" body="Upload a SKILL.md on the Compile page, or ask Sigil to do a task: a task it has no skill for gets compiled into one.">
-                    <a href="#/compile" className={BTN_SM + " no-underline"}>Compile a skill</a>
-                </Empty>) if (not skills) else None}
-                <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
-                    {for s in ranked {
-                        <a key={"h-" + str(s.signature)} href={"#/skills/" + str(s.signature)}
-                            className="flex flex-col gap-1.5 px-3 py-2.5 rounded-[9px] bg-ink-1 border border-line no-underline text-fg hover:border-line-2">
-                            <span className="flex justify-between gap-2">
-                                <span className="font-mono text-[12.5px] truncate">{s.signature}</span>
-                                <span className={"text-xs " + ("text-ok" if (_tone(_okPct(s)) == "ok") else ("text-warn" if (_tone(_okPct(s)) == "warn") else ("text-bad" if (_tone(_okPct(s)) == "bad") else "text-faint")))}>
-                                    {(str(int(_okPct(s))) + "%") if (_okPct(s) >= 0) else "never run"}
-                                </span>
+            <section aria-labelledby="pages" className="flex flex-col gap-3">
+                <h2 id="pages" className={LABEL + " m-0"}>Everything else</h2>
+                <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(250px,1fr))]">
+                    {for t in tiles {
+                        <a key={str(t[0])} href={"#" + str(t[1])}
+                            className={CARD + " flex flex-col gap-1.5 px-4 py-3.5 no-underline text-fg hover:border-line-2" + (" border-warn/40" if t[4] else "")}>
+                            <span className="flex items-center gap-2 text-[13px] font-medium text-fg-2">
+                                <Icon name={str(t[2])} size={16} cls={"text-warn" if t[4] else "text-violet-400"}/>{t[0]}
                             </span>
-                            <Bar pct={_okPct(s) if (_okPct(s) >= 0) else 0.0} tone={_tone(_okPct(s)) or "ok"}/>
+                            <span className={"text-[12.5px] leading-snug " + ("text-warn" if t[4] else "text-muted")}>{t[3]}</span>
                         </a>
                     }}
                 </div>

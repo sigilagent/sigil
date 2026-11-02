@@ -127,3 +127,24 @@ test "chat's slash commands say connect for models and channel for channels" {
     assert "/channel <kind>" in usages;
     assert "/connections" in usages;
 }
+
+test "propose_agent: offered only to web-console turns, and switchable off" {
+    old = os.environ.get("SIGIL_CHAT_PROPOSE");
+    if "SIGIL_CHAT_PROPOSE" in os.environ { del os.environ["SIGIL_CHAT_PROPOSE"]; }
+    _WEB_UI = False;
+    assert not _propose_on();          # the REPL has no Build button to press
+    _WEB_UI = True;
+    assert _propose_on();              # default on in the console
+    os.environ["SIGIL_CHAT_PROPOSE"] = "0";
+    assert not _propose_on();
+    _WEB_UI = False;
+    if old is None { del os.environ["SIGIL_CHAT_PROPOSE"]; }
+    else { os.environ["SIGIL_CHAT_PROPOSE"] = str(old); }
+}
+
+test "propose_agent: no SKILL.md is a normal answer, and a proposal says not to compile" {
+    assert "needs `skill_md`" in propose_agent("x", "y", "  ");
+    out = propose_agent("clean_csv", "Cleans a CSV", "---\nname: clean_csv\n---\n1. Read it.");
+    assert "clean_csv" in out;
+    assert "Do not compile it yourself" in out;
+}

@@ -139,7 +139,7 @@ def:pub RunsPage(route: list[str], go: Callable[[str], None], ask: Callable[[str
             {if loaded and (len(runs) == 0) and (not err) {
                 <Empty title="Nothing has run yet"
                     body="Each task Sigil solves with a compiled skill, and each time a schedule fires, is recorded here with its outcome and report.">
-                    <a href="#/chat" className={BTN2_SM + " no-underline"}>Give Sigil a task</a>
+                    <a href="#/" className={BTN2_SM + " no-underline"}>Give Sigil a task</a>
                 </Empty>
             } elif loaded and (len(runs) > 0) {
                 <div className={CARD + " overflow-x-auto"}>
