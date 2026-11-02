@@ -105,7 +105,7 @@ with entry:__main__ {
     assert res.ir_text, "direct lift produced no IR";
     assert "def run(" in res.module_src, "direct lift did not lower to a runnable module";
     assert "CsvToy" in res.module_src, res.module_src[:200];
-    assert res.status in ["clean", "fixed", "degraded"], "unexpected status: " + res.status;
+    assert res.status in ["clean", "fixed", "degraded"], "unexpected status: " + res.status + " " + str(res.findings)[:800];
     assert res.repairs and str(res.repairs[0]).startswith("front-end: direct"), str(res.repairs[:2]);
 
     _done = [str(e["stage"]) for e in _events if str(e.get("state")) == "done"];

@@ -92,7 +92,7 @@ with entry:__main__ {
     assert res.gate_issues == [];
     assert res.ok, res.compile_errors;
     assert "def run(" in res.module_src;
-    assert "GEN-RAW" in res.ir_text;
+    assert "GENERATE" in res.ir_text;   # the reader canonicalized to the AIS
     _stages = [str(e["stage"]) for e in _events if str(e.get("state")) == "done"];
     assert _stages[:4] == ["spec", "spine", "flows", "assemble"], _stages;
     assert "gates" in _stages, _stages;
