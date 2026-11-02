@@ -241,6 +241,96 @@ def connect_channel(kind: str) -> str {
     return channel_setup_guide(kind);
 }
 
+sem model_connections = """Which model providers Sigil is connected to, and whether each of
+your model tiers (frontier, chat, small, router) has a live connection behind it. Use when
+the user asks what models or providers are set up, why a model call failed for lack of a
+key or sign-in, or to check after they connected one.""";
+def model_connections() -> str {
+    _trace("connections", "");
+    import from .sigil_connect { ready_tiers }
+    rt: dict[str, any] = ready_tiers();
+    lines: list[str] = ["providers:"];
+    for r in list(rt["rows"]) {
+        lines.append(("  [connected] " if r["connected"] else "  [not connected] ")
+                     + str(r["label"]) + " (" + str(r["id"]) + "): " + str(r["detail"]));
+    }
+    lines.append("tiers:");
+    for t in ["frontier", "chat", "small", "router"] {
+        x = rt["tiers"][t];
+        lines.append("  " + t + ": " + str(x["model"] or "(unset)")
+                     + ("" if x["ok"] else ("  NOT READY: " + str(x["why"]))));
+    }
+    return chr(10).join(lines);
+}
+
+sem connect_model = """Start connecting a model provider for the user. ChatGPT and OpenRouter
+connect by a browser sign-in, which this opens on the machine Sigil runs on; tell the user
+to finish it there, then check with model_connections. It never takes an API key: a key
+typed into chat would be sent to the model and kept in the transcript, so for key
+providers it tells the user the safe way (`/connect <provider>`, which asks without
+echoing). Claude Code and Ollama are set up outside Sigil; it says how.""";
+sem connect_model.provider = "chatgpt | openrouter | claude-code | ollama | ollama-cloud | openai | anthropic | gemini | zai";
+def connect_model(provider: str) -> str {
+    _trace("connect", provider);
+    import from .sigil_connect { PROVIDERS, KEYED, provider_status, provider_label, connect_start, how_to }
+    pid = str(provider or "").strip().lower();
+    if pid in ["claude", "claude-cc"] { pid = "claude-code"; }
+    if pid == "google" { pid = "gemini"; }
+    ids = [str(p[0]) for p in PROVIDERS];
+    if pid not in ids { return "no model provider called '" + provider + "'; one of: " + ", ".join(ids); }
+    label = provider_label(pid);
+    st: dict[str, any] = provider_status(pid);
+    if st["connected"] { return label + " is already connected (" + str(st["detail"]) + ")."; }
+    if pid in ["chatgpt", "openrouter"] {
+        # The sign-in comes back to a listener in THIS process. An Observatory
+        # request or a channel message runs in a child that exits with the reply,
+        # taking the listener with it — send those to a place that stays up.
+        if (str(os.environ.get("SIGIL_API_CHILD") or "") == "1") or (str(os.environ.get("SIGIL_CHILD") or "") == "1") {
+            return ("A " + label + " sign-in has to finish in a Sigil that stays running: open the Observatory's "
+                    + "Model providers page (http://localhost:8199/#/settings/connections) and choose "
+                    + ("Continue with ChatGPT" if (pid == "chatgpt") else "Sign in to OpenRouter")
+                    + ", or run /connect " + pid + " in the terminal chat.");
+        }
+        f: dict[str, any] = connect_start(pid);
+        if not f.get("url") { return "could not start the " + label + " sign-in: " + str(f.get("error") or "no link came back"); }
+        # Opened here, never returned: a returning ChatGPT sign-in link carries the
+        # previous ID token as a hint, and tool results go to the model.
+        opened = False;
+        try {
+            import webbrowser;
+            opened = bool(webbrowser.open(str(f["url"])));
+        } except Exception as e { opened = False; }
+        if not opened {
+            return "Could not open a browser here. Run /connect " + pid + " in the terminal chat; it prints the sign-in link.";
+        }
+        return ("Opened the " + label + " sign-in in the browser on this machine. Once the user finishes it there, "
+                + "model_connections will show it connected, and use_model_provider points the tiers at it.");
+    }
+    if pid in KEYED {
+        return (label + " connects with an API key (" + str(KEYED[pid][3]) + "). Do not ask for the key in chat: "
+                + "it would be sent to the model and kept in the transcript. Tell the user to run /connect " + pid
+                + " here (it asks without echoing), or `sigil connect " + pid + "`, or use the Observatory's "
+                + "Model providers page.");
+    }
+    return label + ": " + str(st["detail"]) + ". To connect it: " + how_to(pid) + ".";
+}
+
+sem use_model_provider = """Point the agent's model tiers at a connected provider: its strong
+model for the frontier and chat tiers, and its cheap one for small and router (a CLI
+subscription like Claude Code keeps the small tier on something cheaper). Use only when the
+user asks to use or switch to that provider.""";
+sem use_model_provider.provider = "A connected provider id, as model_connections lists it.";
+def use_model_provider(provider: str) -> str {
+    _trace("use_provider", provider);
+    import from .sigil_connect { connections, tiers_for, apply_tiers, provider_label }
+    pid = str(provider or "").strip().lower();
+    if pid in ["claude", "claude-cc"] { pid = "claude-code"; }
+    t: dict[str, str] = tiers_for(pid, connections());
+    if not t { return provider_label(pid) + " is not connected; connect it first (connect_model)."; }
+    said: list[str] = apply_tiers(t);
+    return chr(10).join(said) + chr(10) + "(takes effect from the next message)";
+}
+
 sem setup_channel = """Actually register a channel on the graph in one step: creates the
 Channel node and a SecretRef for its API token, and returns the remaining wiring steps.
 Use after the user has a token and wants it configured.""";
@@ -345,6 +435,10 @@ Guidance:
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
 - Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
 - External tools: mcp_call for connected MCP servers.
+- Model providers: model_connections says what is connected and whether each tier can run;
+  connect_model starts a connection (it opens a browser sign-in, or explains the safe way to
+  add a key); use_model_provider points the tiers at one. Never ask the user to paste an API
+  key into chat. Messaging apps are channels: connect_channel / setup_channel.
 - About YOURSELF: when the user asks how Sigil works, what a config key/tool does, or
   about the workspace/sandbox/cron/channels/memory/models, call read_docs (or doc_index)
   and answer from the reference — don't guess. For the user's CURRENT settings, use what
@@ -365,6 +459,7 @@ def chat_agent(message: str) -> str by chat_llm(
         schedule_task, list_scheduled, cancel_scheduled, run_scheduled_now,
         remember_fact, recall_memory, sigil_compile, learn_skill, list_skills, use_skill,
         mcp_call, send_message, connect_channel, setup_channel,
+        model_connections, connect_model, use_model_provider,
         cfg_set_model, cfg_set_persona, cfg_set_prompt_mode,
         doc_index, read_docs, spawn_subagent, spawn_parallel
     ] + skill_tools(),

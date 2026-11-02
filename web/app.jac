@@ -49,6 +49,7 @@ glob NAV: list[any] = [
     ["automations", "Automations", "/automations", "clock"],
     ["approvals", "Approvals", "/approvals", "shield"],
     ["", "Connect"],
+    ["models", "Model providers", "/settings/connections", "key"],
     ["channels", "Channels", "/channels", "channels"],
     ["tools", "MCP & tools", "/tools", "plug"]
 ];
@@ -108,6 +109,9 @@ def:pub App() -> JsxElement {
 
     parts: list[str] = [x for x in route.split("/") if x];
     page = parts[0] if parts else "home";
+    # Model providers live in Settings, and are listed under Connect beside
+    # Channels and MCP: that entry, not Settings, is current on that section.
+    navOn = "models" if ((page == "settings") and ((len(parts) < 2) or (parts[1] == "connections"))) else page;
     pending = len(ov.pending) if (ov and ov.pending) else 0;
     nskills = len(ov.skills) if (ov and ov.skills) else 0;
     daemonUp = bool(ov.daemon) if ov else False;
@@ -130,9 +134,9 @@ def:pub App() -> JsxElement {
                     <div key={"h-" + str(item[1])} className="px-2.5 pt-3.5 pb-1 text-[11px] font-medium tracking-wider uppercase text-faint">{item[1]}</div>
                 } else {
                     <a key={str(item[0])} href={"#" + str(item[2])}
-                        aria-current={"page" if (page == item[0]) else None}
-                        className={NAV_ON if (page == item[0]) else NAV_OFF}>
-                        <Icon name={str(item[3])} cls={"text-violet-400" if (page == item[0]) else ""}/>
+                        aria-current={"page" if (navOn == item[0]) else None}
+                        className={NAV_ON if (navOn == item[0]) else NAV_OFF}>
+                        <Icon name={str(item[3])} cls={"text-violet-400" if (navOn == item[0]) else ""}/>
                         <span>{item[1]}</span>
                         {(<span className="ml-auto font-mono text-[11.5px] text-faint">{str(nskills)}</span>) if ((item[0] == "skills") and nskills) else None}
                         {(<span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-[#f5c451] text-[#1a1406] text-[11.5px] font-semibold inline-flex items-center justify-center"
@@ -143,9 +147,9 @@ def:pub App() -> JsxElement {
             <div className="grow min-h-5"></div>
             {for item in FOOT {
                 <a key={str(item[0])} href={"#" + str(item[2])}
-                    aria-current={"page" if (page == item[0]) else None}
-                    className={NAV_ON if (page == item[0]) else NAV_OFF}>
-                    <Icon name={str(item[3])} cls={"text-violet-400" if (page == item[0]) else ""}/>
+                    aria-current={"page" if (navOn == item[0]) else None}
+                    className={NAV_ON if (navOn == item[0]) else NAV_OFF}>
+                    <Icon name={str(item[3])} cls={"text-violet-400" if (navOn == item[0]) else ""}/>
                     <span>{item[1]}</span>
                 </a>
             }}

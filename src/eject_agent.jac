@@ -40,7 +40,8 @@ glob RUNTIME_MODULES: list[str] = [
     "sigil_secrets", "sigil_transports", "sigil_bridge", "sigil_daemon",
     "sigil_tasks", "sigil_workspace", "sigil_subagents", "sigil_mcp",
     "sigil_claude_cc", "sigil_chatgpt", "sigil_observe", "sigil_docs", "sigil_channels_setup",
-    "chat_agent", "sigil_chat", "sigil_logo"
+    "chat_agent", "sigil_chat", "sigil_input", "sigil_logo",
+    "sigil_setup", "sigil_connect", "sigil_oauth"
 ];
 
 # Modules that stay behind: they reach the compiler, or they only make sense in

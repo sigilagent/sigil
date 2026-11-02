@@ -40,13 +40,14 @@ import threading;
 import traceback;
 import from .sigil_chat {
     _banner, _help, _handle_slash, _guttered_markdown, _trace_rows, _tool_style,
-    _sync_toolbar, chat_repl, config_menu, copy_to_clipboard, _TRACE_GUTTER
+    _sync_toolbar, chat_repl, config_menu, copy_to_clipboard, _TRACE_GUTTER, connect_slash
 }
 import from .sigil_input { SlashCompleter, _style, _TOOLBAR }
 import from .chat_agent { chat_turn, set_token_sink }
 import from .sigil_workspace { set_trace_sink, set_start_sink, set_approver }
 import from .sigil_runtime { commit_now }
 import from rich.console { Console }
+import from .sigil_channels_setup { channel_kinds }
 import from rich.text { Text }
 import from rich.table { Table }
 import from rich.padding { Padding }
@@ -727,6 +728,13 @@ def _slash(st: TuiState, cmd: str) -> str {
     verb = str(cmd.split(" ", 1)[0]).lower();
     if verb in ["/exit", "/quit", "/q"] { return "exit"; }
     if verb == "/config" { return "config"; }
+    # Connecting a provider asks for a key without echo, or waits on a browser
+    # sign-in: it needs the real terminal, like the settings editor. Bare
+    # `/connect` (the status) and channel kinds draw in the transcript as usual.
+    if verb == "/connect" {
+        first = str((cmd.split(" ", 1)[1] if (" " in cmd) else "").strip().split(" ")[0]).lower();
+        if first and (first not in channel_kinds()) { return "connect " + cmd.split(" ", 1)[1].strip(); }
+    }
     if verb == "/clear" {
         with st.lock { st.blocks.clear(); }
         st.scroll = 0;
@@ -975,6 +983,14 @@ def tui_chat(turn: any = None) -> None {
                 # screen, then take the alternate one back with the transcript intact
                 config_menu();
                 _sync_toolbar();
+                continue;
+            }
+            if action.startswith("connect ") {
+                # same for /connect <provider>: the real screen while it signs in
+                # or asks for a key, then one line in the transcript saying how it went
+                said = connect_slash(Console(), action[len("connect "):]);
+                _sync_toolbar();
+                if said { st.say(said); }
                 continue;
             }
             break;

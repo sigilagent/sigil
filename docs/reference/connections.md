@@ -179,10 +179,30 @@ on, so CI and other automation still run. `--claude` runs skip the gate, because
 The check makes no model calls. It looks at the credentials on disk, the
 environment, and the local Ollama port.
 
+## In chat
+
+Chat uses the same word for the same thing:
+
+| Command | What it does |
+|---|---|
+| `/connect` | What is connected, and whether each tier can run |
+| `/connect <provider>` | The same flow as `sigil connect <provider>`: a browser sign-in, or a key asked for without echo. The full-screen chat hands the terminal over while it runs, then returns |
+| `/connections` | The status table on its own |
+| `/channel <kind>` | Setup steps for a messaging channel (Discord, Telegram, WhatsApp, Slack). `/connect discord` still answers, and points here |
+
+Or ask in plain words ("connect my ChatGPT", "which models are set up?"). The agent has
+`model_connections`, `connect_model` and `use_model_provider`. `connect_model` opens a
+browser sign-in on this machine for ChatGPT and OpenRouter. It never takes an API key:
+anything typed into chat is sent to the model and kept in the transcript, so for a key
+provider it tells you to run `/connect <provider>`. In the Observatory's chat or a
+channel conversation, it points to the Model providers page instead, because those
+conversations run in a process that ends before a browser sign-in could finish.
+
 ## In the Observatory
 
-**Settings → Connections** lists every route with its status, and a row for each
-tier showing whether it can run:
+**Model providers**, under Connect in the sidebar beside Channels and MCP & tools
+(the same page as Settings → Model providers), lists every route with its status, and
+a row for each tier showing whether it can run:
 
 - **Continue with ChatGPT** and **Sign in to OpenRouter** open the sign-in in a
   new tab. The page waits until you finish, then offers to point the tiers at
