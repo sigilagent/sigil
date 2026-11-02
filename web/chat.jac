@@ -34,7 +34,8 @@ import from .ui {
 }
 import from .compile { MODES }
 import from .compile_card { CompileCard }
-import from "./console_interop.js" { storeGet, storeSet, scrollToEnd, focusId, nowMs, fmtClock, copyText, readFiles }
+import from .markdown { Markdown }
+import from "./console_interop.js" { storeGet, storeSet, scrollToEnd, focusId, nowMs, fmtClock, readFiles }
 import from react { useEffect }
 
 glob STORE_KEY: str = "sigil.chat";
@@ -44,7 +45,6 @@ glob CAP: int = 60;
 glob SEND_CAP: int = 32;
 glob SLIM_AT: int = 4000;
 glob NL: str = chr(10);
-glob FENCE: str = "```";
 glob KNOWN: list[str] = [
     "agent_name", "persona", "principles", "workspace", "sandbox", "running_shell_jobs",
     "compiled_skills", "relevant_memory", "chat_model", "model"
@@ -177,29 +177,6 @@ def _slim(hist: list[any]) -> list[any] {
     return out;
 }
 
-def _blocks(text: str) -> list[any] {
-    # [[kind, body, lang], ...]: prose and ``` fenced code, alternately.
-    out: list[any] = [];
-    parts: list[str] = text.split(FENCE);
-    for (i, p) in enumerate(parts) {
-        if (i % 2) == 1 {
-            lines: list[str] = p.split(NL);
-            first = lines[0].strip() if lines else "";
-            lang = "";
-            body = p;
-            if (len(lines) > 1) and (" " not in first) and (len(first) < 24) {
-                lang = first;
-                body = NL.join(lines[1:]);
-            }
-            out.append(["code", body.rstrip(), lang]);
-        } else {
-            s = p.strip();
-            if s { out.append(["text", s, ""]); }
-        }
-    }
-    return out;
-}
-
 def _shelf(v: any) -> list[any] {
     # "skill_clean_csv — Clean a CSV  (runs=3)" -> [signature, intent, runs]
     out: list[any] = [];
@@ -266,25 +243,8 @@ def ToolRows(tools: list[any]) -> JsxElement {
 }
 
 def Reply(text: str) -> JsxElement {
-    blocks = _blocks(text);
-    return <div className="flex flex-col gap-2.5 text-sm leading-relaxed text-fg min-w-0">
-        {for (bi, b) in enumerate(blocks) {
-            if b[0] == "code" {
-                <div key={"b" + str(bi)} className="rounded-lg bg-ink-1 border border-line overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 h-7 border-b border-line">
-                        <span className="font-mono text-[11px] text-faint">{b[2] if b[2] else "code"}</span>
-                        <button type="button" className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted hover:text-fg cursor-pointer bg-transparent border-0"
-                            onClick={lambda (e: MouseEvent) { copyText(str(b[1])); }}>
-                            <Icon name="copy" size={12}/>Copy
-                        </button>
-                    </div>
-                    <pre className="m-0 px-3 py-2.5 overflow-x-auto text-[12.5px] leading-relaxed font-mono text-fg-2">{b[1]}</pre>
-                </div>
-            } else {
-                <div key={"b" + str(bi)} className="whitespace-pre-wrap break-words">{b[1]}</div>
-            }
-        }}
-    </div>;
+    # The model writes markdown; draw it as such (web/markdown.jac), never as HTML.
+    return <div className="text-sm leading-relaxed text-fg min-w-0"><Markdown text={text}/></div>;
 }
 
 def ApprovalCard(cmd: str, rec: any, busy: bool, onDecide: Callable[[str, str], None]) -> JsxElement {

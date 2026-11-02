@@ -14,6 +14,7 @@ import from .ui {
     PageHead, Icon, Note, Spinner, Empty, CARD, BTN, BTN2, BTN_SM, BTN2_SM, BTN_GHOST_SM, BTN_BAD_SM,
     INP, LABEL, LINK, chip, dotCls, tagCls
 }
+import from .markdown { Markdown }
 import from "./console_interop.js" { readFiles, storeGet, storeSet, fmtAgo, secs, navTo, nowMs }
 import from react { useEffect }
 
@@ -358,7 +359,7 @@ def:pub CompilePage(route: list[str], go: Callable[[str], None], ask: Callable[[
                                 {(<a href={"#/skills/" + str(result.signature)} className={BTN_SM + " ml-auto no-underline"}>Open the skill</a>) if (result.signature and result.ok) else None}
                             </div>
                             {(<Note text={str(result.error)} tone="bad"/>) if result.error else None}
-                            {(<p className="m-0 text-[13px] leading-relaxed text-fg-2 whitespace-pre-wrap">{str(result.explain)}</p>) if result.explain else None}
+                            {(<Markdown text={str(result.explain)}/>) if result.explain else None}
                             {if findings {
                                 <div className="flex flex-col gap-1.5">
                                     <span className={LABEL}>Gate findings</span>
