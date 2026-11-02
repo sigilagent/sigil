@@ -28,6 +28,9 @@ glob OBS_LOG: str = "observability/live.jsonl";
 # The driver we write next to each compiled module: it imports the module's
 # `run`, binds the small model, installs the token observer, and prints the report
 # behind a marker. Kept as a `.format()` template — `{{`/`}}` are literal braces.
+# It is a jac program like any other, so jac 0.37's type gate applies: a bare
+# `dict` (E1036) or an untyped value from a ::py:: module (E1001) fails the run
+# before `run` is ever called, and every solve reported "DONE fail" with no output.
 glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
     "import from jaclang.byllm.lib {{ Model }}\n"
     "import sigil_observe;\n"
@@ -39,15 +42,15 @@ glob _DRIVER: str = "import from crystallized.{mod} {{ run }}\n"
     "    obs = os.getenv(\"SIGIL_OBS\", \"\");\n"
     "    sig = os.getenv(\"SIGIL_SIG\", \"\");\n"
     "    sigil_observe.install(obs, sig);\n"
-    "    model_name = os.getenv(\"SIGIL_MODEL\", \"gpt-4o-mini\");\n"
-    "    cfg: dict = {{}};\n"
+    "    model_name: str = str(os.getenv(\"SIGIL_MODEL\", \"gpt-4o-mini\"));\n"
+    "    cfg: dict[str, any] = {{}};\n"
     "    if sigil_claude_cc.is_claude_cc(model_name) {{\n"
     "        sigil_claude_cc.install();\n"
     "        cfg = {{\"native_tools\": False}};\n"
     "    }}\n"
     "    if sigil_chatgpt.is_chatgpt(model_name) {{\n"
     "        sigil_chatgpt.install();\n"
-    "        model_name = sigil_chatgpt.plan_model(model_name);\n"
+    "        model_name = str(sigil_chatgpt.plan_model(model_name));\n"
     "        cfg = {{\"native_tools\": False}};\n"
     "    }}\n"
     "    if model_name.startswith(\"ollama-cloud/\") {{\n"
