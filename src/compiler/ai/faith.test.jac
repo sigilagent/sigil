@@ -172,8 +172,8 @@ test "check_completeness skips a non-agent step but demands the knowledge" {
         Rule(id="r_step", quote="Resolve the residue", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     pir = ParsedIR(nodes=[
-        PNode(id="fix", ntype="GEN_RAW", traces_to=["r_step"]),
-        PNode(id="done", ntype="TERMINAL")
+        PNode(id="fix", ntype="GENERATE", traces_to=["r_step"]),
+        PNode(id="done", ntype="RETURN")
     ]);
     d = check_completeness(spec, pir);
     # r_env is not the agent's to perform -> no drop; r_fact must be carried -> drop
@@ -194,8 +194,8 @@ test "a dropped FORBIDDEN prohibition is caught (today's G2 ignores it)" {
     # IR realizes the step but NEVER traces the prohibition — exactly what a direct
     # author does when it is only told to trace MANDATORY STEP/IO.
     pir = ParsedIR(nodes=[
-        PNode(id="merge", ntype="CODE", owner="code", traces_to=["r_step"]),
-        PNode(id="done", ntype="TERMINAL")
+        PNode(id="merge", ntype="COMPUTE", owner="code", traces_to=["r_step"]),
+        PNode(id="done", ntype="RETURN")
     ]);
     d = check_completeness(spec, pir);
     assert len(d) == 1;
@@ -211,24 +211,24 @@ test "the same prohibition, once traced onto its slot, is realized" {
         Rule(id="r_step", quote="Create the PDF", kind=RuleKind.STEP, modality=Modality.MANDATORY)
     ]);
     pir = ParsedIR(nodes=[
-        PNode(id="create", ntype="GEN_RAW", owner="model",
+        PNode(id="create", ntype="GENERATE", owner="model",
               doc="Author the PDF. NEVER use Unicode subscripts.", traces_to=["r_step", "r_forbid"]),
-        PNode(id="done", ntype="TERMINAL")
+        PNode(id="done", ntype="RETURN")
     ]);
     assert check_completeness(spec, pir) == [];
 }
 
-test "a dropped HIL gate is caught; a code-owned route realizes it" {
+test "a dropped HIL gate is caught; a BRANCH realizes it" {
     spec = RuleSet(rules=[
         Rule(id="r_gate", quote="confirm before deleting", kind=RuleKind.HIL, modality=Modality.MANDATORY)
     ]);
     # a model slot that 'asks' is NOT a gate (the G3_HIL failure) -> dropped
-    bad = ParsedIR(nodes=[PNode(id="ask", ntype="GEN_RAW", owner="model", traces_to=["r_gate"])]);
+    bad = ParsedIR(nodes=[PNode(id="ask", ntype="GENERATE", owner="model", traces_to=["r_gate"])]);
     db = check_completeness(spec, bad);
     assert len(db) == 1;
     assert db[0].shape == "CODE_GATE";
-    # an owner=code ROUTE traced to the rule IS a gate
-    ok = ParsedIR(nodes=[PNode(id="gate", ntype="ROUTE", owner="code", traces_to=["r_gate"])]);
+    # a BRANCH traced to the rule IS a gate
+    ok = ParsedIR(nodes=[PNode(id="gate", ntype="BRANCH", owner="code", traces_to=["r_gate"])]);
     assert check_completeness(spec, ok) == [];
 }
 
@@ -239,15 +239,15 @@ test "a MANDATORY IO rule needs an embodied write, not just a node" {
     ]);
     # traced only to a model node that authors content but nothing writes it
     authored = ParsedIR(nodes=[
-        PNode(id="draft", ntype="GEN_RAW", owner="model", writes=["out"], traces_to=["r_io"]),
-        PNode(id="done", ntype="TERMINAL")
+        PNode(id="draft", ntype="GENERATE", owner="model", writes=["out"], traces_to=["r_io"]),
+        PNode(id="done", ntype="RETURN")
     ]);
     assert len(check_completeness(spec, authored)) == 1;
     # add an embodied ACT that consumes the carry -> realized
     written = ParsedIR(nodes=[
-        PNode(id="draft", ntype="GEN_RAW", owner="model", writes=["out"], traces_to=["r_io"]),
+        PNode(id="draft", ntype="GENERATE", owner="model", writes=["out"], traces_to=["r_io"]),
         PNode(id="save", ntype="ACT", owner="code", tool="write_file", reads=["out"], writes=["path"]),
-        PNode(id="done", ntype="TERMINAL")
+        PNode(id="done", ntype="RETURN")
     ], tools=[PTool(name="write_file", surface="ACT", serves=["save"],
                     body="def write_file(content, path):\n    open(path,'w').write(content)\n    return path")]);
     assert check_completeness(spec, written) == [];
@@ -258,18 +258,18 @@ test "DISCRETIONARY guidance is never required" {
         Rule(id="r_may", quote="you may compress the output", kind=RuleKind.STEP,
              modality=Modality.DISCRETIONARY)
     ]);
-    empty = ParsedIR(nodes=[PNode(id="done", ntype="TERMINAL")]);
+    empty = ParsedIR(nodes=[PNode(id="done", ntype="RETURN")]);
     assert check_completeness(spec, empty) == [];
 }
 
 # --- Layer 2: soundness (nothing added) -----------------------------------
 
-test "an untraced non-terminal node is an ADDED behavior; TERMINAL is exempt" {
+test "an untraced non-terminal node is an ADDED behavior; RETURN is exempt" {
     spec = RuleSet(rules=[Rule(id="r1", quote="x", kind=RuleKind.STEP, modality=Modality.MANDATORY)]);
     pir = ParsedIR(nodes=[
-        PNode(id="a", ntype="CODE", owner="code", traces_to=["r1"]),
-        PNode(id="b", ntype="GEN_RAW", owner="model", traces_to=[]),   # ADDED
-        PNode(id="done", ntype="TERMINAL", traces_to=[])               # exempt
+        PNode(id="a", ntype="COMPUTE", owner="code", traces_to=["r1"]),
+        PNode(id="b", ntype="GENERATE", owner="model", traces_to=[]),   # ADDED
+        PNode(id="done", ntype="RETURN", traces_to=[])               # exempt
     ]);
     s = check_soundness(spec, pir);
     assert len(s) == 1;
@@ -279,7 +279,7 @@ test "an untraced non-terminal node is an ADDED behavior; TERMINAL is exempt" {
 
 test "dangling provenance (traces to a non-existent rule) is caught" {
     spec = RuleSet(rules=[Rule(id="r1", quote="x", kind=RuleKind.STEP, modality=Modality.MANDATORY)]);
-    pir = ParsedIR(nodes=[PNode(id="a", ntype="CODE", owner="code", traces_to=["r_nope"])]);
+    pir = ParsedIR(nodes=[PNode(id="a", ntype="COMPUTE", owner="code", traces_to=["r_nope"])]);
     s = check_soundness(spec, pir);
     assert any([("unknown rule 'r_nope'" in f.message) for f in s]);
 }

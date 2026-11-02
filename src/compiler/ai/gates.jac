@@ -142,7 +142,9 @@ def gate_artifact_boundary(spec: RuleSet, wf: WorkflowView, vb: ViewBundle) -> l
 # lower — no tool bound, no inline body. The ability is still generated (it has
 # to be, the walker must traverse it), so its NAME appears in the module either
 # way; only the marker distinguishes a real gate from a pass-through.
-glob HOLLOW_MARKERS: list[str] = ["# COMPUTE ", "# OBSERVE ", "# ACT "];
+# The legacy spellings stay recognized: a module lowered before the AIS
+# alignment carries `# CODE` / `# SENSE` markers and is just as hollow.
+glob HOLLOW_MARKERS: list[str] = ["# COMPUTE ", "# OBSERVE ", "# ACT ", "# CODE ", "# SENSE "];
 
 """Did this node lower to a marker comment instead of to work?
 
