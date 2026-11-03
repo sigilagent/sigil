@@ -195,6 +195,41 @@ def _supervise_children() -> None {
     return None;
 }
 
+def scheduler_lock_path() -> str { return os.path.join(run_dir(), "scheduler.lock"); }
+
+def _claim_scheduler(poll_s: float = 2.0) -> any {
+    # One scheduler per Sigil home, however many were started. Two would each
+    # fire every due job, and the second run of a job waits on rows the first
+    # has written but not committed, until Postgres gives up ("canceling
+    # statement due to lock timeout ... while inserting index tuple ... in
+    # relation anchors"). They were easy to get: on macOS the login service
+    # keeps the daemon alive, so `daemon restart` stopping it made launchd start
+    # one while restart started its own.
+    #
+    # So the scheduler holds an exclusive lock for its whole life. A second one
+    # waits (polling, so a stop signal still ends it) and takes over when the
+    # first exits. Returns the held handle, or None when stopped while waiting,
+    # or when locking is unavailable (then it runs unserialized, as before).
+    try { import fcntl; } except Exception as e { return None; }
+    try { fh = open(scheduler_lock_path(), "a+"); } except Exception as e2 { return None; }
+    told = False;
+    while not _STOP["now"] {
+        try {
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB);
+            return fh;
+        } except Exception as e3 {
+            if not told {
+                _log("another scheduler is running (pid " + str(read_pid(DAEMON_PID))
+                     + "); pid " + str(os.getpid()) + " waits and takes over if it stops");
+                told = True;
+            }
+            time.sleep(poll_s);
+        }
+    }
+    try { fh.close(); } except Exception as e4 { }
+    return None;
+}
+
 def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
     # The supervisor. Blocks. `sigil daemon start` runs this detached.
     #
@@ -223,6 +258,11 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
     os.environ["SIGIL_CHILD"] = "1";
     _STOP["now"] = False;
     _install_stop_handlers();
+    claim = _claim_scheduler();
+    if _STOP["now"] {
+        # Stopped while another scheduler held the lock: this one never ran.
+        return {"ticks": 0};
+    }
     write_pidfile(DAEMON_PID);
     _write_state(interval_s);
     _log("sigil daemon up — pid " + str(os.getpid()) + ", tick " + str(interval_s)
@@ -264,6 +304,9 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
         clear_pidfile(DAEMON_PID);
         _clear_state();
         _log("sigil daemon stopped");
+        if claim is not None {
+            try { claim.close(); } except Exception as _clerr { }
+        }
     }
     return {"ticks": ticks};
 }
