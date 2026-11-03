@@ -31,7 +31,7 @@ the escape hatch if a store ever disagrees again.
 import os;
 import json;
 import subprocess;
-import from .sigil_runtime { _jac_bin, entry_script, project_root }
+import from .sigil_runtime { _jac_bin, entry_script, project_root, commit_now }
 
 glob JSON_MARKER: str = "<<<SIGIL_JSON>>>";
 glob CHILD_ENV: str = "SIGIL_API_CHILD";
@@ -145,6 +145,10 @@ def api_local(name: str, args: dict[str, any]) -> dict[str, any] {
     try {
         body = json.loads(api_json(api_dispatch(name, dict(args or {}))));
     } finally {
+        # Commit while still on the superroot. Left to the request's close, the
+        # flush runs as the guest, which may not write the superroot's nodes:
+        # "Permission denied: field_write on Memory[...]", then a WriteConflict.
+        commit_now("api " + name);
         ctx.set_user_root(was);
     }
     return {"ok": bool(body.get("ok", True)), "data": body.get("data"),

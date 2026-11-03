@@ -25,7 +25,7 @@ import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt, plan_model 
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
-    skill_description, graph_write
+    skill_description, graph_write, commit_now
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
@@ -600,6 +600,10 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str
         import from .sigil_skill_tools { skill_manifest }
         shelf = skill_manifest(tg.signature);
     } except Exception as e { shelf = ""; }
+    # Commit first: the run takes minutes, and a transaction left open across
+    # it (recall has already bumped memory uses) fails its commit as soon as
+    # any other process writes what it read.
+    commit_now("before skill run");
     res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
