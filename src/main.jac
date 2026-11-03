@@ -582,7 +582,6 @@ def serve_observatory(port: str) {
                os.path.join(proj, "observatory.jac")];
     print("Sigil Observatory → " + embed_url(port) + "   (or http://localhost:" + port + ")");
     sys.stdout.flush();
-    p = subprocess.Popen(cmdline, cwd=proj);
     # Record ourselves as THE observatory, whether this is a terminal run or the
     # detached child of `serve start` — otherwise `serve status` would only ever
     # see servers started one particular way.
@@ -590,27 +589,56 @@ def serve_observatory(port: str) {
     # `serve stop` sends SIGTERM here, not to the jac child. Without a handler the
     # default action kills this supervisor outright and leaves that child holding
     # the port — the orphan `stop` would then have to hunt down. Reap it instead.
+    child: dict[str, any] = {"p": None, "stopping": False};
     def _bye(signum: any, frame: any) -> None {
-        try { p.terminate(); } except Exception as _e { }
+        child["stopping"] = True;
+        try { child["p"].terminate(); } except Exception as _e { }
         unmark_serving();
         sys.exit(0);
     }
     try { signal.signal(int(signal.SIGTERM), _bye); }
     except Exception as _sigerr { }
+    # A server that dies while still PREPARING is started again. jac aborts the
+    # preparation when the project's sources change under it ("Sources changed
+    # during preparation; retry with the new revision"), and on this machine
+    # they change every 30s: each `cron tick` and each skill run is a `jac run`
+    # of the same project. After `sigil update` the Observatory lost that race
+    # three times running and stayed down. One that dies after the window is a
+    # real crash, and one we stopped ourselves is not retried.
+    retries = _to_int(os.getenv("SIGIL_SERVE_RETRIES") or "5", 5);
+    attempts = 0;
     try {
-        # First-ever start: the server creates the auth store moments after
-        # boot; align the guest root as soon as it lands so run #1 shares the
-        # graph too. Bounded poll — worst case ~5 min covers a cold client build.
-        tries = 0;
-        while (not aligned) and (p.poll() is None) and (tries < 600) {
-            time.sleep(0.5);
-            aligned = _align_guest_root(data);
-            tries += 1;
+        while True {
+            started = time.time();
+            p = subprocess.Popen(cmdline, cwd=proj);
+            child["p"] = p;
+            # First-ever start: the server creates the auth store moments after
+            # boot; align the guest root as soon as it lands so run #1 shares the
+            # graph too. Bounded poll — worst case ~5 min covers a cold client build.
+            tries = 0;
+            while (not aligned) and (p.poll() is None) and (tries < 600) {
+                time.sleep(0.5);
+                aligned = _align_guest_root(data);
+                tries += 1;
+            }
+            rc = p.wait();
+            if child["stopping"] { break; }
+            if (rc != 0) and ((time.time() - started) < 900) and (attempts < retries) {
+                attempts += 1;
+                print("observatory exited while starting (rc " + str(rc) + "); starting it again ("
+                      + str(attempts) + "/" + str(retries) + ")");
+                sys.stdout.flush();
+                time.sleep(3 * attempts);
+                continue;
+            }
+            break;
         }
-        p.wait();
     } except KeyboardInterrupt {
-        p.terminate();
-        p.wait();
+        p = child["p"];
+        if p is not None {
+            p.terminate();
+            p.wait();
+        }
     }
     unmark_serving();
 }
