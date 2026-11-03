@@ -393,6 +393,35 @@ def _dedent_code(src):
     return t
 
 
+def _record_items(v):
+    # A slot typed list[str] whose prose asks for records ("a list of objects with
+    # hn_id, established, why_relevant ...") gets each record back as a JSON
+    # object STRING, and every consumer that does item.get("hn_id") dies with
+    # "'str' object has no attribute 'get'" (hackernews_topic_log's
+    # verify_metadata, caught live). An element that is exactly one JSON object
+    # becomes that dict; anything else is left as written. SIGIL_RECORD_ITEMS=0
+    # turns it off.
+    if not _sigil_on("RECORD_ITEMS") or not isinstance(v, (list, tuple)):
+        return v
+    out = []
+    for x in v:
+        if isinstance(x, str):
+            s = x.strip()
+            if s.startswith("```"):
+                s = s.strip("`").strip()
+                if s[:4].lower() == "json":
+                    s = s[4:].strip()
+            if s.startswith("{") and s.endswith("}"):
+                try:
+                    d = _json.loads(s)
+                except Exception:
+                    d = None
+                if isinstance(d, dict):
+                    out.append(d)
+                    continue
+        out.append(x)
+    return out
+
 def _clean_strlist(v):
     # byLLM's structured output over a small local model leaks JSON structure into
     # list elements: a 5-item answer comes back with a trailing "" or a fragment

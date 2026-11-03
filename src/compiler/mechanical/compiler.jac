@@ -2366,7 +2366,9 @@ def _emit_walker(ir: any) -> list[any] {
                 # then reads as a real item. Strip contentless entries at the source.
                 # list()-wrapped: the helper's ::py:: return is Unknown, which a
                 # TYPED list carry (G4-unified) rejects at jac check.
-                if str(tt).startswith("list") { val = f"list(_clean_strlist({call}))"; }
+                # …and a record the model handed back as a JSON-object STRING is
+                # turned back into the dict its consumers .get() from (_record_items).
+                if str(tt).startswith("list") { val = f"list(_record_items(_clean_strlist({call})))"; }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));
@@ -2758,6 +2760,21 @@ def _emit_nodes(ir: any) -> str {
     return _j("\n", out);
 }
 
+# An input the caller did not pass, read out of the task. Emitted once, ahead
+# of run(), into any module whose entry reads a raw-`str` input besides `task`.
+# The model returns the value as the task states it (the topic in "find posts
+# about agentic AI", or the content a note-taking skill should save); nothing
+# back, or SIGIL_INPUT_EXTRACT=0, leaves the old answer: the task text itself.
+glob INPUT_FROM_TASK: str = "def _input_from_task(name: str, about: str, task: str) -> str by llm(max_tokens=600);\n"
+    + "sem _input_from_task = \"A program was run with only a natural-language task, and the named input was not passed separately. Return the value the task gives for that input, as the task states it: for a topic, query, name or setting, just that phrase; for content the program should process, that content. Return an empty string when the task gives no value for it. Return only the value, with no explanation.\";\n"
+    + "def _input_or_task(name: str, task: str) -> str {\n"
+    + "    if not _sigil_on(\"INPUT_EXTRACT\") { return task; }\n"
+    + "    about = str(_EJ_PARAM_DOCS.get(name, \"\") or name);\n"
+    + "    got = \"\";\n"
+    + "    try { got = str(_input_from_task(name, about, task) or \"\").strip(); } except Exception as e { got = \"\"; }\n"
+    + "    return got if got else task;\n"
+    + "}";
+
 def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
     types = ir.get("types");
     edges = _list(ir.get("edges"));
@@ -2803,6 +2820,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         _ir_nodes = _list(ir.get("nodes"));
         _entry_reads: list[any] = [str(r) for r in _list((_ir_nodes[0] if _ir_nodes else {}).get("reads"))];
         extra_in: list = [];
+        _from_task = False;
         pkeys: list = [];
         # …and what each one MEANS. The MCP schema described every input as
         # "Exact value for input 'x'", so the model matched on the name alone and
@@ -2863,8 +2881,15 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
             if (str(meta.get("type") or "").strip() == "str") and (k in _entry_reads)
                and (not _pathish_carry(k)) {
                 # absent -> the task-named file whose extension matches the param
-                # (draft_bib <- test.bib), else the task text (see _task_file_for)
-                extra_in.append(str(sk) + "=str(_text_or_file(params.get('" + str(sk) + "', (_task_file_for('" + str(sk) + "', task) or task))))");
+                # (draft_bib <- test.bib), else the input's value as the task
+                # states it (_input_or_task), else the task text. The task text
+                # alone was right for a content input and wrong for a parameter:
+                # hackernews_topic_log searched Algolia for the whole sentence
+                # "Find recent Hacker News posts about the topic: agentic AI ..."
+                # (0 hits; "agentic AI" alone has 73), so every run found nothing
+                # and appended nothing, as designed.
+                extra_in.append(str(sk) + "=str(_text_or_file(params.get('" + str(sk) + "', (_task_file_for('" + str(sk) + "', task) or _input_or_task('" + str(sk) + "', task)))))");
+                _from_task = True;
             } elif _pathish_carry(k) and (_jt == "str") and (_n_path_inputs == 1) {
                 extra_in.append(f"{sk}=str(params.get('{sk}', _inname(task)))");
             } elif (_jt == "str") and (not _pathish_carry(k)) and (not is_path_param(str(k))) {
@@ -2983,6 +3008,7 @@ def _emit_run(ir: any, walker_name: any, env: bool = False) -> str {
         out.append("    task = str(_note_task_text(_format_contract(task)));");
         out.append("    _join_reset();");
         sargs = _j(", ", ["task=task"] + extra_in);
+        if _from_task { out.insert(0, INPUT_FROM_TASK); }
         out.insert(0, f"glob _EJ_PARAM_KEYS: list[any] = {pkeys};");
         out.insert(1, f"glob _EJ_PARAM_DOCS: dict[str, any] = {pdocs};");
         # what this program IMPLEMENTS, for the tool contract: the LIFT's own
