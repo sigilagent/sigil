@@ -2366,7 +2366,9 @@ def _emit_walker(ir: any) -> list[any] {
                 # then reads as a real item. Strip contentless entries at the source.
                 # list()-wrapped: the helper's ::py:: return is Unknown, which a
                 # TYPED list carry (G4-unified) rejects at jac check.
-                if str(tt).startswith("list") { val = f"list(_clean_strlist({call}))"; }
+                # …and a record the model handed back as a JSON-object STRING is
+                # turned back into the dict its consumers .get() from (_record_items).
+                if str(tt).startswith("list") { val = f"list(_record_items(_clean_strlist({call})))"; }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));

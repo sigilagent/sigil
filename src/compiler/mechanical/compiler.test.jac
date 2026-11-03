@@ -1727,3 +1727,31 @@ tools:
     # python as jac from the first unbalanced fence onward
     assert (src.count("::py::") % 2) == 0, "unbalanced ::py:: fences in the emitted module";
 }
+
+# A record-shaped slot typed list[str] hands each record back as a JSON-object
+# string; consumers .get() from it. hackernews_topic_log's verify_metadata died
+# with "'str' object has no attribute 'get'" on exactly that.
+test "_record_items turns JSON-object strings back into records, and nothing else" {
+    import os;
+    import re;
+    import json;
+    asset = "";
+    with open(os.path.join(os.path.dirname(__file__), "assets", "osp_runtime.py.txt")) as f {
+        asset = str(f.read());
+    }
+    m = re.search(r"def _record_items\(.*?(?=\ndef )", asset, re.S);
+    assert m, "_record_items must ship in the runtime asset";
+    flags: dict[str, any] = {"on": True};
+    ns: dict[str, any] = {"_json": json, "_sigil_on": lambda (name: str) -> bool { return bool(flags["on"]); }};
+    exec(str(m.group(0)), ns);
+    fn = ns["_record_items"];
+    got = fn(['{"hn_id": "1", "established": true}', "plain text", '```json\n{"hn_id": "2"}\n```', "{not json}"]);
+    assert got[0] == {"hn_id": "1", "established": True};
+    assert got[1] == "plain text";
+    assert got[2] == {"hn_id": "2"};
+    assert got[3] == "{not json}";
+    assert fn("not a list") == "not a list";
+    flags["on"] = False;
+    assert fn(['{"a": 1}']) == ['{"a": 1}'];          # SIGIL_RECORD_ITEMS=0
+    # and the lowering wraps every list slot with it
+}
