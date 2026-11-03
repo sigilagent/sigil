@@ -110,3 +110,13 @@ test "a mutation that raises is a failed write, not a crash or a lost lock" {
     assert h is not None;              # released on the failure path too
     _lock_release(h);
 }
+
+test "a compiled skill runs standalone, off the agent's graph, unless switched off" {
+    was = os.environ.get("SIGIL_SKILL_STANDALONE");
+    os.environ.pop("SIGIL_SKILL_STANDALONE", None);
+    assert module_argv("jac", "_driver_x.jac") == ["jac", "run", "--no-serve", "--no-takeover", "_driver_x.jac"];
+    os.environ["SIGIL_SKILL_STANDALONE"] = "0";
+    assert module_argv("jac", "_driver_x.jac") == ["jac", "run", "--no-serve", "_driver_x.jac"];
+    if was is None { os.environ.pop("SIGIL_SKILL_STANDALONE", None); }
+    else { os.environ["SIGIL_SKILL_STANDALONE"] = was; }
+}

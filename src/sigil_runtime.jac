@@ -477,6 +477,23 @@ def graph_write(mutate: any, context: str = "") -> dict[str, any] {
     return {"ok": (err == ""), "data": out, "error": err};
 }
 
+def module_argv(jacbin: str, driver: str) -> list[str] {
+    # How a compiled skill is run: standalone (--no-takeover), off the agent's
+    # graph. Its driver sits in src/, so a plain `jac run` took the project over:
+    # the module's walker attached its nodes to the agent's superroot and
+    # committed on exit, while the process that launched it (a scheduled job,
+    # `solve`, the Observatory) still held a transaction over that same root, so
+    # that process's commit failed every time ("could not serialize access due
+    # to concurrent update", "WriteConflict ... expected v0, found v1"). And each
+    # run rewrote the project's client build, which broke an Observatory starting
+    # at the same moment ("Sources changed during preparation"). A skill run's
+    # graph is scratch; nothing reads it back. SIGIL_SKILL_STANDALONE=0 restores
+    # the takeover run.
+    v = str(os.environ.get("SIGIL_SKILL_STANDALONE") or "").strip().lower();
+    if v in ["0", "false", "no", "off"] { return [jacbin, "run", "--no-serve", driver]; }
+    return [jacbin, "run", "--no-serve", "--no-takeover", driver];
+}
+
 # Run a compiled module in an isolated ``jac run`` subprocess. Returns
 # ``{ok, report, error}``. Never raises — a crash/timeout is a typed failure the
 # walker escalates (mutate + retry), never a walker abort. ``mcp_json`` is the
@@ -505,7 +522,7 @@ def execute_module(module_path: str, task: str, model_name: str,
     }
     jacbin = _jac_bin();
     try {
-        p = subprocess.run([jacbin, "run", "--no-serve", str(driver)], cwd=workdir, env=env,
+        p = subprocess.run(module_argv(jacbin, str(driver)), cwd=workdir, env=env,
                            capture_output=True, text=True, timeout=timeout);
     } except subprocess.TimeoutExpired as e {
         return {"ok": False, "report": "", "error": f"timeout after {timeout}s"};

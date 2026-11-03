@@ -183,3 +183,10 @@ test "a second scheduler waits for the first instead of ticking beside it" {
     assert second is not None, "once the first is gone, the waiting one takes over";
     second.close();
 }
+
+test "a failed tick's log line keeps the error, not just the traceback frames" {
+    err = "  233 |     job +>:Fired:+> run;\n  at _fire() src/cron.jac:232\n  at cron_tick() src/cron.jac:274\nSerializationError: could not serialize access due to concurrent update";
+    line = _tick_error(err);
+    assert "could not serialize access" in line;
+    assert "_fire" in line;
+}
