@@ -25,3 +25,12 @@ test "bootstrap registers the channel node + a token SecretRef" {
     names = [str(s["name"]) for s in secret_list()];
     assert "tg_token" in names, str(names);
 }
+
+test "whatsapp bootstrap also maps the phone-number id, joined onto the config" {
+    r = channel_bootstrap("wa", "whatsapp", "");
+    assert r["extra_env"] == "WHATSAPP_PHONE_ID", str(r);
+    names = [str(s["name"]) for s in secret_list()];
+    assert "wa_token" in names and "wa_target" in names, str(names);
+    g = channel_setup_guide("telegram");
+    assert "long-polls" in g and "setWebhook" not in g, g;
+}

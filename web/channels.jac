@@ -2,9 +2,11 @@
 
 A channel is a node on the agent's graph (src/channels.jac). A message that
 arrives on one runs as a task, and the reply goes back on the same thread. The
-top of the page is what is connected: the webhook every adapter posts to, and
-each channel with its history, a test send and a way to remove it. Below it is a
-card per provider Sigil has a guide for, with the steps to get a token.
+page is two lists, the shape other claw-style consoles settled on: what is
+connected (a row each, with status; a row opens its history, a test send and
+removal), then what can be added (a row each with one line on what connecting
+costs). Set up opens a dialog with the provider's steps and the fields it
+needs. The plain webhook any adapter can post to is the last row.
 
 A token is saved with the `secret_save` op, which runs in the server process and
 writes the console's secrets file: it never rides on a command line, never
@@ -91,6 +93,31 @@ def _meta(r: any) -> str {
     return " · ".join(bits);
 }
 
+def _nextStep(delivery: str) -> str {
+    # What to do right after Connect, by how the provider reaches Sigil.
+    if delivery == "long-poll" { return "Message the bot to try it; Sigil answers while the daemon runs."; }
+    if delivery == "gateway-bridge" { return "Replies work now. Receiving needs the bridge under How messages reach Sigil."; }
+    return "Next, give its bridge a public URL; the steps are under How messages reach Sigil.";
+}
+
+def _tile(kind: str) -> JsxElement {
+    # A neutral initial in a square: which provider at a glance, no brand marks.
+    k = str(kind or "?");
+    return <span aria-hidden="true"
+        className="shrink-0 w-9 h-9 rounded-lg bg-ink-3 border border-line-2 grid place-items-center text-[14px] font-semibold text-fg-2">{k[:1].upper()}</span>;
+}
+
+def _wire(lines: list[any]) -> JsxElement {
+    return <details className="text-xs text-muted">
+        <summary className="cursor-pointer select-none">How messages reach Sigil</summary>
+        <div className="mt-2 flex flex-col gap-1 font-mono text-[11.5px] leading-relaxed text-faint whitespace-pre-wrap break-words">
+            {for (wi, w) in enumerate(lines) {
+                <span key={str(wi)}>{w}</span>
+            }}
+        </div>
+    </details>;
+}
+
 def _lines(v: any) -> list[any] {
     if isinstance(v, list) { return [str(x) for x in v]; }
     return [str(v)] if v else [];
@@ -113,7 +140,7 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     has sendNote: str = "";
     has sendTone: str = "ok";
     has confirm: str = "";
-    has opened: dict[str, any] = {};
+    has setup: str = "";
     has tokens: dict[str, any] = {};
     has cardErr: dict[str, any] = {};
     has copied: bool = False;
@@ -258,24 +285,39 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         }
     }
 
+    async def saveSecret(kind: str, env: str, val: str) -> bool {
+        s: any = await call("secret_save", {"env": env, "value": val});
+        if s and s.ok { return True; }
+        cardErr = _with(cardErr, kind, str(s.error) if s else "no response from Sigil");
+        return False;
+    }
+
     async def connect(g: any) {
         kind = str(g.kind);
         tok = str(_get(tokens, kind)).strip();
+        x: any = g.extra;
+        xenv = str(x.env) if (x and x.env) else "";
+        xval = str(_get(tokens, kind + ":x")).strip();
         if (not tok) and (not g.token_set) {
             cardErr = _with(cardErr, kind, "Paste the token first. Sigil needs it to send replies.");
+            focusId("tok-" + kind);
+            return;
+        }
+        if xenv and (not xval) and (not x.set) {
+            cardErr = _with(cardErr, kind, "Add the " + str(x.label) + " too. Replies need it.");
+            focusId("tok-" + kind + "-x");
             return;
         }
         busy = "connect:" + kind;
         cardErr = _with(cardErr, kind, "");
         if tok {
-            s: any = await call("secret_save", {"env": str(g.token_env), "value": tok});
-            if (not s) or (not s.ok) {
-                busy = "";
-                cardErr = _with(cardErr, kind, str(s.error) if s else "no response from Sigil");
-                return;
-            }
+            if not (await saveSecret(kind, str(g.token_env), tok)) { busy = ""; return; }
             tokens = _with(tokens, kind, "");
             markSet(kind);
+        }
+        if xenv and xval {
+            if not (await saveSecret(kind, xenv, xval)) { busy = ""; return; }
+            tokens = _with(tokens, kind + ":x", "");
         }
         m: any = await call("channel_connect", {"kind": kind, "name": kind, "token_env": str(g.token_env)});
         busy = "";
@@ -284,8 +326,10 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
                 configured = configured + [{"name": str(m.name), "kind": str(m.kind), "enabled": True,
                                             "dm_scope": "per-peer", "messages": 0}];
             }
-            flash = "Connected " + _kind(kind) + ". Wire the provider to Sigil's webhook; the steps are on its card.";
+            setup = "";
+            flash = "Connected " + _kind(kind) + ". " + _nextStep(str(g.delivery));
             flashTone = "ok";
+            openHist(str(m.name));
             refresh();
             load();
         } else {
@@ -309,245 +353,279 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     selKind = str(selC.kind) if selC else "";
     selTitle = _title(selC) if selC else sel;
     rows: list[any] = list(hists[sel]) if (sel and (sel in hists)) else [];
+    sg: any = gby[setup] if (setup and (setup in gby)) else None;
+    sx: any = sg.extra if (sg and sg.extra and sg.extra.env) else None;
+    ROW = "flex items-center gap-3 px-4 py-3 min-w-0";
+
+    def statusChip(c: any) -> JsxElement {
+        k = str(c.kind);
+        if not c.enabled { return <span className={chip("warn")}>paused</span>; }
+        if (k in gby) and (not gby[k].token_set) { return <span className={chip("warn")}>needs token</span>; }
+        return <span className={chip("ok")}><span className={dotCls("ok")}></span>on</span>;
+    }
+
+    def subline(c: any) -> str {
+        # The list's count is from the last `channels` read; a history read since is newer.
+        n = int(c.messages or 0);
+        if (str(c.name) in hists) and (len(hists[str(c.name)]) > n) { n = len(hists[str(c.name)]); }
+        bits: list[str] = [(str(n) + (" message" if n == 1 else " messages")) if n else "no messages yet"];
+        if str(c.name) in hists {
+            lp = _lastPeer(hists[str(c.name)]);
+            if lp { bits.append("last with " + lp); }
+        }
+        if str(c.name) != str(c.kind) { bits.append(_kind(c.kind)); }
+        return " · ".join(bits);
+    }
+
+    def detail(c: any) -> JsxElement {
+        k = str(c.kind);
+        nm = str(c.name);
+        g: any = gby[k] if (k in gby) else None;
+        return <div className="px-4 pb-4 pt-1 flex flex-col gap-3 border-t border-line bg-ink-1/40">
+            {if g and (not g.token_set) {
+                <div className="flex flex-col gap-1.5 pt-3">
+                    <span className="text-xs text-warn">{"Its token is not set, so Sigil cannot reply on " + _title(c) + "."}</span>
+                    <div className="flex gap-2">
+                        <input type="password" autoComplete="off" spellCheck={False}
+                            aria-label={TOKEN_LABELS[k] if (k in TOKEN_LABELS) else "Token"}
+                            value={str(_get(tokens, k))}
+                            placeholder={TOKEN_HINTS[k] if (k in TOKEN_HINTS) else "Token"}
+                            onChange={lambda (e: ChangeEvent) { setTok(k, e.target.value); }}
+                            className={INP + " flex-1 font-mono"}/>
+                        <button type="button" className={BTN_SM} disabled={busy == ("tok:" + k)}
+                            onClick={lambda (e: MouseEvent) { saveToken(g); }}>
+                            {"Saving…" if (busy == ("tok:" + k)) else "Save token"}
+                        </button>
+                    </div>
+                    {(<Note text={str(_get(cardErr, k))} tone="bad"/>) if _get(cardErr, k) else None}
+                </div>
+            }}
+
+            <div className="flex items-center gap-2 pt-3">
+                <span className={LABEL + " mr-auto"}>History</span>
+                {(<Spinner/>) if histBusy else None}
+                <button type="button" aria-label="Reload the history" disabled={histBusy}
+                    className={BTN_GHOST_SM + " w-8 px-0"} onClick={lambda (e: MouseEvent) { loadHist(nm, False); }}>
+                    <Icon name="refresh" size={14}/>
+                </button>
+            </div>
+            <div id="chan-hist" className="flex flex-col gap-2.5 text-[13px] max-h-[340px] overflow-y-auto">
+                {if histBusy and (not rows) {
+                    <Spinner label="Reading the history…"/>
+                } elif not rows {
+                    <span className="text-[12.5px] text-muted">No messages on this channel yet.</span>
+                }}
+                {for (i, r) in enumerate(rows) {
+                    <div key={str(r.mid) if r.mid else ("m" + str(i))} className={_bubble(str(r.dir))}>
+                        <span className="whitespace-pre-wrap break-words">{str(r.text)}</span>
+                        <span className="block mt-0.5 text-[11px] text-muted">{_meta(r)}</span>
+                    </div>
+                }}
+            </div>
+            <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap gap-2">
+                    <input id="chan-peer" value={peer} aria-label={_peerLabel(selKind)}
+                        placeholder={(_peerLabel(selKind) + " to send to") if (selKind in PEERS) else "Peer (optional)"}
+                        onChange={lambda (e: ChangeEvent) { peer = e.target.value; }}
+                        className={INP + " w-[180px] font-mono"}/>
+                    <input id="chan-text" value={draft} aria-label={"Send as Sigil on " + selTitle} placeholder="Send as Sigil"
+                        onChange={lambda (e: ChangeEvent) { draft = e.target.value; }}
+                        onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { send(); } }}
+                        className={INP + " flex-[1_1_220px]"}/>
+                    <button type="button" className={BTN2_SM + " h-9"} disabled={(busy == "send") or (not draft.strip())}
+                        onClick={lambda (e: MouseEvent) { send(); }}>{"Sending…" if (busy == "send") else "Send"}</button>
+                </div>
+                {(<Note text={sendNote} tone={sendTone}/>) if sendNote else None}
+            </div>
+
+            {if confirm == nm {
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 rounded-lg bg-bad/10 border border-bad/30 text-[12.5px]">
+                    <span className="flex-[1_1_100%] text-fg">Remove <span className="font-mono">{nm}</span>? Sigil stops answering on it, and its history goes with it. The token stays in your secrets.</span>
+                    <button type="button" className={BTN_BAD_SM} disabled={busy == ("rm:" + nm)}
+                        onClick={lambda (e: MouseEvent) { removeChannel(nm); }}>
+                        {"Removing…" if (busy == ("rm:" + nm)) else "Remove"}
+                    </button>
+                    <button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { confirm = ""; }}>Cancel</button>
+                </div>
+            } else {
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <button type="button" className={BTN_GHOST_SM}
+                        onClick={lambda (e: MouseEvent) { openTest(nm); }}>Send a test</button>
+                    <span className="text-xs text-muted mx-1.5">{"Conversations: " + (SCOPES[str(c.dm_scope)] if (str(c.dm_scope) in SCOPES) else str(c.dm_scope)).lower()}</span>
+                    <button type="button" className={BTN_BAD_SM + " ml-auto"}
+                        onClick={lambda (e: MouseEvent) { confirm = nm; }}>Remove</button>
+                </div>
+            }}
+            {(_wire(_lines(g.wire))) if (g and _lines(g.wire)) else None}
+        </div>;
+    }
 
     return <div className="flex flex-col">
         <PageHead title="Channels" kicker="Connect · where Sigil listens and replies" onAsk={ask}
             askHint="“connect my Slack workspace”" tag="channels"/>
 
-        <div className="px-7 pt-5 pb-10 flex flex-col gap-6">
+        <div className="px-7 pt-5 pb-10 flex flex-col gap-7 max-w-[860px]">
             {(<Note text={err} tone="bad"/>) if err else None}
             {(<Note text={flash} tone={flashTone}/>) if flash else None}
             {(<Spinner label="Reading the channels…"/>) if (not loaded) else None}
 
-            <section aria-labelledby="connected" className="flex flex-col gap-3">
+            <section aria-labelledby="connected" className="flex flex-col gap-2.5">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <h2 id="connected" className="m-0 text-[15px] font-semibold">Connected</h2>
                     <span className="text-xs text-muted">While the daemon runs, it keeps a bridge open for each enabled channel.</span>
                 </div>
-                {(<span className="text-[13px] text-muted">No channels yet. Add one below, or have any adapter post to the webhook.</span>) if (loaded and (not configured)) else None}
+                {if loaded and (not configured) {
+                    <div className={CARD + " px-4 py-5 text-[13px] text-muted"}>No channels yet. Pick one below to get started.</div>
+                } elif configured {
+                    <ul className={CARD + " m-0 p-0 list-none divide-y divide-line overflow-hidden"}>
+                        {for c in configured {
+                            <li key={"c-" + str(c.name)} className="flex flex-col">
+                                <button type="button" aria-expanded={"true" if (sel == str(c.name)) else "false"}
+                                    onClick={lambda (e: MouseEvent) { if sel == str(c.name) { sel = ""; } else { openHist(str(c.name)); } }}
+                                    className={ROW + " w-full text-left bg-transparent border-0 cursor-pointer hover:bg-ink-3/50 text-fg"}>
+                                    {_tile(str(c.kind))}
+                                    <span className="flex-1 min-w-0 flex flex-col">
+                                        <span className="text-[14px] font-semibold truncate">{_title(c)}</span>
+                                        <span className="text-xs text-muted truncate">{subline(c)}</span>
+                                    </span>
+                                    {statusChip(c)}
+                                    <Icon name="chevron" size={15} cls={"text-muted transition-transform " + ("rotate-90" if (sel == str(c.name)) else "")}/>
+                                </button>
+                                {(detail(c)) if (sel == str(c.name)) else None}
+                            </li>
+                        }}
+                    </ul>
+                }}
+            </section>
 
-                <div className="flex flex-wrap gap-5 items-start">
-                    <div className="flex-[999_1_520px] min-w-0 grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
-                        {if endpoint {
-                            <article className={CARD + " p-4 flex flex-col gap-2.5"}>
-                                <div className="flex items-center gap-2.5">
-                                    <h3 className="m-0 text-[15px] font-semibold">Webhook</h3>
-                                    <span className={chip("ok")}><span className={dotCls("ok")}></span>on</span>
-                                </div>
-                                <div className="font-mono text-xs px-2.5 py-2 rounded-lg bg-ink-1 text-fg-2 break-all">{"POST " + url}</div>
-                                <span className="text-xs text-muted">Any adapter can post {"{channel, peer, text}"} here. The reply comes back in the response.</span>
-                                <div className="flex flex-wrap gap-1.5">
+            <section aria-labelledby="add" className="flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <h2 id="add" className="m-0 text-[15px] font-semibold">Add a channel</h2>
+                    <span className="text-xs text-muted">Pick a service and follow the steps.</span>
+                </div>
+                <ul className={CARD + " m-0 p-0 list-none divide-y divide-line overflow-hidden"}>
+                    {for g in avail {
+                        <li key={"g-" + str(g.kind)} className={ROW}>
+                            {_tile(str(g.kind))}
+                            <span className="flex-1 min-w-0 flex flex-col">
+                                <span className="text-[14px] font-semibold">{_kind(g.kind)}</span>
+                                <span className="text-xs text-muted">{str(g.summary) if g.summary else _delivery(str(g.delivery))}</span>
+                            </span>
+                            {(<span className={chip("ok")}>token saved</span>) if g.token_set else None}
+                            <button type="button" className={BTN2_SM}
+                                onClick={lambda (e: MouseEvent) { setup = str(g.kind); cardErr = _with(cardErr, str(g.kind), ""); }}>Set up</button>
+                        </li>
+                    }}
+                    {if endpoint {
+                        <li className="flex flex-col">
+                            <div className={ROW + " flex-wrap"}>
+                                <span aria-hidden="true" className="shrink-0 w-9 h-9 rounded-lg bg-ink-3 border border-line-2 grid place-items-center text-fg-2"><Icon name="plug" size={16}/></span>
+                                <span className="flex-[1_1_220px] min-w-0 flex flex-col">
+                                    <span className="text-[14px] font-semibold">Your own adapter</span>
+                                    <span className="text-xs text-muted">Anything that can POST {"{channel, peer, text}"} to the webhook. The reply comes back in the response.</span>
+                                </span>
+                                <span className="flex gap-1.5 ml-auto">
+                                    <button type="button" className={BTN_GHOST_SM} aria-expanded={"true" if example else "false"}
+                                        onClick={lambda (e: MouseEvent) { example = not example; }}>Example</button>
                                     <button type="button" className={BTN2_SM} onClick={lambda (e: MouseEvent) { copyUrl(url); }}>
                                         <Icon name={"check" if copied else "copy"} size={13}/>{"Copied" if copied else "Copy URL"}
                                     </button>
-                                    <button type="button" className={BTN_GHOST_SM} aria-expanded={"true" if example else "false"}
-                                        onClick={lambda (e: MouseEvent) { example = not example; }}>Example request</button>
-                                </div>
-                                {(<pre className="m-0 px-2.5 py-2 rounded-lg bg-ink-1 text-[11.5px] font-mono text-fg-2 whitespace-pre-wrap break-all">{curl}</pre>) if example else None}
-                            </article>
-                        }}
-
-                        {for c in configured {
-                            <article key={"c-" + str(c.name)}
-                                className={"rounded-xl bg-ink-2 border p-4 flex flex-col gap-2.5 " + ("border-violet-400/60" if (sel == str(c.name)) else "border-line")}>
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <h3 className="m-0 text-[15px] font-semibold truncate">{_title(c)}</h3>
-                                    {if not c.enabled {
-                                        <span className={chip("warn")}>paused</span>
-                                    } elif (str(c.kind) in gby) and (not gby[str(c.kind)].token_set) {
-                                        <span className={chip("warn")}>token not set</span>
-                                    } else {
-                                        <span className={chip("ok")}><span className={dotCls("ok")}></span>on</span>
-                                    }}
-                                </div>
-                                <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12.5px]">
-                                    {(<dt className="text-muted">Kind</dt>) if (str(c.name) != str(c.kind)) else None}
-                                    {(<dd className="m-0 font-mono">{str(c.kind)}</dd>) if (str(c.name) != str(c.kind)) else None}
-                                    <dt className="text-muted">Messages</dt>
-                                    <dd className="m-0">{str(c.messages or 0)}</dd>
-                                    {(<dt className="text-muted">Last peer</dt>) if ((str(c.name) in hists) and _lastPeer(hists[str(c.name)])) else None}
-                                    {(<dd className="m-0 font-mono truncate">{_lastPeer(hists[str(c.name)])}</dd>) if ((str(c.name) in hists) and _lastPeer(hists[str(c.name)])) else None}
-                                    <dt className="text-muted">Conversations</dt>
-                                    <dd className="m-0">{SCOPES[str(c.dm_scope)] if (str(c.dm_scope) in SCOPES) else str(c.dm_scope)}</dd>
-                                    {(<dt className="text-muted">Token</dt>) if (str(c.kind) in gby) else None}
-                                    {(<dd className="m-0"><span className="font-mono">{str(gby[str(c.kind)].token_env)}</span>
-                                        {(<span className="text-ok">{" · set"}</span>) if gby[str(c.kind)].token_set else (<span className="text-warn">{" · not set"}</span>)}
-                                    </dd>) if (str(c.kind) in gby) else None}
-                                </dl>
-
-                                {if (str(c.kind) in gby) and (not gby[str(c.kind)].token_set) {
-                                    <div className="flex flex-col gap-1.5">
-                                        <div className="flex gap-2">
-                                            <input type="password" autoComplete="off" spellCheck={False}
-                                                aria-label={TOKEN_LABELS[str(c.kind)] if (str(c.kind) in TOKEN_LABELS) else "Token"}
-                                                value={str(_get(tokens, str(c.kind)))}
-                                                placeholder={TOKEN_HINTS[str(c.kind)] if (str(c.kind) in TOKEN_HINTS) else "Token"}
-                                                onChange={lambda (e: ChangeEvent) { setTok(str(c.kind), e.target.value); }}
-                                                className={INP + " flex-1 font-mono"}/>
-                                            <button type="button" className={BTN_SM} disabled={busy == ("tok:" + str(c.kind))}
-                                                onClick={lambda (e: MouseEvent) { saveToken(gby[str(c.kind)]); }}>
-                                                {"Saving…" if (busy == ("tok:" + str(c.kind))) else "Save token"}
-                                            </button>
-                                        </div>
-                                        {(<Note text={str(_get(cardErr, str(c.kind)))} tone="bad"/>) if _get(cardErr, str(c.kind)) else None}
-                                    </div>
-                                }}
-
-                                {if confirm == str(c.name) {
-                                    <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 rounded-lg bg-bad/10 border border-bad/30 text-[12.5px]">
-                                        <span className="flex-[1_1_100%] text-fg">Remove <span className="font-mono">{str(c.name)}</span>? Sigil stops answering on it, and its history goes with it. The token stays in your secrets.</span>
-                                        <button type="button" className={BTN_BAD_SM} disabled={busy == ("rm:" + str(c.name))}
-                                            onClick={lambda (e: MouseEvent) { removeChannel(str(c.name)); }}>
-                                            {"Removing…" if (busy == ("rm:" + str(c.name))) else "Remove"}
-                                        </button>
-                                        <button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { confirm = ""; }}>Cancel</button>
-                                    </div>
-                                } else {
-                                    <div className="flex flex-wrap gap-1.5">
-                                        <button type="button" className={BTN2_SM} aria-pressed={"true" if (sel == str(c.name)) else "false"}
-                                            onClick={lambda (e: MouseEvent) { openHist(str(c.name)); }}>History</button>
-                                        <button type="button" className={BTN_GHOST_SM}
-                                            onClick={lambda (e: MouseEvent) { openTest(str(c.name)); }}>Send a test</button>
-                                        <button type="button" className={BTN_BAD_SM}
-                                            onClick={lambda (e: MouseEvent) { confirm = str(c.name); }}>Remove</button>
-                                    </div>
-                                }}
-
-                                {if (str(c.kind) in gby) and _lines(gby[str(c.kind)].wire) {
-                                    <details className="text-xs text-muted">
-                                        <summary className="cursor-pointer">How messages reach Sigil</summary>
-                                        <div className="mt-2 flex flex-col gap-1 font-mono text-[11.5px] leading-relaxed text-faint whitespace-pre-wrap break-words">
-                                            {for (wi, w) in enumerate(_lines(gby[str(c.kind)].wire)) {
-                                                <span key={str(wi)}>{w}</span>
-                                            }}
-                                        </div>
-                                    </details>
-                                }}
-                            </article>
-                        }}
-                    </div>
-
-                    {if sel {
-                        <section aria-labelledby="hist" className={CARD + " flex-[1_1_340px] min-w-0 overflow-hidden flex flex-col"}>
-                            <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
-                                <h3 id="hist" className="m-0 mr-auto text-sm font-semibold truncate">{selTitle + " · history"}</h3>
-                                {(<Spinner/>) if histBusy else None}
-                                <button type="button" aria-label="Reload the history" disabled={histBusy}
-                                    className={BTN_GHOST_SM + " w-8 px-0"} onClick={lambda (e: MouseEvent) { loadHist(sel, False); }}>
-                                    <Icon name="refresh" size={14}/>
-                                </button>
-                                <button type="button" aria-label="Close the history" className={BTN_GHOST_SM + " w-8 px-0"}
-                                    onClick={lambda (e: MouseEvent) { sel = ""; }}>
-                                    <Icon name="x" size={14}/>
-                                </button>
+                                </span>
                             </div>
-                            <div id="chan-hist" className="px-4 py-3.5 flex flex-col gap-2.5 text-[13px] max-h-[460px] overflow-y-auto">
-                                {if histBusy and (not rows) {
-                                    <Spinner label="Reading the history…"/>
-                                } elif not rows {
-                                    <span className="text-[12.5px] text-muted">No messages on this channel yet.</span>
-                                }}
-                                {for (i, r) in enumerate(rows) {
-                                    <div key={str(r.mid) if r.mid else ("m" + str(i))} className={_bubble(str(r.dir))}>
-                                        <span className="whitespace-pre-wrap break-words">{str(r.text)}</span>
-                                        <span className="block mt-0.5 text-[11px] text-muted">{_meta(r)}</span>
-                                    </div>
-                                }}
-                            </div>
-                            <div className="mt-auto px-4 py-3 border-t border-line flex flex-col gap-2">
-                                <label className="flex items-center gap-2 text-xs text-muted">{_peerLabel(selKind)}
-                                    <input id="chan-peer" value={peer} placeholder={"who to send to" if (selKind in PEERS) else "optional"}
-                                        onChange={lambda (e: ChangeEvent) { peer = e.target.value; }}
-                                        className={INP + " flex-1 h-8 font-mono"}/>
-                                </label>
-                                <div className="flex gap-2">
-                                    <input id="chan-text" value={draft} aria-label={"Send as Sigil on " + selTitle} placeholder="Send as Sigil"
-                                        onChange={lambda (e: ChangeEvent) { draft = e.target.value; }}
-                                        onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { send(); } }}
-                                        className={INP + " flex-1"}/>
-                                    <button type="button" className={BTN2_SM + " h-9"} disabled={(busy == "send") or (not draft.strip())}
-                                        onClick={lambda (e: MouseEvent) { send(); }}>{"Sending…" if (busy == "send") else "Send"}</button>
+                            {if example {
+                                <div className="px-4 pb-3.5 flex flex-col gap-2">
+                                    <div className="font-mono text-xs px-2.5 py-2 rounded-lg bg-ink-1 text-fg-2 break-all">{"POST " + url}</div>
+                                    <pre className="m-0 px-2.5 py-2 rounded-lg bg-ink-1 text-[11.5px] font-mono text-fg-2 whitespace-pre-wrap break-all">{curl}</pre>
                                 </div>
-                                {(<Note text={sendNote} tone={sendTone}/>) if sendNote else None}
-                            </div>
-                        </section>
+                            }}
+                        </li>
                     }}
-                </div>
+                </ul>
             </section>
-
-            {if avail {
-                <section aria-labelledby="add" className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                        <h2 id="add" className="m-0 text-[15px] font-semibold">Add a channel</h2>
-                        <span className="text-xs text-muted">The token is saved to your secrets file by the server itself, never on a command line. This page does not show it again.</span>
-                    </div>
-                    <div className="grid gap-3.5 grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
-                        {for g in avail {
-                            <article key={"g-" + str(g.kind)} className={CARD + " p-4 flex flex-col gap-2.5"}>
-                                <div className="flex items-center gap-2.5">
-                                    <h3 className="m-0 text-[15px] font-semibold">{_kind(g.kind)}</h3>
-                                    {(<span className={chip("ok")}>token set</span>) if g.token_set else (<span className={chip("")}>not set up</span>)}
-                                </div>
-                                {(<p className="m-0 text-[12.5px] text-muted">{_delivery(str(g.delivery))}</p>) if g.delivery else None}
-
-                                {if not _get(opened, str(g.kind)) {
-                                    <button type="button" className={BTN2_SM + " self-start"}
-                                        onClick={lambda (e: MouseEvent) { opened = _with(opened, str(g.kind), True); }}>
-                                        {"Set up " + _kind(g.kind)}
-                                    </button>
-                                } else {
-                                    <span className={LABEL}>Get a token</span>
-                                    if isinstance(g.get_token, list) {
-                                        <ol className="m-0 pl-[18px] list-decimal text-[12.5px] text-fg-2 flex flex-col gap-1">
-                                            {for (si, st) in enumerate(g.get_token) {
-                                                <li key={str(si)} className="break-words">{str(st)}</li>
-                                            }}
-                                        </ol>
-                                    } elif g.get_token {
-                                        <p className="m-0 text-[12.5px] text-fg-2 whitespace-pre-wrap break-words">{str(g.get_token)}</p>
-                                    }
-                                    <label className="flex flex-col gap-1.5 text-xs text-muted">
-                                        {TOKEN_LABELS[str(g.kind)] if (str(g.kind) in TOKEN_LABELS) else "Token"}
-                                        <input type="password" autoComplete="off" spellCheck={False}
-                                            value={str(_get(tokens, str(g.kind)))}
-                                            placeholder={("Leave empty to keep the one that is set") if g.token_set else (TOKEN_HINTS[str(g.kind)] if (str(g.kind) in TOKEN_HINTS) else "Token")}
-                                            onChange={lambda (e: ChangeEvent) { setTok(str(g.kind), e.target.value); }}
-                                            className={INP + " font-mono"}/>
-                                    </label>
-                                    if g.token_set {
-                                        <span className="text-xs text-muted"><span className="font-mono">{str(g.token_env)}</span> is already set, so you can connect without pasting it again. A new token replaces it.</span>
-                                    } else {
-                                        <span className="text-xs text-muted">Saved as <span className="font-mono">{str(g.token_env)}</span> in your secrets file on this machine. Sigil reads it when it sends; it never goes into the graph.</span>
-                                    }
-                                    <div className="flex flex-wrap gap-1.5">
-                                        <button type="button" className={BTN_SM} disabled={busy == ("connect:" + str(g.kind))}
-                                            onClick={lambda (e: MouseEvent) { connect(g); }}>
-                                            {"Connecting…" if (busy == ("connect:" + str(g.kind))) else "Connect"}
-                                        </button>
-                                        <button type="button" className={BTN_GHOST_SM}
-                                            onClick={lambda (e: MouseEvent) { ask("Walk me through connecting " + _kind(g.kind) + " to Sigil."); }}>
-                                            Walk me through it in chat
-                                        </button>
-                                    </div>
-                                    if _get(cardErr, str(g.kind)) {
-                                        <Note text={str(_get(cardErr, str(g.kind)))} tone="bad"/>
-                                    }
-                                    if _lines(g.wire) {
-                                        <details className="text-xs text-muted">
-                                            <summary className="cursor-pointer">{"How messages reach Sigil · " + str(g.delivery or "webhook") + " delivery"}</summary>
-                                            <div className="mt-2 flex flex-col gap-1 font-mono text-[11.5px] leading-relaxed text-faint whitespace-pre-wrap break-words">
-                                                {for (wi, w) in enumerate(_lines(g.wire)) {
-                                                    <span key={str(wi)}>{w}</span>
-                                                }}
-                                            </div>
-                                        </details>
-                                    }
-                                }}
-                            </article>
-                        }}
-                    </div>
-                </section>
-            }}
         </div>
+
+        {if sg {
+            <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[10vh] pb-10"
+                onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Escape" { setup = ""; } }}>
+                <div aria-hidden="true" className="absolute inset-0 bg-ink-0/80 backdrop-blur-[2px]"
+                    onClick={lambda (e: MouseEvent) { setup = ""; }}></div>
+                <div role="dialog" aria-modal="true" aria-labelledby="setup-title"
+                    className="relative w-[520px] max-w-full max-h-[80vh] flex flex-col rounded-2xl bg-ink-2 border border-line-2 shadow-2xl overflow-hidden">
+                    <div className="flex items-start gap-3 px-5 py-4 border-b border-line">
+                        {_tile(str(sg.kind))}
+                        <div className="flex-1 min-w-0 flex flex-col">
+                            <h2 id="setup-title" className="m-0 text-[16px] font-semibold">{"Set up " + _kind(sg.kind)}</h2>
+                            <span className="text-xs text-muted">{str(sg.summary) if sg.summary else _delivery(str(sg.delivery))}</span>
+                        </div>
+                        <button type="button" aria-label="Close" className={BTN_GHOST_SM + " w-8 px-0"}
+                            onClick={lambda (e: MouseEvent) { setup = ""; }}><Icon name="x" size={14}/></button>
+                    </div>
+
+                    <div className="px-5 py-4 flex flex-col gap-5 overflow-y-auto min-h-0">
+                        <div className="flex flex-col gap-2">
+                            <span className={LABEL}>1 · Create the bot</span>
+                            {if isinstance(sg.get_token, list) {
+                                <ol className="m-0 pl-[18px] list-decimal text-[13px] text-fg-2 flex flex-col gap-1.5">
+                                    {for (si, st) in enumerate(sg.get_token) {
+                                        <li key={str(si)} className="break-words">{str(st)}</li>
+                                    }}
+                                </ol>
+                            } elif sg.get_token {
+                                <p className="m-0 text-[13px] text-fg-2 whitespace-pre-wrap break-words">{str(sg.get_token)}</p>
+                            }}
+                            {if sg.link and (len(sg.link) > 1) {
+                                <a href={str(sg.link[1])} target="_blank" rel="noopener noreferrer"
+                                    className={BTN2_SM + " self-start no-underline"}>
+                                    {str(sg.link[0])}<Icon name="external" size={13}/>
+                                </a>
+                            }}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                            <span className={LABEL}>{"2 · Paste the token" if (not sx) else "2 · Paste the credentials"}</span>
+                            <label className="flex flex-col gap-1.5 text-xs text-muted">
+                                {TOKEN_LABELS[str(sg.kind)] if (str(sg.kind) in TOKEN_LABELS) else "Token"}
+                                <input id={"tok-" + str(sg.kind)} type="password" autoComplete="off" spellCheck={False} autoFocus={True}
+                                    value={str(_get(tokens, str(sg.kind)))}
+                                    placeholder={("Leave empty to keep the one that is set") if sg.token_set else (TOKEN_HINTS[str(sg.kind)] if (str(sg.kind) in TOKEN_HINTS) else "Token")}
+                                    onChange={lambda (e: ChangeEvent) { setTok(str(sg.kind), e.target.value); }}
+                                    onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { connect(sg); } }}
+                                    className={INP + " font-mono"}/>
+                            </label>
+                            {if sx {
+                                <label className="flex flex-col gap-1.5 text-xs text-muted">
+                                    {str(sx.label)}
+                                    <input id={"tok-" + str(sg.kind) + "-x"} autoComplete="off" spellCheck={False}
+                                        value={str(_get(tokens, str(sg.kind) + ":x"))}
+                                        placeholder={("Leave empty to keep the one that is set") if sx.set else str(sx.hint or sx.label)}
+                                        onChange={lambda (e: ChangeEvent) { setTok(str(sg.kind) + ":x", e.target.value); }}
+                                        onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { connect(sg); } }}
+                                        className={INP + " font-mono"}/>
+                                </label>
+                            }}
+                            <span className="text-xs text-muted">
+                                {"Saved as "}<span className="font-mono">{str(sg.token_env)}</span>
+                                {(<span>{" and "}<span className="font-mono">{str(sx.env)}</span></span>) if sx else None}
+                                {" in your secrets file on this machine. Sigil reads it when it sends; it never goes into the graph, and this page does not show it again."}
+                            </span>
+                        </div>
+
+                        {(_wire(_lines(sg.wire))) if _lines(sg.wire) else None}
+                        {(<Note text={str(_get(cardErr, str(sg.kind)))} tone="bad"/>) if _get(cardErr, str(sg.kind)) else None}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 px-5 py-3.5 border-t border-line">
+                        <button type="button" className={BTN_SM} disabled={busy == ("connect:" + str(sg.kind))}
+                            onClick={lambda (e: MouseEvent) { connect(sg); }}>
+                            {"Connecting…" if (busy == ("connect:" + str(sg.kind))) else "Connect"}
+                        </button>
+                        <button type="button" className={BTN_GHOST_SM}
+                            onClick={lambda (e: MouseEvent) { k = _kind(sg.kind); setup = ""; ask("Walk me through connecting " + k + " to Sigil."); }}>
+                            Walk me through it in chat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }}
     </div>;
 }
