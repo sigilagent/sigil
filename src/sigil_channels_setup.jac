@@ -60,7 +60,7 @@ glob CHANNEL_GUIDES: dict[str, any] = {
         "token_env": "WHATSAPP_TOKEN",
         "delivery": "webhook",
         "summary": "Meta's Cloud API. Needs a public URL for incoming messages.",
-        "link": ["Open Meta for Developers", "https://developers.facebook.com/apps"],
+        "link": ["Open Meta's setup guide", "https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started"],
         "extra": {"env": "WHATSAPP_PHONE_ID", "label": "Phone Number ID", "hint": "123456789012345"},
         "get_token": [
             "Create a Meta app and add the WhatsApp product.",
