@@ -163,3 +163,23 @@ test "the login service brings the Observatory up and carries PATH and jac" {
 test "plist values are escaped" {
     assert _xml("a&b<c>") == "a&amp;b&lt;c&gt;";
 }
+
+test "a second scheduler waits for the first instead of ticking beside it" {
+    # Two schedulers fire every due job twice, and the second run times out on
+    # the first one's uncommitted rows. A held claim makes the next one wait.
+    import fcntl;
+    import threading;
+    os.makedirs(run_dir(), exist_ok=True);
+    first = open(scheduler_lock_path(), "a+");
+    fcntl.flock(first.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB);
+    _STOP["now"] = False;
+    t = threading.Timer(0.3, lambda { _STOP["now"] = True; });
+    t.start();
+    assert _claim_scheduler(0.05) is None, "it must not run while another scheduler holds the claim";
+    t.join();
+    _STOP["now"] = False;
+    first.close();                       # the first scheduler exits
+    second = _claim_scheduler(0.05);
+    assert second is not None, "once the first is gone, the waiting one takes over";
+    second.close();
+}
