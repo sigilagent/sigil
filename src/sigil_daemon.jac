@@ -195,6 +195,18 @@ def _supervise_children() -> None {
     return None;
 }
 
+def _tick_error(err: str) -> str {
+    # A failed tick's stderr is a jac traceback: the source excerpt and the
+    # frames come first and the exception line is last, so a head cut kept the
+    # frames and dropped the message ("tick failed: ... at _fire() ..."). Keep
+    # the lines that name the error, then what fits of the rest.
+    lines = [l for l in err.splitlines() if l.strip()];
+    named = [l.strip() for l in lines if ("Error" in l) or ("error" in l) or ("raised" in l) or ("Exception" in l)];
+    head = " | ".join(named[-3:]) if named else "";
+    rest = " ".join(l.strip() for l in lines[-6:]);
+    return ((head + " || ") if head else "") + rest[:600];
+}
+
 def scheduler_lock_path() -> str { return os.path.join(run_dir(), "scheduler.lock"); }
 
 def _claim_scheduler(poll_s: float = 2.0) -> any {
@@ -278,7 +290,7 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
                 _supervise_children();
                 res = tick_isolated();
                 if not res["ok"] {
-                    _log("tick failed: " + str(res["err"])[:300]);
+                    _log("tick failed: " + _tick_error(str(res["err"])));
                 } else {
                     for line in str(res["out"]).splitlines() {
                         s = line.strip();
