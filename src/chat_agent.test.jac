@@ -148,3 +148,32 @@ test "propose_agent: no SKILL.md is a normal answer, and a proposal says not to 
     assert "clean_csv" in out;
     assert "Do not compile it yourself" in out;
 }
+
+test "a tool call parsed from text leaves for the browser as plain JSON" {
+    # A model without native tools (the ChatGPT plan tier) writes calls as text;
+    # byLLM parses them into SimpleNamespace, which json would turn into a repr.
+    import from types { SimpleNamespace }
+    import json;
+    call = SimpleNamespace(id="call_1", type="function",
+                           function=SimpleNamespace(name="propose_agent", arguments="{\"name\": \"x\"}"));
+    h = _plain_history([{"role": "assistant", "content": "", "tool_calls": [call]}]);
+    tc = h[0]["tool_calls"][0];
+    assert tc["function"]["name"] == "propose_agent";
+    assert json.loads(tc["function"]["arguments"])["name"] == "x";
+    # and it survives the trip: json can carry it as is
+    assert "namespace(" not in json.dumps(h);
+}
+
+test "a history saved with repr'd tool calls is repaired on the way back in" {
+    import json;
+    args = json.dumps({"name": "clean_csv", "skill_md": "---\nname: clean_csv\n---\n1. Read it."});
+    bad = "namespace(id='call_9', type='function', function=namespace(name='propose_agent', arguments=" + repr(args) + "))";
+    h = _plain_history([{"role": "assistant", "content": "", "tool_calls": [bad]}]);
+    tc = h[0]["tool_calls"][0];
+    assert tc["id"] == "call_9";
+    assert tc["function"]["name"] == "propose_agent";
+    assert json.loads(tc["function"]["arguments"])["skill_md"].startswith("---");
+    # plain dicts pass through untouched, and a string that is not a repr is dropped
+    ok = {"id": "c", "type": "function", "function": {"name": "ws_read", "arguments": "{}"}};
+    assert _plain_history([{"role": "assistant", "tool_calls": [ok, "junk"]}])[0]["tool_calls"] == [ok];
+}

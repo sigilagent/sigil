@@ -616,6 +616,57 @@ def _plain_last_user(h: list[any], message: str) -> list[any] {
     return out;
 }
 
+def _call_from_repr(s: str) -> any {
+    # A tool call that already crossed to the browser as its Python repr
+    # ("namespace(id='call_1', type='function', function=namespace(name='x',
+    # arguments='{...}'))"), back to JSON. Earlier histories were saved that way.
+    import ast;
+    import re;
+    if ("namespace(" not in s) or ("arguments=" not in s) { return None; }
+    try {
+        cid = re.search("id='([^']*)'", s);
+        name = re.search("name='([^']*)'", s);
+        lit = s.split("arguments=", 1)[1].rstrip();
+        if lit.endswith("))") { lit = lit[:len(lit) - 2]; }
+        return {"id": cid.group(1) if cid else "", "type": "function",
+                "function": {"name": name.group(1) if name else "", "arguments": str(ast.literal_eval(lit))}};
+    } except Exception { return None; }
+}
+
+def _plain_call(tc: any) -> any {
+    # One tool call as plain JSON: {"id", "type", "function": {"name", "arguments"}}.
+    # A model without native tools writes its calls as text and byLLM parses them
+    # into SimpleNamespace objects; json would turn those into their repr, and
+    # the console could then read neither the tool's name nor a Build proposal.
+    if isinstance(tc, str) { return _call_from_repr(tc); }
+    fn: any = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None);
+    if isinstance(tc, dict) and ((fn is None) or isinstance(fn, dict)) { return tc; }
+    return {
+        "id": str(_field(tc, "id") or ""),
+        "type": str(_field(tc, "type") or "function"),
+        "function": {"name": str(_field(fn, "name") or ""),
+                     "arguments": str(_field(fn, "arguments") or "{}")}
+    };
+}
+
+def _field(o: any, k: str) -> any {
+    if o is None { return None; }
+    return o.get(k) if isinstance(o, dict) else getattr(o, k, None);
+}
+
+def _plain_history(h: list[any]) -> list[any] {
+    # Every message's tool calls as plain JSON, both ways across the browser.
+    out: list[any] = [];
+    for m in h {
+        if isinstance(m, dict) and m.get("tool_calls") {
+            calls = [c for c in [_plain_call(t) for t in list(m["tool_calls"])] if c];
+            m = {**m, "tool_calls": calls};
+        }
+        out.append(m);
+    }
+    return out;
+}
+
 def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
     # One chat turn for the web console. The REPL keeps CHAT_HISTORY alive in its
     # own process; a console request runs in a fresh process, so the browser holds
@@ -627,14 +678,14 @@ def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
     # module's conversation state: one turn at a time, and the web-only Build
     # proposal is switched back off before a channel's turn can run here.
     with _WEB_TURN {
-        CHAT_HISTORY = _starts_clean([h for h in list(history or []) if isinstance(h, dict)][-32:]);
+        CHAT_HISTORY = _starts_clean(_plain_history([h for h in list(history or []) if isinstance(h, dict)][-32:]));
         _WEB_UI = True;
         try {
             out = chat_turn(message);
         } finally {
             _WEB_UI = False;
         }
-        out["history"] = _plain_last_user(_starts_clean(list(CHAT_HISTORY)), message);
+        out["history"] = _plain_last_user(_starts_clean(_plain_history(list(CHAT_HISTORY))), message);
         out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};
     }
     return out;
