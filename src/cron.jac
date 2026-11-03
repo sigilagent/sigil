@@ -26,7 +26,8 @@ import from .channels { message_send }
 import from .sigil_cron { now_ms, parse_at, cron_next, cron_valid, local_tz, describe_schedule }
 import from .sigil_api { report_for }
 import from .sigil_runtime {
-    write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root
+    write_pidfile, clear_pidfile, process_running, _jac_bin, entry_script, project_root,
+    graph_write
 }
 
 edge Schedules: any --> any {}   # Soul -> CronJob
@@ -228,14 +229,50 @@ def _fire(job: CronJob, t: int) -> dict[str, any] {
         ok = False;
         summary = "job raised: " + str(e)[:400];
     }
-    run = CronRun(started_ms=t, ok=ok, summary=summary[:400]);
-    job +>:Fired:+> run;
-    job.runs += 1;
-    if not ok { job.errors += 1; }
-    job.last_status = "ok" if ok else "error";
-    _prune_runs(job);
+    # Recorded in a write of its own, committed on the spot: the run took
+    # minutes, and the record must not wait for this process to exit holding
+    # the job's rows (a sibling then times out on them).
+    def _record() -> bool {
+        run = CronRun(started_ms=t, ok=ok, summary=summary[:400]);
+        job +>:Fired:+> run;
+        job.runs += 1;
+        if not ok { job.errors += 1; }
+        job.last_status = "ok" if ok else "error";
+        _prune_runs(job);
+        return True;
+    }
+    graph_write(_record, "cron record " + job.name);
     if ok { _deliver(job, summary); }
     return {"name": job.name, "ok": ok, "summary": summary[:400]};
+}
+
+def _claim_state(job: CronJob, t: int) -> bool {
+    # Take a due job for this firer: move it off "due" BEFORE it runs. True when
+    # taken; False when it is not due (any longer) and someone else has it.
+    if (not job.enabled) or (job.next_run_ms <= 0) or (job.next_run_ms > t) { return False; }
+    if job.kind == "at" {
+        # a one-shot is spent the moment it is taken; _rearm retires it after
+        job.enabled = False;
+        job.next_run_ms = 0;
+    } else {
+        job.next_run_ms = _schedule_next(job, t);
+        if job.next_run_ms <= 0 { job.enabled = False; }
+    }
+    job.last_status = "running";
+    return True;
+}
+
+def _claim(job: CronJob, t: int) -> bool {
+    # The claim, committed before the job runs. The job used to move to its next
+    # due time only AFTER the run, and only when the tick process exited, so for
+    # the whole multi-minute run every other firer (a second scheduler, `sigil
+    # cron run`, an API tick) still saw it due, fired it again, and they all
+    # piled onto the same rows: "canceling statement due to lock timeout ...
+    # while inserting index tuple ... in relation anchors". graph_write
+    # serializes the check-and-move across processes and commits it at once.
+    def _do() -> bool { return _claim_state(job, t); }
+    r = graph_write(_do, "cron claim " + job.name);
+    return bool(r["ok"]) and bool(r["data"]);
 }
 
 def _rearm(job: CronJob, t: int) -> bool {
@@ -271,9 +308,14 @@ def cron_tick() -> dict[str, any] {
         if (not j.enabled) or (j.next_run_ms <= 0) { continue; }
         armed += 1;
         if j.next_run_ms > t { continue; }
+        if not _claim(j, t) { continue; }   # another firer has it
         out = _fire(j, t);
         fired.append({"name": out["name"], "ok": out["ok"]});
-        _rearm(j, t);
+        if j.kind == "at" {
+            # recurring jobs were re-armed by the claim; a one-shot retires now
+            def _retire() -> bool { return _rearm(j, t); }
+            graph_write(_retire, "cron retire " + j.name);
+        }
     }
     return {"now_ms": t, "fired": fired, "count": len(fired), "armed": armed};
 }

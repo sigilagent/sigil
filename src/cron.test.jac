@@ -132,3 +132,29 @@ test "cron_enable re-arms a recurring job from now, not from its stale due time"
     assert int(after["next_run_ms"]) > now_ms();
     cron_remove("_t_rearm");
 }
+
+test "_claim_state: a due job is taken off due BEFORE it runs, and only once" {
+    # A job moved to its next due time only after its run, so every other firer
+    # during a multi-minute run fired it again and they timed out on its rows.
+    t = _at(2026, 3, 10, 12, 0);
+    j = CronJob(name="rep", kind="every", spec="1800");
+    j.next_run_ms = t - 1000;
+    assert _claim_state(j, t), "a due job is taken";
+    assert j.next_run_ms == t + 1_800_000, "and moved forward before it runs";
+    assert j.last_status == "running";
+    assert not _claim_state(j, t), "a second firer finds it no longer due";
+    later = CronJob(name="later", kind="every", spec="1800");
+    later.next_run_ms = t + 60_000;
+    assert not _claim_state(later, t), "a job that is not due is left alone";
+    assert later.next_run_ms == t + 60_000;
+}
+
+test "_claim_state: a one-shot is spent when taken, then retires by its outcome" {
+    t = _at(2026, 3, 10, 12, 0);
+    j = CronJob(name="once", kind="at", spec=str(t - 1000), delete_after_run=False);
+    j.next_run_ms = t - 1000;
+    assert _claim_state(j, t);
+    assert not j.enabled;
+    assert j.next_run_ms == 0;
+    assert not _claim_state(j, t), "taken once, never again";
+}
