@@ -3,20 +3,20 @@
 
 test "sentence_cut finds the end of the first n sentences, and not inside code" {
     t = "One. Two! Three? Four.";
-    assert t[:sentence_cut(t, 2)] == "One. Two! ", str(sentence_cut(t, 2));
+    assert t[:sentence_cut(t, 2)] == "One. Two!", str(sentence_cut(t, 2));
     assert sentence_cut("One. Two", 2) == -1, "the second sentence is not finished";
     para = "A line with no stop\n\nNext";
     assert para[:sentence_cut(para, 1)] == "A line with no stop\n\n";
     code = "Run:\n```\nx = 1. y = 2. z = 3.\n```\nDone. Next.";
-    cut = sentence_cut(code, 2);
-    assert "```\nDone." in code[:cut], code[:cut];
+    # the stops inside the ``` block are not sentence ends
+    assert code[:sentence_cut(code, 1)].endswith("```\nDone."), code[:sentence_cut(code, 1)];
 }
 
 test "split_long keeps each part under the limit, at a paragraph when it can" {
     text = ("a" * 30) + "\n\n" + ("b" * 30);
     parts = split_long(text, 40);
     assert parts == ["a" * 30, "b" * 30], str(parts);
-    assert all([len(x) <= 40 for x in split_long("word " * 50, 40)]);
+    for piece in split_long("word " * 50, 40) { assert len(piece) <= 40, str(len(piece)); }
 }
 
 test "a stream sends n sentences at a time, notes ride along, finish flushes" {
