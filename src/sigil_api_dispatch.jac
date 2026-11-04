@@ -117,6 +117,11 @@ def api_dispatch(name: str, a: dict[str, any]) -> dict[str, any] {
             payload["data"] = inbound(str(a.get("channel", "webhook")), str(a.get("peer", "anon")),
                                       str(a.get("text", "")), str(a.get("thread_id", "")));
         }
+        elif name == "channel_turn_record" {
+            import from .channels { record_turn }
+            payload["data"] = record_turn(str(a.get("channel", "")), str(a.get("peer", "")),
+                                          a.get("history"), str(a.get("reply", "")), str(a.get("thread_id", "")));
+        }
         elif name == "cron_tick" { payload["data"] = cron_tick(); }
         elif name == "cron_list" { payload["data"] = cron_list(); }
         elif name == "cron_record" {

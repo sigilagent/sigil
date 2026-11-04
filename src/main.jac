@@ -1458,7 +1458,16 @@ with entry:__main__ {
             # The seam every bridge uses: one message in, one reply out, in a
             # FRESH process so the answer comes from the current graph. The
             # marker is how the bridge finds the reply in the output.
-            r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            # With SIGIL_CHANNEL_STREAM=1 (the bridge sets it) the reply also
+            # leaves in parts while it is written; see sigil_channel_stream.
+            import from src.sigil_channel_stream { start_channel_stream, stop_channel_stream }
+            st = start_channel_stream();
+            r: dict[str, any] = {"reply": ""};
+            try {
+                r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
+            } finally {
+                stop_channel_stream(st, str(r.get("reply") or ""));
+            }
             print(REPLY_MARKER);
             print(str(r["reply"]));
         }

@@ -10,7 +10,7 @@ the `api_inbound` HTTP endpoint IS a ready webhook channel.
 
 import from .sigil_core { awaken, Soul }
 import from .hooks { fire_hooks }
-import from .sigil_sessions { session_note, chat_history, chat_history_save, chat_history_reset }
+import from .sigil_sessions { session_note, chat_history, chat_history_save }
 import from .sigil_secrets { resolve_credential }
 import from .sigil_transports { deliver }
 import from .sigil_api { report_for }
@@ -88,35 +88,82 @@ def _record(ch: Channel, direction: str, peer: str, text: str, thread_id: str = 
 }
 
 def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str, any] {
-    # The core loop: a message arrives on a channel -> the agent solves it ->
+    # The core loop: a message arrives on a channel -> the agent answers it ->
     # the reply is recorded as outbound (an adapter delivers it). The peer becomes
-    # part of the routing key (per OpenClaw's dm_scope) — here, memory context.
-    # The reply threads under the inbound message so thread_id round-trips.
-    soul = awaken();
-    ch = _get_channel(soul, channel);
-    if not ch.enabled { return {"ok": False, "reply": "", "error": "channel disabled"}; }
-    inm = _record(ch, "in", peer, text, thread_id);
-    fire_hooks("message_received", channel + ":" + peer + ": " + text);
-    session_note(channel, peer, ch.dm_scope, "user", text);   # transcript, scoped by dm_scope
+    # part of the routing key (per OpenClaw's dm_scope). The reply threads under
+    # the inbound message so thread_id round-trips.
+    #
     # Each channel conversation is an ongoing chat with the agent `sigil chat`
     # talks to, not a fresh task per message: a message is answered knowing what
     # was said before on this channel, and the agent reaches compiled skills as
-    # its tools. (Routing every message through the task solver compiled a "Hi"
-    # into a greeting skill and sent its raw output back.)
+    # its tools.
+    #
+    # A turn can run for minutes while other processes (the scheduler, the
+    # console, a skill compile) commit to the graph, so this process's view goes
+    # stale and saving the turn afterwards can be refused (WriteConflict). That
+    # used to raise out of here and throw the finished reply away. Now the inbound
+    # message is committed before the turn, the turn's records are saved after it
+    # in one serialized write, and when that is refused a fresh process saves
+    # them. The reply is returned whatever happens to the bookkeeping.
+    import from .sigil_runtime { commit_now, graph_write }
+    soul = awaken();
+    ch = _get_channel(soul, channel);
+    if not ch.enabled { return {"ok": False, "reply": "", "error": "channel disabled"}; }
+    dm_scope = str(ch.dm_scope);
+    kind = str(ch.kind);
+    inm = _record(ch, "in", peer, text, thread_id);
+    in_mid = str(inm.mid);
+    fire_hooks("message_received", channel + ":" + peer + ": " + text);
+    session_note(channel, peer, dm_scope, "user", text);   # transcript, scoped by dm_scope
+    history = chat_history(channel, peer, dm_scope);
+    commit_now("channel inbound " + channel);
+    reply_thread = thread_id if thread_id else in_mid;
+    new_history: any = None;
     if str(text).strip().lower() in ["/new", "/reset"] {
-        chat_history_reset(channel, peer, ch.dm_scope);
+        new_history = [];
         reply = "Started a new conversation.";
     } else {
         import from .chat_agent { channel_chat_turn };
-        res = channel_chat_turn(text, chat_history(channel, peer, ch.dm_scope), surface_hint(str(ch.kind)));
-        chat_history_save(channel, peer, ch.dm_scope, list(res["history"]));
+        res = channel_chat_turn(text, history, surface_hint(kind));
+        new_history = list(res["history"]);
         reply = str(res["reply"]);
     }
-    reply_thread = thread_id if thread_id else inm.mid;
-    outm = _record(ch, "out", peer, reply, reply_thread);
-    session_note(channel, peer, ch.dm_scope, "assistant", reply);
+    saved = record_turn(channel, peer, new_history, reply, reply_thread);
+    if not saved["ok"] {
+        saved = _record_turn_fresh(channel, peer, new_history, reply, reply_thread, str(saved["error"]));
+    }
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
-            "signature": "chat", "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};
+            "signature": "chat", "in_mid": in_mid, "out_mid": str(saved.get("out_mid") or ""),
+            "thread_id": reply_thread, "saved": bool(saved["ok"])};
+}
+
+def record_turn(channel: str, peer: str, history: any, reply: str, thread_id: str) -> dict[str, any] {
+    # The after-turn bookkeeping in one serialized write: the stored conversation,
+    # the outbound Message and the transcript line. Reads the channel inside the
+    # write, so a fresh process can run it too (the `channel_turn_record` API op).
+    import from .sigil_runtime { graph_write }
+    def _do() -> str {
+        c = _get_channel(awaken(), channel);
+        if history is not None { chat_history_save(channel, peer, str(c.dm_scope), list(history)); }
+        m = _record(c, "out", peer, reply, thread_id);
+        session_note(channel, peer, str(c.dm_scope), "assistant", reply);
+        return str(m.mid);
+    }
+    r = graph_write(_do, "channel turn " + channel);
+    return {"ok": bool(r["ok"]), "out_mid": str(r["data"] or ""), "error": str(r["error"])};
+}
+
+def _record_turn_fresh(channel: str, peer: str, history: any, reply: str, thread_id: str, why: str) -> dict[str, any] {
+    import from .sigil_api { api_call, in_child }
+    print("channel: saving the turn on " + channel + " failed in this process (" + why[:160] + "); retrying from a fresh one", flush=True);
+    if in_child() { return {"ok": False, "out_mid": "", "error": why}; }
+    r = api_call("channel_turn_record", {"channel": channel, "peer": peer, "history": history,
+                                         "reply": reply, "thread_id": thread_id}, 300);
+    d: any = r["data"] if r["ok"] else None;
+    if isinstance(d, dict) and d.get("ok") { return {"ok": True, "out_mid": str(d.get("out_mid") or ""), "error": ""}; }
+    err = str(d.get("error")) if isinstance(d, dict) else str(r["error"]);
+    print("channel: the fresh save failed too: " + err[:200], flush=True);
+    return {"ok": False, "out_mid": "", "error": err};
 }
 
 def surface_hint(kind: str) -> str {
