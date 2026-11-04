@@ -63,7 +63,8 @@ test "the plain webhook contract is {channel, peer, text}" {
 test "delivery refuses what it cannot send instead of reporting success" {
     assert not deliver("telegram", "", "1", "hi")["ok"], "no token is not a delivery";
     assert not deliver("telegram", "tok", "1", "")["ok"], "an empty message is not a delivery";
-    assert not deliver("whatsapp", "tok", "1", "hi")["ok"], "whatsapp needs a phone-number id";
+    # a WhatsApp agent addresses user:<id> from an inbound message, never a bare number
+    assert not deliver("whatsapp", "tok", "15551234", "hi")["ok"], "a bare number is not an agent recipient";
     assert not deliver("webhook", "", "1", "hi")["ok"];
 }
 
@@ -86,7 +87,31 @@ test "a provider that answers 200 and ok:false is a failure, not a success" {
 
 test "only telegram polls; everything else waits to be pushed" {
     assert supports_polling("telegram");
+    assert supports_polling("whatsapp"), "the Agent Platform long-polls";
+    assert not supports_polling("whatsapp", "15551234"), "a phone-number id is the Cloud API webhook";
     assert not supports_polling("slack");
     assert not supports_polling("webhook");
     assert not supports_polling("");
+}
+
+test "whatsapp agent platform: every text message in /updates, with its timestamp" {
+    body = {"object": "whatsapp_agent_platform", "next_offset": 1288, "entry": [{"id": "1", "changes": [{
+        "field": "messages", "value": {
+            "messaging_product": "whatsapp",
+            "contacts": [{"wa_id": "user:509", "profile": {"name": "Alex"}}],
+            "messages": [
+                {"from": "user:509", "id": "wamid.A", "timestamp": "1736844652", "type": "text", "text": {"body": "hello agent"}},
+                {"from": "user:509", "id": "wamid.B", "timestamp": "1736844653", "type": "reaction", "reaction": {"message_id": "wamid.A", "emoji": "x"}},
+                {"from": "user:509", "id": "wamid.C", "timestamp": "1736844660", "type": "text", "text": {"body": "and again"}}
+            ],
+            "statuses": [{"id": "wamid.Z", "status": "read", "recipient_id": "user:509", "timestamp": "1736844650"}]
+        }}]}]};
+    got = whatsapp_messages(body);
+    assert len(got) == 2, str(got);
+    assert got[0]["peer"] == "user:509" and got[0]["text"] == "hello agent";
+    assert got[0]["thread_id"] == "wamid.A" and got[0]["ts"] == 1736844652;
+    assert got[1]["text"] == "and again";
+    # the webhook path still sees the first message
+    assert normalize_inbound("whatsapp", body)["thread_id"] == "wamid.A";
+    assert whatsapp_messages({}) == [];
 }

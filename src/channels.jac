@@ -129,14 +129,35 @@ def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dic
     # transport, and the record says which of those two things happened.
     soul = awaken();
     ch = _get_channel(soul, channel);
-    m = _record(ch, "out", peer, text, thread_id);
     creds = channel_credentials(ch);
+    if (not str(peer or "").strip()) and (str(ch.kind) == "whatsapp") and (not str(creds[1])) {
+        # A WhatsApp agent can only talk to the person who created it, at the
+        # user:<id> WhatsApp puts on their messages, which nobody can type
+        # in. So an empty peer means "them": the sender of the latest inbound.
+        peer = _last_inbound_peer(ch);
+        if not peer {
+            return {"ok": False, "error": "message your agent from WhatsApp first; Sigil learns where to reply from your message"};
+        }
+    }
+    m = _record(ch, "out", peer, text, thread_id);
     sent = deliver(ch.kind, str(creds[0]), peer, text, thread_id, str(creds[1]));
     out = {"ok": True, "channel": channel, "peer": peer, "text": text,
            "mid": m.mid, "thread_id": thread_id, "delivered": bool(sent["ok"])};
     if not sent["ok"] { out["delivery_error"] = str(sent["error"]); }
     if sent.get("note") { out["note"] = str(sent["note"]); }
     return out;
+}
+
+def _last_inbound_peer(ch: Channel) -> str {
+    best = "";
+    best_ts = -1.0;
+    for m in [ch -->[?:Message]] {
+        if (str(m.direction) == "in") and m.peer and (float(m.ts or 0) >= best_ts) {
+            best = str(m.peer);
+            best_ts = float(m.ts or 0);
+        }
+    }
+    return best;
 }
 
 def react(channel: str, mid: str, emoji: str) -> str {

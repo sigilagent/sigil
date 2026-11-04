@@ -395,7 +395,10 @@ def keys_overview() -> dict[str, any] {
     configured = channel_list();
     chans: list[any] = [];
     seen: list[str] = [str(m[1]) for m in MODEL_KEYS] + [str(s[1]) for s in SEARCH_KEYS] + list(KEY_ALIASES.values());
-    for kind in sorted(list(CHANNEL_GUIDES.keys())) {
+    # Easiest first: Telegram works on a token alone, the rest need a public URL or a bridge.
+    first = ["telegram", "slack", "discord", "whatsapp"];
+    kinds = [k for k in first if k in CHANNEL_GUIDES] + sorted([k for k in CHANNEL_GUIDES.keys() if k not in first]);
+    for kind in kinds {
         g = dict(CHANNEL_GUIDES[kind]);
         env = str(g.get("token_env") or "");
         if not env { continue; }
@@ -673,11 +676,16 @@ def channels_view() -> dict[str, any] {
     import from .channels { channel_list }
     import from .sigil_channels_setup { CHANNEL_GUIDES }
     guides: list[any] = [];
-    for kind in sorted(list(CHANNEL_GUIDES.keys())) {
+    # Easiest first: Telegram works on a token alone, the rest need a public URL or a bridge.
+    first = ["telegram", "slack", "discord", "whatsapp"];
+    kinds = [k for k in first if k in CHANNEL_GUIDES] + sorted([k for k in CHANNEL_GUIDES.keys() if k not in first]);
+    for kind in kinds {
         g = dict(CHANNEL_GUIDES[kind]);
         env = str(g.get("token_env") or "");
         guides.append({"kind": kind, "token_env": env, "token_set": bool(os.environ.get(env)) if env else False,
                        "delivery": str(g.get("delivery") or ""),
+                       "summary": str(g.get("summary") or ""),
+                       "link": [str(x) for x in list(g.get("link") or [])],
                        "get_token": [str(s) for s in list(g.get("get_token") or [])],
                        "wire": [str(s) for s in list(g.get("wire") or [])]});
     }

@@ -25,3 +25,11 @@ test "bootstrap registers the channel node + a token SecretRef" {
     names = [str(s["name"]) for s in secret_list()];
     assert "tg_token" in names, str(names);
 }
+
+test "telegram and whatsapp guides need no public URL and no second credential" {
+    g = channel_setup_guide("telegram");
+    assert "long-polls" in g and "setWebhook" not in g, g;
+    w = channel_setup_guide("whatsapp");
+    assert "Settings → Agents" in w and "api.whatsapp.com/agent/v1" in w, w;
+    assert "Phone Number ID" not in w, w;
+}

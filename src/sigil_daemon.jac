@@ -152,7 +152,7 @@ def wanted_bridges() -> list[dict[str, any]] {
         if not c["enabled"] { continue; }
         if kind in ["cli", ""] { continue; }
         cfg = channel_config(name);
-        if supports_polling(kind) and (not cfg["token"]) {
+        if supports_polling(kind, str(cfg["target"])) and (not cfg["token"]) {
             out.append({"name": name, "kind": kind, "ready": False,
                         "why": "its token env var is unset"});
             continue;
