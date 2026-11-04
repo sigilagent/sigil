@@ -672,15 +672,6 @@ def approvals_view() -> dict[str, any] {
             "history": approvals_history(40), "elevated": elevated_audit()[-20:]};
 }
 
-def _extra_view(g: dict[str, any]) -> dict[str, any] {
-    # A guide's second credential, with whether its env var is set. Empty when none.
-    if "extra" not in g { return {}; }
-    x = dict(g["extra"]);
-    env = str(x.get("env") or "");
-    return {"env": env, "label": str(x.get("label") or env), "hint": str(x.get("hint") or ""),
-            "set": bool(os.environ.get(env)) if env else False};
-}
-
 def channels_view() -> dict[str, any] {
     import from .channels { channel_list }
     import from .sigil_channels_setup { CHANNEL_GUIDES }
@@ -695,7 +686,6 @@ def channels_view() -> dict[str, any] {
                        "delivery": str(g.get("delivery") or ""),
                        "summary": str(g.get("summary") or ""),
                        "link": [str(x) for x in list(g.get("link") or [])],
-                       "extra": _extra_view(g),
                        "get_token": [str(s) for s in list(g.get("get_token") or [])],
                        "wire": [str(s) for s in list(g.get("wire") or [])]});
     }

@@ -25,13 +25,13 @@ glob KINDS: dict[str, str] = {
 };
 # What `channel_send`'s peer is for each provider.
 glob PEERS: dict[str, str] = {
-    "telegram": "Chat id", "slack": "Channel id", "discord": "Channel id", "whatsapp": "Phone number"
+    "telegram": "Chat id", "slack": "Channel id", "discord": "Channel id", "whatsapp": "User id"
 };
 glob TOKEN_LABELS: dict[str, str] = {
-    "telegram": "Bot token", "slack": "Bot token", "discord": "Bot token", "whatsapp": "Access token"
+    "telegram": "Bot token", "slack": "Bot token", "discord": "Bot token", "whatsapp": "API key"
 };
 glob TOKEN_HINTS: dict[str, str] = {
-    "telegram": "123456:ABC-DEF…", "slack": "xoxb-…", "discord": "Bot token", "whatsapp": "Access token"
+    "telegram": "123456:ABC-DEF…", "slack": "xoxb-…", "discord": "Bot token", "whatsapp": "API key from the agent's Chat info"
 };
 glob SCOPES: dict[str, str] = {
     "per-peer": "One per person", "main": "One for everyone", "per-channel-peer": "One per person, per channel"
@@ -95,7 +95,7 @@ def _meta(r: any) -> str {
 
 def _nextStep(delivery: str) -> str {
     # What to do right after Connect, by how the provider reaches Sigil.
-    if delivery == "long-poll" { return "Message the bot to try it; Sigil answers while the daemon runs."; }
+    if delivery == "long-poll" { return "Send it a message to try it; Sigil answers while the daemon runs."; }
     if delivery == "gateway-bridge" { return "Replies work now. Receiving needs the bridge under How messages reach Sigil."; }
     return "Next, give its bridge a public URL; the steps are under How messages reach Sigil.";
 }
@@ -295,17 +295,9 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     async def connect(g: any) {
         kind = str(g.kind);
         tok = str(_get(tokens, kind)).strip();
-        x: any = g.extra;
-        xenv = str(x.env) if (x and x.env) else "";
-        xval = str(_get(tokens, kind + ":x")).strip();
         if (not tok) and (not g.token_set) {
             cardErr = _with(cardErr, kind, "Paste the token first. Sigil needs it to send replies.");
             focusId("tok-" + kind);
-            return;
-        }
-        if xenv and (not xval) and (not x.set) {
-            cardErr = _with(cardErr, kind, "Add the " + str(x.label) + " too. Replies need it.");
-            focusId("tok-" + kind + "-x");
             return;
         }
         busy = "connect:" + kind;
@@ -314,10 +306,6 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
             if not (await saveSecret(kind, str(g.token_env), tok)) { busy = ""; return; }
             tokens = _with(tokens, kind, "");
             markSet(kind);
-        }
-        if xenv and xval {
-            if not (await saveSecret(kind, xenv, xval)) { busy = ""; return; }
-            tokens = _with(tokens, kind + ":x", "");
         }
         m: any = await call("channel_connect", {"kind": kind, "name": kind, "token_env": str(g.token_env)});
         busy = "";
@@ -354,7 +342,6 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     selTitle = _title(selC) if selC else sel;
     rows: list[any] = list(hists[sel]) if (sel and (sel in hists)) else [];
     sg: any = gby[setup] if (setup and (setup in gby)) else None;
-    sx: any = sg.extra if (sg and sg.extra and sg.extra.env) else None;
     ROW = "flex items-center gap-3 px-4 py-3 min-w-0";
 
     def statusChip(c: any) -> JsxElement {
@@ -563,7 +550,7 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
 
                     <div className="px-5 py-4 flex flex-col gap-5 overflow-y-auto min-h-0">
                         <div className="flex flex-col gap-2">
-                            <span className={LABEL}>1 · Create the bot</span>
+                            <span className={LABEL}>{"1 · Create the " + ("agent" if (str(sg.kind) == "whatsapp") else "bot")}</span>
                             {if isinstance(sg.get_token, list) {
                                 <ol className="m-0 pl-[18px] list-decimal text-[13px] text-fg-2 flex flex-col gap-1.5">
                                     {for (si, st) in enumerate(sg.get_token) {
@@ -582,7 +569,7 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <span className={LABEL}>{"2 · Paste the token" if (not sx) else "2 · Paste the credentials"}</span>
+                            <span className={LABEL}>{"2 · Paste the " + (TOKEN_LABELS[str(sg.kind)] if (str(sg.kind) in TOKEN_LABELS) else "token").lower()}</span>
                             <label className="flex flex-col gap-1.5 text-xs text-muted">
                                 {TOKEN_LABELS[str(sg.kind)] if (str(sg.kind) in TOKEN_LABELS) else "Token"}
                                 <input id={"tok-" + str(sg.kind)} type="password" autoComplete="off" spellCheck={False} autoFocus={True}
@@ -592,20 +579,8 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
                                     onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { connect(sg); } }}
                                     className={INP + " font-mono"}/>
                             </label>
-                            {if sx {
-                                <label className="flex flex-col gap-1.5 text-xs text-muted">
-                                    {str(sx.label)}
-                                    <input id={"tok-" + str(sg.kind) + "-x"} autoComplete="off" spellCheck={False}
-                                        value={str(_get(tokens, str(sg.kind) + ":x"))}
-                                        placeholder={("Leave empty to keep the one that is set") if sx.set else str(sx.hint or sx.label)}
-                                        onChange={lambda (e: ChangeEvent) { setTok(str(sg.kind) + ":x", e.target.value); }}
-                                        onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { connect(sg); } }}
-                                        className={INP + " font-mono"}/>
-                                </label>
-                            }}
                             <span className="text-xs text-muted">
                                 {"Saved as "}<span className="font-mono">{str(sg.token_env)}</span>
-                                {(<span>{" and "}<span className="font-mono">{str(sx.env)}</span></span>) if sx else None}
                                 {" in your secrets file on this machine. Sigil reads it when it sends; it never goes into the graph, and this page does not show it again."}
                             </span>
                         </div>

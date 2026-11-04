@@ -14,9 +14,14 @@ Two directions per provider:
   deliver()           the agent's reply, out to the provider
   normalize_inbound() the provider's payload, in to {peer, text, thread_id}
 
-Telegram additionally supports long polling (`poll_telegram`), which is the one
-transport that needs no public URL, no tunnel and no extra dependency — so it is
-the one that works the moment you paste a token.
+Telegram and WhatsApp also support long polling (`poll_telegram`,
+`poll_whatsapp_agent`), the transports that need no public URL, no tunnel and no
+extra dependency, so they work the moment you paste a token. WhatsApp's is the
+Agent Platform (api.whatsapp.com/agent/v1): an agent a person creates in their
+own WhatsApp app (Settings → Agents), whose API key is the whole credential. It
+can only talk to the person who created it, which is what a personal agent is.
+A WhatsApp channel whose config carries a phone-number id is the older Cloud
+API instead, and that one pushes to a webhook.
 """
 
 import json;
@@ -27,14 +32,19 @@ glob TELEGRAM_API: str = "https://api.telegram.org/bot";
 glob SLACK_API: str = "https://slack.com/api/";
 glob DISCORD_API: str = "https://discord.com/api/v10/";
 glob GRAPH_API: str = "https://graph.facebook.com/v20.0/";
+glob WA_AGENT_API: str = "https://api.whatsapp.com/agent/v1/";
 
 # Providers whose inbound arrives by us asking (poll) rather than them pushing.
-glob POLLING_KINDS: list[str] = ["telegram"];
+glob POLLING_KINDS: list[str] = ["telegram", "whatsapp"];
 # Providers that push to a URL we have to be listening on.
-glob WEBHOOK_KINDS: list[str] = ["slack", "whatsapp", "webhook", "discord"];
+glob WEBHOOK_KINDS: list[str] = ["slack", "webhook", "discord"];
 
-def supports_polling(kind: str) -> bool {
-    return str(kind or "").lower() in POLLING_KINDS;
+def supports_polling(kind: str, target: str = "") -> bool {
+    # WhatsApp polls on the Agent Platform. A config carrying a phone-number id
+    # (`target`) is the Cloud API, which pushes to a webhook instead.
+    k = str(kind or "").lower();
+    if (k == "whatsapp") and target { return False; }
+    return k in POLLING_KINDS;
 }
 
 # ---------------------------------------------------------------------------
@@ -101,7 +111,19 @@ def deliver(kind: str, token: str, peer: str, text: str,
     }
     if k == "whatsapp" {
         if not token { return {"ok": False, "error": "no whatsapp token"}; }
-        if not target { return {"ok": False, "error": "whatsapp needs a phone-number id"}; }
+        if not target {
+            # The Agent Platform addresses a person as "user:<id>", taken from
+            # an inbound message, and only the agent's creator. It rejects a
+            # bare phone number, so refuse it here rather than spend a request.
+            if not str(peer).startswith("user:") {
+                return {"ok": False, "error": "a WhatsApp agent replies to a user:<id> from an inbound message, and only to the person who created it"};
+            }
+            r = http_json(WA_AGENT_API + "messages",
+                          {"messaging_product": "whatsapp", "to": str(peer),
+                           "type": "text", "text": {"body": msg[:4096]}},
+                          {"Authorization": "Bearer " + token});
+            return _provider_ok(r, "");
+        }
         r = http_json(GRAPH_API + str(target) + "/messages",
                       {"messaging_product": "whatsapp", "to": peer,
                        "type": "text", "text": {"body": msg}},
@@ -158,23 +180,77 @@ def normalize_inbound(kind: str, body: dict[str, any]) -> dict[str, any] {
                 "thread_id": str(ev.get("thread_ts") or ev.get("ts") or "")};
     }
     if k == "whatsapp" {
-        try {
-            wh_entry = list(b.get("entry") or [])[0];
-            change = list(dict(wh_entry).get("changes") or [])[0];
-            value = dict(dict(change).get("value") or {});
-            msg = dict(list(value.get("messages") or [])[0]);
-        } except Exception as e {
-            return {};
-        }
-        text = str(dict(msg.get("text") or {}).get("body") or "");
-        if (not text) or (not msg.get("from")) { return {}; }
-        return {"peer": str(msg["from"]), "text": text, "thread_id": str(msg.get("id") or "")};
+        got = whatsapp_messages(b);
+        if not got { return {}; }
+        one = dict(got[0]);
+        return {"peer": str(one["peer"]), "text": str(one["text"]), "thread_id": str(one["thread_id"])};
     }
     # the plain contract: {channel, peer, text[, thread_id]}
     text = str(b.get("text") or "");
     if not text { return {}; }
     return {"peer": str(b.get("peer") or "anon"), "text": text,
             "thread_id": str(b.get("thread_id") or "")};
+}
+
+def whatsapp_messages(body: dict[str, any]) -> list[any] {
+    # Every text message in a WhatsApp envelope, as {peer, text, thread_id, ts}.
+    # The Cloud API webhook and the Agent Platform's /updates share the shape
+    # entry[].changes[].value.messages[]; receipts ride in value.statuses.
+    out: list[any] = [];
+    try {
+        for wh_entry in list(dict(body or {}).get("entry") or []) {
+            for change in list(dict(wh_entry).get("changes") or []) {
+                value = dict(dict(change).get("value") or {});
+                for raw in list(value.get("messages") or []) {
+                    msg = dict(raw);
+                    text = str(dict(msg.get("text") or {}).get("body") or "");
+                    if (not text) or (not msg.get("from")) { continue; }
+                    ts = 0;
+                    try { ts = int(str(msg.get("timestamp") or "0")); } except Exception as e { ts = 0; }
+                    out.append({"peer": str(msg["from"]), "text": text,
+                                "thread_id": str(msg.get("id") or ""), "ts": ts});
+                }
+            }
+        }
+    } except Exception as ex {
+        return out;
+    }
+    return out;
+}
+
+def acknowledge(kind: str, token: str, target: str, thread_id: str) -> None {
+    # Tell the person their message landed while the agent thinks, which takes
+    # a while. WhatsApp agents: mark it read and show "typing…" (lasts ~25s).
+    # Best effort: a failed receipt must never stop the reply.
+    if (str(kind or "").lower() == "whatsapp") and token and (not target) and thread_id {
+        http_json(WA_AGENT_API + "statuses",
+                  {"messaging_product": "whatsapp", "status": "read", "message_id": thread_id,
+                   "typing_indicator": {"type": "text"}},
+                  {"Authorization": "Bearer " + token}, 10);
+    }
+    return None;
+}
+
+# ---------------------------------------------------------------------------
+# WhatsApp Agent Platform long polling
+# ---------------------------------------------------------------------------
+def poll_whatsapp_agent(token: str, offset: int, timeout: int = 25, min_ts: int = 0) -> dict[str, any] {
+    # Returns {"ok", "messages": [{peer,text,thread_id,ts}], "offset": next, "error"}.
+    # Pass `next_offset` back unchanged. An offset of 0 replays the 30-day
+    # backlog, so a first-ever poll passes `min_ts` to skip what predates the
+    # bridge rather than answer a month of old messages. A 204 (nothing before
+    # the timeout) carries no next_offset: keep polling at the same one.
+    if not token { return {"ok": False, "messages": [], "offset": offset, "error": "no token"}; }
+    qs = urlencode({"offset": (offset if offset > 0 else 0), "limit": 100, "timeout": timeout});
+    r = http_json(WA_AGENT_API + "updates?" + qs, None, {"Authorization": "Bearer " + token}, timeout + 10);
+    if not r["ok"] { return {"ok": False, "messages": [], "offset": offset, "error": str(r["error"])}; }
+    body = dict(r.get("body") or {});
+    nxt = offset;
+    if body.get("next_offset") is not None {
+        try { nxt = int(body["next_offset"]); } except Exception as e { nxt = offset; }
+    }
+    msgs = [m for m in whatsapp_messages(body) if int(m["ts"]) >= min_ts];
+    return {"ok": True, "messages": msgs, "offset": nxt, "error": ""};
 }
 
 # ---------------------------------------------------------------------------

@@ -30,7 +30,7 @@ import from .sigil_runtime {
     _jac_bin, entry_script, project_root
 }
 import from .sigil_transports {
-    deliver, normalize_inbound, poll_telegram, supports_polling
+    deliver, normalize_inbound, poll_telegram, poll_whatsapp_agent, supports_polling, acknowledge
 }
 
 glob REPLY_MARKER: str = "<<<SIGIL_REPLY>>>";
@@ -194,6 +194,7 @@ def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
     text = str(m.get("text") or "");
     thread = str(m.get("thread_id") or "");
     _log("in  " + channel + "/" + peer + ": " + text[:120]);
+    acknowledge(str(cfg["kind"]), str(cfg["token"]), str(cfg["target"]), thread);
     res = ask_agent(channel, peer, text, thread);
     if not res["ok"] {
         _log("agent failed: " + str(res["error"])[:200]);
@@ -216,8 +217,13 @@ def bridge_poll(channel: str, cfg: dict[str, any], max_rounds: int = 0) -> dict[
     rounds = 0;
     offset = read_offset(channel);
     backoff = 1;
+    kind = str(cfg["kind"]);
+    # A first-ever WhatsApp poll reads from the start of a 30-day backlog. Answer
+    # only what was sent in the few minutes before the bridge came up (someone
+    # who said hi right after connecting), never last month.
+    since = (int(time.time()) - 300) if offset <= 0 else 0;
     while not _STOP["now"] {
-        r = poll_telegram(str(cfg["token"]), offset, 25);
+        r = poll_whatsapp_agent(str(cfg["token"]), offset, 25, since) if (kind == "whatsapp") else poll_telegram(str(cfg["token"]), offset, 25);
         if not r["ok"] {
             # A provider outage must not become a hot loop against their API.
             _log("poll error: " + str(r["error"])[:200] + " (retrying in " + str(backoff) + "s)");
@@ -309,7 +315,8 @@ def bridge_run(name: str, port: int = 0, max_rounds: int = 0) -> dict[str, any] 
         return {"ok": False, "error": "channel '" + name + "' is disabled"};
     }
     kind = str(cfg["kind"]);
-    if (not cfg["token"]) and supports_polling(kind) {
+    polls = supports_polling(kind, str(cfg["target"]));
+    if (not cfg["token"]) and polls {
         return {"ok": False, "error": "channel '" + name + "' has no credential — its token env var is unset"};
     }
     _STOP["now"] = False;
@@ -317,7 +324,7 @@ def bridge_run(name: str, port: int = 0, max_rounds: int = 0) -> dict[str, any] 
     write_pidfile(bridge_pid_name(name));
     _log("bridge up — channel '" + name + "' [" + kind + "]");
     try {
-        if supports_polling(kind) {
+        if polls {
             bridge_poll(name, cfg, max_rounds);
         } else {
             bridge_webhook(name, cfg, port if port > 0 else 8390);

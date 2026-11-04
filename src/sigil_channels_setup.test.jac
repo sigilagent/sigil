@@ -26,11 +26,10 @@ test "bootstrap registers the channel node + a token SecretRef" {
     assert "tg_token" in names, str(names);
 }
 
-test "whatsapp bootstrap also maps the phone-number id, joined onto the config" {
-    r = channel_bootstrap("wa", "whatsapp", "");
-    assert r["extra_env"] == "WHATSAPP_PHONE_ID", str(r);
-    names = [str(s["name"]) for s in secret_list()];
-    assert "wa_token" in names and "wa_target" in names, str(names);
+test "telegram and whatsapp guides need no public URL and no second credential" {
     g = channel_setup_guide("telegram");
     assert "long-polls" in g and "setWebhook" not in g, g;
+    w = channel_setup_guide("whatsapp");
+    assert "Settings → Agents" in w and "api.whatsapp.com/agent/v1" in w, w;
+    assert "Phone Number ID" not in w, w;
 }

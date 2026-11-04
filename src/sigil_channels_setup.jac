@@ -17,11 +17,9 @@ import from .sigil_core { awaken, Soul }
 import from .channels { channel_add, channel_list }
 import from .sigil_secrets { secret_add }
 
-# kind -> {token_env, delivery, summary, link, get_token[], wire[], extra?}
+# kind -> {token_env, delivery, summary, link, get_token[], wire[]}
 #   summary  one line for the console's channel list: what connecting costs you
 #   link     [label, url] of the page where the token is made
-#   extra    a second credential the transport needs, stored the same way as the
-#            token and joined onto the channel config as "<token>|<extra>"
 glob CHANNEL_GUIDES: dict[str, any] = {
     "telegram": {
         "token_env": "TELEGRAM_BOT_TOKEN",
@@ -58,18 +56,18 @@ glob CHANNEL_GUIDES: dict[str, any] = {
     },
     "whatsapp": {
         "token_env": "WHATSAPP_TOKEN",
-        "delivery": "webhook",
-        "summary": "Meta's Cloud API. Needs a public URL for incoming messages.",
-        "link": ["Open Meta's setup guide", "https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started"],
-        "extra": {"env": "WHATSAPP_PHONE_ID", "label": "Phone Number ID", "hint": "123456789012345"},
+        "delivery": "long-poll",
+        "summary": "Create an agent in WhatsApp and paste its API key. No public URL needed.",
+        "link": ["About WhatsApp agents", "https://faq.whatsapp.com/1050934623978152"],
         "get_token": [
-            "Create a Meta app and add the WhatsApp product.",
-            "WhatsApp → API Setup: copy the access token (temporary, or a System User's permanent one) and the Phone Number ID."
+            "In WhatsApp on your phone: Settings → Agents → Create an agent. Give it a name and a photo.",
+            "Open the agent's chat → Chat info → API key, and copy it.",
+            "The agent can only talk to you, its creator. WhatsApp says agent chats are not end-to-end encrypted."
         ],
         "wire": [
-            "The channel's bridge listens on 127.0.0.1:8390. Give it a public URL with a tunnel, e.g. ngrok http 8390.",
-            "Meta app → WhatsApp → Configuration: set the Callback URL to the tunnel URL, pick a Verify Token,",
-            "and subscribe to the 'messages' field. Replies go out through graph.facebook.com/<phone_id>/messages."
+            "Nothing to wire. While the daemon runs, Sigil long-polls api.whatsapp.com/agent/v1/updates with the key, so no public URL or tunnel is needed.",
+            "Message the agent from your phone to start. Sigil marks it read, shows typing while it thinks, and replies in the same chat.",
+            "Uninstalling WhatsApp or resetting the key invalidates it; paste the new one here."
         ]
     },
     "slack": {
@@ -106,7 +104,6 @@ def channel_setup_guide(kind: str) -> str {
     lines.append("");
     lines.append("1) Get the credentials" + ((" (" + str(g["link"][1]) + ")") if ("link" in g) else ""));
     for s in list(g["get_token"]) { lines.append("   • " + str(s)); }
-    if "extra" in g { lines.append("   • Also set " + str(g["extra"]["env"]) + " (" + str(g["extra"]["label"]) + ")."); }
     lines.append("");
     lines.append("2) Register the channel on the graph");
     lines.append("   channel connect " + k + " " + k + "        # creates the Channel node + a token SecretRef");
@@ -126,23 +123,12 @@ def channel_bootstrap(name: str, kind: str, token_env: str = "") -> dict[str, an
     known = k in CHANNEL_GUIDES;
     env = token_env if token_env else (str(CHANNEL_GUIDES[k]["token_env"]) if known else (name.upper() + "_TOKEN"));
     soul = awaken();
-    config = "secret:" + name + "_token";
-    extra_env = "";
-    if known and ("extra" in CHANNEL_GUIDES[k]) {
-        # The transport's second coordinate (a WhatsApp phone-number id) rides
-        # on the config as "<token>|<extra>"; channel_config splits it back.
-        extra_env = str(CHANNEL_GUIDES[k]["extra"]["env"]);
-        config = config + "|secret:" + name + "_target";
-        secret_add(name + "_target", extra_env);
-    }
-    channel_add(name, k if known else kind, config, "per-peer");
+    channel_add(name, k if known else kind, "secret:" + name + "_token", "per-peer");
     secret_add(name + "_token", env);
     return {
         "name": name, "kind": (k if known else kind), "token_env": env,
         "endpoint": "/walker/api_inbound",
         "token_set": bool(os.getenv(env)),
-        "extra_env": extra_env,
-        "extra_set": bool(os.getenv(extra_env)) if extra_env else True,
         "guide": channel_setup_guide(k) if known else ("Registered custom channel '" + name + "'. Have your adapter POST {channel:'" + name + "', peer, text} to /walker/api_inbound.")
     };
 }
