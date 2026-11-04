@@ -47,6 +47,7 @@ glob CHAT_HISTORY: list[any] = [];
 glob CHAT_INFO: dict[str, any] = {};   # the soul, injected into every turn via byLLM incl_info (mutated in place)
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
 glob _WEB_UI: bool = False;   # this turn came from the web console, which can show a Build button
+glob _SURFACE: str = "";     # where this turn's reply is read (a channel), for formatting
 glob _WEB_TURN: any = threading.Lock();   # the server runs requests on threads; a web turn owns the chat state
 
 def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
@@ -539,6 +540,7 @@ def _refresh_info(message: str) -> None {
     };
     mems = recollect(message, 4);
     if mems { info["relevant_memory"] = [str(m["content"]) for m in mems]; }
+    if _SURFACE { info["replying_on"] = _SURFACE; }
     CHAT_INFO.clear();
     CHAT_INFO.update(info);
 }
@@ -663,6 +665,26 @@ def _plain_history(h: list[any]) -> list[any] {
             m = {**m, "tool_calls": calls};
         }
         out.append(m);
+    }
+    return out;
+}
+
+def channel_chat_turn(message: str, history: list[any], surface: str) -> dict[str, any] {
+    # One turn of a channel's own ongoing conversation: the same agent, tools and
+    # approvals as `sigil chat`, continuing from `history` (the channel's stored
+    # messages) and handing the new history back to be stored. `surface` tells
+    # the model where the reply is read, so a WhatsApp answer is not a markdown
+    # table. A bridge runs this in a fresh process; the webhook endpoint runs it
+    # in the Observatory's, so it shares the web console's one-turn-at-a-time lock.
+    with _WEB_TURN {
+        CHAT_HISTORY = _starts_clean(_plain_history([h for h in list(history or []) if isinstance(h, dict)][-32:]));
+        _SURFACE = str(surface or "");
+        try {
+            out = chat_turn(message);
+        } finally {
+            _SURFACE = "";
+        }
+        out["history"] = _plain_last_user(_starts_clean(_plain_history(list(CHAT_HISTORY))), message);
     }
     return out;
 }
