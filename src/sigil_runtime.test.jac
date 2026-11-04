@@ -121,6 +121,21 @@ test "a compiled skill runs standalone, off the agent's graph, unless switched o
     else { os.environ["SIGIL_SKILL_STANDALONE"] = was; }
 }
 
+test "a compiled skill runs from a scratch dir outside the project" {
+    # jac picks the store from the working directory: a run started in src/
+    # committed its walker graph onto the agent's superroot.
+    was = os.environ.get("SIGIL_SKILL_STANDALONE");
+    os.environ.pop("SIGIL_SKILL_STANDALONE", None);
+    d = module_cwd(repo_root());
+    assert d == skill_run_dir();
+    assert os.path.isdir(d);
+    assert not os.path.abspath(d).startswith(os.path.abspath(project_root()) + os.sep);
+    os.environ["SIGIL_SKILL_STANDALONE"] = "0";
+    assert module_cwd(repo_root()) == repo_root();
+    if was is None { os.environ.pop("SIGIL_SKILL_STANDALONE", None); }
+    else { os.environ["SIGIL_SKILL_STANDALONE"] = was; }
+}
+
 test "a read refused because the file is in iCloud says so; other errors add nothing" {
     import errno;
     hint = cloud_file_hint(OSError(errno.EDEADLK, "Resource deadlock avoided"), "/Users/x/Desktop/log.txt");

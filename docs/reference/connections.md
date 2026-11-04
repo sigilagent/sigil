@@ -151,6 +151,66 @@ The key goes into `$SIGIL_HOME/secrets.env` (0600, readable by you alone) and
 never onto the graph. A key exported in your shell always wins over the file.
 The Observatory's Keys & secrets page manages the same file.
 
+## Web search
+
+These connections are not model routes. They are what the agent's `web_search`
+tool runs on, and they never take a tier or count toward the setup requirement.
+
+```bash
+sigil connect tavily      # browser sign-ins, no API key
+sigil connect exa
+sigil connect parallel
+sigil connect perplexity
+sigil connect serper      # paste a Serper key (Google results)
+```
+
+| Provider | How | Notes |
+|---|---|---|
+| Tavily | sign-in | Free plan: 1,000 searches a month. Uses one of your Tavily API keys behind the scenes. |
+| Exa | sign-in | Also works with no account, at low limits. Signing in raises them. |
+| Parallel | sign-in | Search built for AI agents. The sign-in issues a long-lived key, with no refresh. |
+| Perplexity | sign-in | Billed to your Perplexity API account. Perplexity does not document this sign-in, so it may change. |
+| Serper | key | Google results. Get a key at [serper.dev](https://serper.dev/api-key). |
+
+The four sign-ins connect the way ChatGPT does: a link, a sign-in, and it works.
+The browser comes back to a one-time loopback address
+(`http://127.0.0.1:<port>/callback`). Each sign-in goes through the provider's
+hosted MCP server, using the MCP authorization spec:
+
+1. Sigil reads the server's OAuth metadata.
+2. Sigil registers itself as a public client during that first sign-in, with no
+   secret (RFC 7591 dynamic client registration).
+3. The sign-in uses PKCE. Its token is good for that MCP server only, and each
+   search is an MCP tool call.
+
+Sigil checks the token with the server, and saves the search tool's input
+schema, before it says "connected". Search tools differ in shape: Exa wants a
+`query` and an `objective`, and Parallel a list of `search_queries`. Sigil
+builds the arguments from that saved schema. `sigil disconnect <provider>`
+revokes the session where the provider allows it, and deletes the token.
+
+Two more routes need no search connection at all:
+
+- **ChatGPT.** When a model tier runs on your ChatGPT plan, `web_search` uses
+  ChatGPT's own hosted web search. Each search is one request against your
+  plan, and its answer cites its sources. `SIGIL_CHATGPT_SEARCH=0` turns this
+  off.
+- **Exa with no account.** This is the last resort, so a fresh install can
+  still search. It is rate-limited. `SIGIL_KEYLESS_SEARCH=0` turns it off.
+
+**Serper** has no sign-in, only a key from [serper.dev](https://serper.dev/api-key),
+kept in `secrets.env` like any other.
+
+`web_search` tries these routes in order:
+
+1. a signed-in provider
+2. the Brave, Serper and Firecrawl keys
+3. ChatGPT's search, when a tier runs on your plan
+4. Claude Code's WebSearch, in claude mode
+5. Exa with no account
+
+See [models](models.md#web-search-providers).
+
 ## Tiers, from what is connected
 
 After you connect, setup suggests a model for each tier:
@@ -225,6 +285,7 @@ a remote Sigil, connect from its terminal instead.
 | ChatGPT sign-in | `$SIGIL_HOME/auth/chatgpt.json` (0600) |
 | This machine's ChatGPT host id | `$SIGIL_HOME/auth/host_id`: an opaque `urn:uuid:…`, not a credential |
 | OpenRouter and API keys | `$SIGIL_HOME/secrets.env` (0600) |
+| Search sign-ins | `$SIGIL_HOME/auth/search-<provider>.json` (0600), refreshed under a lock like ChatGPT's |
 | Claude Code | the `claude` CLI's own config; Sigil only reads which account it is |
 
 None of them is ever written to the graph or to `jac.toml`. The ChatGPT access

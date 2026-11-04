@@ -574,9 +574,32 @@ def module_argv(jacbin: str, driver: str) -> list[str] {
     # at the same moment ("Sources changed during preparation"). A skill run's
     # graph is scratch; nothing reads it back. SIGIL_SKILL_STANDALONE=0 restores
     # the takeover run.
-    v = str(os.environ.get("SIGIL_SKILL_STANDALONE") or "").strip().lower();
-    if v in ["0", "false", "no", "off"] { return [jacbin, "run", "--no-serve", driver]; }
+    if not skill_standalone() { return [jacbin, "run", "--no-serve", driver]; }
     return [jacbin, "run", "--no-serve", "--no-takeover", driver];
+}
+
+def skill_standalone() -> bool {
+    v = str(os.environ.get("SIGIL_SKILL_STANDALONE") or "").strip().lower();
+    return v not in ["0", "false", "no", "off"];
+}
+
+def skill_run_dir() -> str {
+    # Where a compiled skill runs: $SIGIL_HOME/skill-runs, outside the project.
+    # --no-takeover alone was not enough. jac picks the store from the working
+    # directory, so a run started in src/ still committed its whole walker graph
+    # onto the agent's superroot (47 dead run trees, 676 nodes, on one install),
+    # and the process that launched it, holding a transaction across the run,
+    # then failed its commit ("could not serialize access", then jac's retry
+    # "WriteConflict ... expected v1, found v0"). The compiled runtime also
+    # stages its bundle directory into the working directory, which put a copy
+    # of every crystallized module into src/. Out here both land in scratch.
+    d = os.path.join(sigil_home(), "skill-runs");
+    try { Path(d).mkdir(parents=True, exist_ok=True); } except Exception as e { }
+    return d;
+}
+
+def module_cwd(workdir: str) -> str {
+    return skill_run_dir() if skill_standalone() else str(workdir);
 }
 
 # Run a compiled module in an isolated ``jac run`` subprocess. Returns
@@ -589,11 +612,15 @@ def execute_module(module_path: str, task: str, model_name: str,
                    mcp_json: str = "", signature: str = "",
                    skill_tools: str = "", channels: str = "") -> dict[str, any] {
     mod = Path(module_path).stem;
-    driver = Path(workdir) / f"_driver_{mod}.jac";
+    wd = os.path.abspath(str(workdir));
+    driver = Path(wd) / f"_driver_{mod}.jac";
     driver.write_text(_DRIVER.format(mod=mod, marker=_MARKER));
     env = dict(os.environ);
     env.update(SIGIL_MODEL=model_name, SIGIL_TASK=task, SIGIL_SKILL=skill);
-    env["SIGIL_OBS"] = str(Path(workdir) / OBS_LOG);
+    env["SIGIL_OBS"] = str(Path(wd) / OBS_LOG);
+    # The run starts outside src/ (module_cwd), so put src/ back on the path for
+    # the runtime's own Python imports (`import sigil_mcp` in _live_tool).
+    env["PYTHONPATH"] = os.pathsep.join([p for p in [wd, str(env.get("PYTHONPATH") or "")] if p]);
     env["SIGIL_SIG"] = signature;
     if mcp_json {
         env["SIGIL_MCP"] = mcp_json;
@@ -616,7 +643,7 @@ def execute_module(module_path: str, task: str, model_name: str,
         env["SIGIL_JAC"] = jacbin;
     }
     try {
-        p = subprocess.run(module_argv(jacbin, str(driver)), cwd=workdir, env=env,
+        p = subprocess.run(module_argv(jacbin, str(driver)), cwd=module_cwd(wd), env=env,
                            capture_output=True, text=True, timeout=timeout);
     } except subprocess.TimeoutExpired as e {
         return {"ok": False, "report": "", "error": f"timeout after {timeout}s"};

@@ -175,11 +175,21 @@ test "web_search: claude is only reached in claude mode, and the message says so
     # No provider keys and not in claude mode -> the guidance names all three routes,
     # claude mode first, because it is the one that needs no signup.
     import os;
-    for k in ["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY", "FIRECRAWL_API_KEY"] { os.environ.pop(k, None); }
+    import tempfile;
+    for k in ["BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY", "SERPER_API_KEY", "FIRECRAWL_API_KEY"] { os.environ.pop(k, None); }
+    os.environ["SIGIL_KEYLESS_SEARCH"] = "0";   # the no-account floor would answer instead
+    os.environ["SIGIL_CHATGPT_SEARCH"] = "0";
+    prev_home = os.environ.get("SIGIL_HOME");
+    os.environ["SIGIL_HOME"] = tempfile.mkdtemp();   # no search sign-in on record either
     assert not _claude_search_ready(), "claude search must stay off outside claude mode";
     out = web_search("anything at all");
+    if prev_home is None { os.environ.pop("SIGIL_HOME", None); } else { os.environ["SIGIL_HOME"] = prev_home; }
+    os.environ.pop("SIGIL_KEYLESS_SEARCH", None);
+    os.environ.pop("SIGIL_CHATGPT_SEARCH", None);
     assert "claude mode" in out, out;
     assert "BRAVE_API_KEY" in out and "FIRECRAWL_API_KEY" in out, out;
+    assert "sigil connect tavily" in out and "serper" in out, out;   # the no-key sign-ins are offered
+    assert "perplexity" in out and "ChatGPT" in out, out;
     assert "web_fetch" in out, out;          # still says what DOES work without a key
 }
 
