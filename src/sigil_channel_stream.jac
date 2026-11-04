@@ -80,9 +80,12 @@ def split_long(text: str, limit: int = 3500) -> list[str] {
     out: list[str] = [];
     rest = str(text);
     while len(rest) > limit {
-        cut = rest.rfind("\n\n", 0, limit);
-        if cut < limit // 2 { cut = rest.rfind("\n", 0, limit); }
-        if cut < limit // 2 { cut = rest.rfind(" ", 0, limit); }
+        # Search a slice, not rfind(sub, 0, limit): the bounded form is not
+        # honoured under every jac backend (jac test ignored the end bound).
+        window = rest[:limit];
+        cut = window.rfind("\n\n");
+        if cut < limit // 2 { cut = window.rfind("\n"); }
+        if cut < limit // 2 { cut = window.rfind(" "); }
         if cut <= 0 { cut = limit; }
         out.append(rest[:cut].rstrip());
         rest = rest[cut:].lstrip();
