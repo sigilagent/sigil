@@ -25,7 +25,7 @@ glob KINDS: dict[str, str] = {
 };
 # What `channel_send`'s peer is for each provider.
 glob PEERS: dict[str, str] = {
-    "telegram": "Chat id", "slack": "Channel id", "discord": "Channel id", "whatsapp": "User id"
+    "telegram": "Chat id", "slack": "Channel id", "discord": "Channel id"
 };
 glob TOKEN_LABELS: dict[str, str] = {
     "telegram": "Bot token", "slack": "Bot token", "discord": "Bot token", "whatsapp": "API key"
@@ -205,7 +205,8 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     def openTest(name: str) {
         openHist(name);
         draft = TEST_TEXT;
-        focusId("chan-text" if peer else "chan-peer");
+        wa = len([c for c in configured if (str(c.name) == name) and (str(c.kind) == "whatsapp")]) > 0;
+        focusId("chan-text" if (peer or wa) else "chan-peer");
     }
 
     async def send() {
@@ -410,11 +411,14 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
                 }}
             </div>
             <div className="flex flex-col gap-2">
+                {(<span className="text-xs text-muted">{"Replies go to you, the person who created the agent." if _lastPeer(rows) else "Message your agent from WhatsApp first. Sigil learns where to reply from your message."}</span>) if (selKind == "whatsapp") else None}
                 <div className="flex flex-wrap gap-2">
+                    {if selKind != "whatsapp" {
                     <input id="chan-peer" value={peer} aria-label={_peerLabel(selKind)}
                         placeholder={(_peerLabel(selKind) + " to send to") if (selKind in PEERS) else "Peer (optional)"}
                         onChange={lambda (e: ChangeEvent) { peer = e.target.value; }}
                         className={INP + " w-[180px] font-mono"}/>
+                    }}
                     <input id="chan-text" value={draft} aria-label={"Send as Sigil on " + selTitle} placeholder="Send as Sigil"
                         onChange={lambda (e: ChangeEvent) { draft = e.target.value; }}
                         onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { send(); } }}

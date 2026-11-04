@@ -3,7 +3,7 @@
 # bookkeeping that decides whether a message gets answered twice.
 
 import os;
-import from .channels { channel_add, channel_remove }
+import from .channels { channel_add, channel_remove, message_send, _get_channel, _record }
 
 test "the long-poll cursor survives a restart" {
     # Without a persisted cursor, a restarted bridge re-fetches updates Telegram
@@ -66,4 +66,17 @@ test "a polling channel with no credential is refused with the reason" {
     assert not r["ok"];
     assert "credential" in str(r["error"]);
     channel_remove("_t_no_token");
+}
+
+test "a WhatsApp agent send with no peer goes to whoever last wrote to it" {
+    # An agent may only message its creator, at a user:<id> nobody can type in,
+    # so an empty peer resolves to the sender of the latest inbound message.
+    channel_add("_t_wa_agent", "whatsapp", "", "per-peer");
+    r = message_send("_t_wa_agent", "", "hello");
+    assert not r["ok"] and ("message your agent" in str(r["error"])), str(r);
+    ch = _get_channel(awaken(), "_t_wa_agent");
+    _record(ch, "in", "user:7", "hi agent", "wamid.T");
+    r2 = message_send("_t_wa_agent", "", "hello");
+    assert r2["ok"] and (r2["peer"] == "user:7"), str(r2);
+    channel_remove("_t_wa_agent");
 }
