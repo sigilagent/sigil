@@ -232,18 +232,60 @@ def _fire(job: CronJob, t: int) -> dict[str, any] {
     # Recorded in a write of its own, committed on the spot: the run took
     # minutes, and the record must not wait for this process to exit holding
     # the job's rows (a sibling then times out on them).
-    def _record() -> bool {
-        run = CronRun(started_ms=t, ok=ok, summary=summary[:400]);
-        job +>:Fired:+> run;
-        job.runs += 1;
-        if not ok { job.errors += 1; }
-        job.last_status = "ok" if ok else "error";
-        _prune_runs(job);
-        return True;
+    def _record() -> bool { return _record_run(job, t, ok, summary); }
+    rec = graph_write(_record, "cron record " + job.name);
+    if not rec["ok"] {
+        # This process held the graph for the whole run while the channel
+        # bridge, the console and the scheduler committed to it, so its view is
+        # stale and the save is refused (WriteConflict: "changed concurrently").
+        # That used to drop the record silently: the job ran, its side effects
+        # landed, and runs/errors froze. A fresh process reads the current graph.
+        why = str(rec["error"])[:160];
+        res = _record_fresh(job.name, t, ok, summary);
+        # "tick: " so the daemon relays it into its log (_report_tick).
+        print("tick: run of " + job.name + " recorded from a fresh process ("
+              + ("ok" if res["ok"] else ("FAILED: " + str(res["error"])[:160])) + "); in-process save failed: " + why, flush=True);
     }
-    graph_write(_record, "cron record " + job.name);
     if ok { _deliver(job, summary); }
     return {"name": job.name, "ok": ok, "summary": summary[:400]};
+}
+
+def _record_run(job: CronJob, t: int, ok: bool, summary: str) -> bool {
+    run = CronRun(started_ms=t, ok=ok, summary=str(summary)[:400]);
+    job +>:Fired:+> run;
+    job.runs += 1;
+    if not ok { job.errors += 1; }
+    job.last_status = "ok" if ok else "error";
+    _prune_runs(job);
+    return True;
+}
+
+def cron_record(name: str, started_ms: int, ok: bool, summary: str) -> dict[str, any] {
+    # Record a run that happened elsewhere: the fresh-process half of _fire's
+    # fallback, reached as the `cron_record` API op.
+    def _do() -> bool {
+        soul = awaken();
+        for j in _jobs(soul) {
+            if j.name == name { return _record_run(j, started_ms, ok, summary); }
+        }
+        return False;
+    }
+    r = graph_write(_do, "cron record (fresh) " + name);
+    if r["ok"] and (not r["data"]) { return {"ok": False, "error": "no such cron job: " + name}; }
+    return {"ok": bool(r["ok"]), "error": str(r["error"])};
+}
+
+def _record_fresh(name: str, started_ms: int, ok: bool, summary: str) -> dict[str, any] {
+    import from .sigil_api { api_call, in_child }
+    if in_child() {
+        return {"ok": False, "error": "already in an API child process; nothing fresher to ask"};
+    }
+    r = api_call("cron_record", {"name": name, "started_ms": int(started_ms), "ok": bool(ok),
+                                 "summary": str(summary)[:400]}, 300);
+    if not r["ok"] { return {"ok": False, "error": str(r["error"])}; }
+    d: any = r["data"];
+    if isinstance(d, dict) and (not d.get("ok")) { return {"ok": False, "error": str(d.get("error") or "")}; }
+    return {"ok": True, "error": ""};
 }
 
 def _claim_state(job: CronJob, t: int) -> bool {

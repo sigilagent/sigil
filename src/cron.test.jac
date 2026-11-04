@@ -158,3 +158,17 @@ test "_claim_state: a one-shot is spent when taken, then retires by its outcome"
     assert j.next_run_ms == 0;
     assert not _claim_state(j, t), "taken once, never again";
 }
+
+test "cron_record counts a run that happened in another process" {
+    cron_add("_t_rec", "every", "3600", "noop task", "", "");
+    r = cron_record("_t_rec", now_ms(), False, "boom");
+    assert r["ok"], str(r);
+    r2 = cron_record("_t_rec", now_ms(), True, "fine");
+    assert r2["ok"], str(r2);
+    j = cron_show("_t_rec");
+    assert int(j["runs"]) == 2 and int(j["errors"]) == 1, str(j);
+    hist = cron_runs("_t_rec");
+    assert len(hist) == 2, str(hist);
+    assert not cron_record("_t_nope", now_ms(), True, "x")["ok"];
+    cron_remove("_t_rec");
+}

@@ -20,7 +20,7 @@ import from .sigil {
     register_skill, eval_skill, relearn, forget
 }
 import from .agent { run_task }
-import from .cron { cron_list, cron_runs, cron_remove, cron_enable, cron_tick }
+import from .cron { cron_list, cron_runs, cron_remove, cron_enable, cron_tick, cron_record }
 import from .channels { channel_list, inbound }
 import from .hooks { hook_list }
 import from .approvals { approvals_get }
@@ -119,6 +119,10 @@ def api_dispatch(name: str, a: dict[str, any]) -> dict[str, any] {
         }
         elif name == "cron_tick" { payload["data"] = cron_tick(); }
         elif name == "cron_list" { payload["data"] = cron_list(); }
+        elif name == "cron_record" {
+            payload["data"] = cron_record(str(a.get("name", "")), int(a.get("started_ms") or 0),
+                                          bool(a.get("ok")), str(a.get("summary", "")));
+        }
         elif name == "cron_runs" { payload["data"] = cron_runs(str(a.get("name", ""))); }
         elif name == "cron_enable" { payload["data"] = cron_enable(str(a.get("name", "")), bool(a.get("on", True))); }
         elif name == "cron_remove" { payload["data"] = cron_remove(str(a.get("name", ""))); }
