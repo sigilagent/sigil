@@ -9,9 +9,8 @@ the `api_inbound` HTTP endpoint IS a ready webhook channel.
 """
 
 import from .sigil_core { awaken, Soul }
-import from .agent { run_task }
 import from .hooks { fire_hooks }
-import from .sigil_sessions { session_note }
+import from .sigil_sessions { session_note, chat_history, chat_history_save, chat_history_reset }
 import from .sigil_secrets { resolve_credential }
 import from .sigil_transports { deliver }
 import from .sigil_api { report_for }
@@ -99,13 +98,41 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
     inm = _record(ch, "in", peer, text, thread_id);
     fire_hooks("message_received", channel + ":" + peer + ": " + text);
     session_note(channel, peer, ch.dm_scope, "user", text);   # transcript, scoped by dm_scope
-    res = run_task(text, "");
-    reply = str(res["result"]);
+    # Each channel conversation is an ongoing chat with the agent `sigil chat`
+    # talks to, not a fresh task per message: a message is answered knowing what
+    # was said before on this channel, and the agent reaches compiled skills as
+    # its tools. (Routing every message through the task solver compiled a "Hi"
+    # into a greeting skill and sent its raw output back.)
+    if str(text).strip().lower() in ["/new", "/reset"] {
+        chat_history_reset(channel, peer, ch.dm_scope);
+        reply = "Started a new conversation.";
+    } else {
+        import from .chat_agent { channel_chat_turn };
+        res = channel_chat_turn(text, chat_history(channel, peer, ch.dm_scope), surface_hint(str(ch.kind)));
+        chat_history_save(channel, peer, ch.dm_scope, list(res["history"]));
+        reply = str(res["reply"]);
+    }
     reply_thread = thread_id if thread_id else inm.mid;
     outm = _record(ch, "out", peer, reply, reply_thread);
     session_note(channel, peer, ch.dm_scope, "assistant", reply);
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
-            "signature": str(res["signature"]), "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};
+            "signature": "chat", "in_mid": inm.mid, "out_mid": outm.mid, "thread_id": reply_thread};
+}
+
+def surface_hint(kind: str) -> str {
+    # Where the reply is read, for the model's formatting. Chat apps render
+    # little markdown, and a reply is read on a phone.
+    k = str(kind or "").lower();
+    if k == "whatsapp" {
+        return "a WhatsApp chat on the user's phone: reply in short plain text. WhatsApp renders *bold*, _italic_ and ```code``` only; no headings, tables or [text](url) links.";
+    }
+    if k == "telegram" {
+        return "a Telegram chat: reply in short plain text; no markdown headings or tables.";
+    }
+    if k in ["slack", "discord"] {
+        return "a " + k.capitalize() + " chat: keep replies short; light markdown is fine, no headings or tables.";
+    }
+    return "a messaging channel (" + (k or "webhook") + "): keep replies short and plain.";
 }
 
 def channel_credentials(ch: Channel) -> list[str] {

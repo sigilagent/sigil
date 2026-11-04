@@ -163,7 +163,7 @@ def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
         return {"ok": True, "reply": out.split(REPLY_MARKER, 1)[1].strip(), "error": ""};
     }
     return {"ok": False, "reply": "",
-            "error": (str(p.stderr or out)[-400:] or "the agent produced no reply")};
+            "error": (str(p.stderr or out)[-2000:] or "the agent produced no reply")};
 }
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
     acknowledge(str(cfg["kind"]), str(cfg["token"]), str(cfg["target"]), thread);
     res = ask_agent(channel, peer, text, thread);
     if not res["ok"] {
-        _log("agent failed: " + str(res["error"])[:200]);
+        _log("agent failed: " + str(res["error"])[-2000:]);
         # Say something. Silence on a chat channel is indistinguishable from the
         # bot being dead, and the person is still waiting.
         deliver(str(cfg["kind"]), str(cfg["token"]), peer,

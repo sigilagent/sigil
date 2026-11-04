@@ -5,6 +5,13 @@ where the scope follows the channel's `dm_scope` (main | per-peer | per-channel-
 — so two peers on a per-peer channel keep separate transcripts. Transcripts reset
 daily (OpenClaw's daily reset). `session_context` projects the recent turns as
 run-time context (bounded), and `channels.inbound` records each turn.
+
+A `ChannelChat` node is the same conversation as the chat agent sees it: the
+message list a `sigil chat` turn carries (user turns, replies, tool calls and
+their results), keyed like the Session. It is what makes a channel an ongoing
+chat rather than a string of unrelated tasks. It does not reset daily; it is
+bounded instead, and `/new` from the channel starts over. It is its own node, not
+a field on Session, so Sessions already on a graph load unchanged.
 """
 
 import time;
@@ -20,6 +27,11 @@ node Session {
     has scope: str = "";
     has day: str = "";     # yyyy-mm-dd of the current transcript (for the daily reset)
     has turns: list[any] = [];  # [{role, text, ts}]
+}
+
+node ChannelChat {
+    has key: str;               # same key as the Session: "<channel>:<scope-key>"
+    has history: list[any] = [];  # the chat agent's messages, plain JSON
 }
 
 def _today() -> str { return date.today().isoformat(); }
@@ -84,6 +96,34 @@ def session_reset(channel: str, peer: str, dm_scope: str = "per-peer") -> str {
     s = _get(channel, peer, dm_scope);
     s.turns = [];
     return "reset session " + s.key;
+}
+
+def _chat_key(channel: str, peer: str, dm_scope: str) -> str {
+    return channel + ":" + _scope_key(peer, dm_scope, channel);
+}
+
+def chat_history(channel: str, peer: str, dm_scope: str = "per-peer") -> list[any] {
+    # The conversation so far for this channel (and peer, per dm_scope).
+    soul = awaken();
+    key = _chat_key(channel, peer, dm_scope);
+    for c in [soul -->[?:ChannelChat]] { if c.key == key { return list(c.history); } }
+    return [];
+}
+
+def chat_history_save(channel: str, peer: str, dm_scope: str, history: list[any]) -> int {
+    soul = awaken();
+    key = _chat_key(channel, peer, dm_scope);
+    kept = list(history)[-32:];
+    for c in [soul -->[?:ChannelChat]] {
+        if c.key == key { c.history = kept; return len(kept); }
+    }
+    soul +>:Sessioned:+> ChannelChat(key=key, history=kept);
+    return len(kept);
+}
+
+def chat_history_reset(channel: str, peer: str, dm_scope: str = "per-peer") -> str {
+    chat_history_save(channel, peer, dm_scope, []);
+    return "reset chat " + _chat_key(channel, peer, dm_scope);
 }
 
 def session_list() -> list[any] {

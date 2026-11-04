@@ -1,7 +1,8 @@
 """Channels: where Sigil listens and replies.
 
-A channel is a node on the agent's graph (src/channels.jac). A message that
-arrives on one runs as a task, and the reply goes back on the same thread. The
+A channel is a node on the agent's graph (src/channels.jac). Each conversation
+on one is an ongoing chat with the agent, and the reply goes back on the same
+thread. The
 page is two lists, the shape other claw-style consoles settled on: what is
 connected (a row each, with status; a row opens its history, a test send and
 removal), then what can be added (a row each with one line on what connecting
@@ -442,7 +443,7 @@ def:pub ChannelsPage(route: list[str], go: Callable[[str], None], ask: Callable[
                 <div className="flex flex-wrap items-center gap-1.5">
                     <button type="button" className={BTN_GHOST_SM}
                         onClick={lambda (e: MouseEvent) { openTest(nm); }}>Send a test</button>
-                    <span className="text-xs text-muted mx-1.5">{"Conversations: " + (SCOPES[str(c.dm_scope)] if (str(c.dm_scope) in SCOPES) else str(c.dm_scope)).lower()}</span>
+                    <span className="text-xs text-muted mx-1.5">{"Ongoing chat, " + (SCOPES[str(c.dm_scope)] if (str(c.dm_scope) in SCOPES) else str(c.dm_scope)).lower() + " · send /new to start over"}</span>
                     <button type="button" className={BTN_BAD_SM + " ml-auto"}
                         onClick={lambda (e: MouseEvent) { confirm = nm; }}>Remove</button>
                 </div>

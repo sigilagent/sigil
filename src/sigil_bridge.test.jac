@@ -3,7 +3,7 @@
 # bookkeeping that decides whether a message gets answered twice.
 
 import os;
-import from .channels { channel_add, channel_remove, message_send, _get_channel, _record }
+import from .channels { channel_add, channel_remove, message_send, _get_channel, _record, inbound, surface_hint }
 
 test "the long-poll cursor survives a restart" {
     # Without a persisted cursor, a restarted bridge re-fetches updates Telegram
@@ -79,4 +79,20 @@ test "a WhatsApp agent send with no peer goes to whoever last wrote to it" {
     r2 = message_send("_t_wa_agent", "", "hello");
     assert r2["ok"] and (r2["peer"] == "user:7"), str(r2);
     channel_remove("_t_wa_agent");
+}
+
+test "/new on a channel starts its conversation over without a model call" {
+    import from .sigil_sessions { chat_history, chat_history_save }
+    channel_add("_t_chat_new", "telegram", "", "per-peer");
+    chat_history_save("_t_chat_new", "42", "per-peer", [{"role": "user", "content": "earlier"}]);
+    r = inbound("_t_chat_new", "42", "/new", "");
+    assert r["ok"] and ("new conversation" in str(r["reply"])), str(r);
+    assert chat_history("_t_chat_new", "42", "per-peer") == [];
+    channel_remove("_t_chat_new");
+}
+
+test "the model is told where its reply is read" {
+    assert "WhatsApp" in surface_hint("whatsapp") and "no headings" in surface_hint("whatsapp");
+    assert "Telegram" in surface_hint("telegram");
+    assert "short" in surface_hint("webhook");
 }

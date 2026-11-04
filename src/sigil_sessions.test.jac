@@ -16,3 +16,16 @@ test "session_start fires when a transcript begins" {
     assert after == before + 1;
     hook_remove("_t_session_hook");
 }
+
+test "a channel's chat history persists per conversation, bounded, and resets on /new" {
+    chat_history_reset("_t_chat", "user:1", "per-peer");
+    assert chat_history("_t_chat", "user:1", "per-peer") == [];
+    turns = [{"role": "user", "content": "m" + str(i)} for i in range(40)];
+    assert chat_history_save("_t_chat", "user:1", "per-peer", turns) == 32, "kept bounded";
+    got = chat_history("_t_chat", "user:1", "per-peer");
+    assert got[-1]["content"] == "m39", str(got[-1]);
+    # another peer on a per-peer channel is a separate conversation
+    assert chat_history("_t_chat", "user:2", "per-peer") == [];
+    chat_history_reset("_t_chat", "user:1", "per-peer");
+    assert chat_history("_t_chat", "user:1", "per-peer") == [];
+}
