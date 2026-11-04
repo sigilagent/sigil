@@ -674,7 +674,7 @@ def consume(events) -> dict:
         elif kind == "response.completed":
             r = ev.get("response") or {}
             return {"text": _final_text(r) or "".join(deltas), "usage": r.get("usage") or {},
-                    "finish": "stop", "id": str(r.get("id") or "")}
+                    "finish": "stop", "id": str(r.get("id") or ""), "response": r}
         elif kind == "response.incomplete":
             r = ev.get("response") or {}
             text = _final_text(r) or "".join(deltas)
@@ -751,6 +751,78 @@ def _chunk(resp) -> dict:
         "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens,
                   "total_tokens": usage.total_tokens},
     }
+
+
+# ---------------------------------------------------------------------------
+# Web search on the plan
+# ---------------------------------------------------------------------------
+# The Responses API's hosted `web_search` tool is on plan usage's supported list
+# ("Preview limitations" in the docs), so a ChatGPT sign-in can answer
+# `web_search` with no search key. One search is one Responses request, counted
+# against the plan like any other, which is why Sigil only does it when a tier
+# already runs on ChatGPT (sigil_workspace decides).
+_SEARCH_INSTRUCTIONS = (
+    "You are a web search backend, not an assistant. Use the web_search tool for the "
+    "user's query, then reply with a short factual summary (at most 6 sentences) of what "
+    "the results say. Cite the pages you used."
+)
+
+
+def citations(response: dict) -> list:
+    """[{title, url}] from a completed response's url_citation annotations, deduplicated."""
+    out, seen = [], set()
+    for item in (response or {}).get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for c in item.get("content") or []:
+            for a in (c.get("annotations") or []) if isinstance(c, dict) else []:
+                if isinstance(a, dict) and a.get("type") == "url_citation" and a.get("url"):
+                    u = str(a["url"])
+                    if u not in seen:
+                        seen.add(u)
+                        out.append({"title": str(a.get("title") or ""), "url": u})
+    return out
+
+
+def _clean_url(u: str) -> str:
+    # OpenAI tags cited links with utm_source=openai; the page is the same without it.
+    parts = urllib.parse.urlsplit(u)
+    q = [(k, v) for (k, v) in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k != "utm_source"]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(q)))
+
+
+def text_citations(text: str) -> list:
+    """[{title, url}] from the inline markdown links a plan reply cites with.
+    Plan usage streams `store: false`, and its completed response carries no
+    output items to read annotations from, so the links in the text are it."""
+    import re
+    out, seen = [], set()
+    for m in re.finditer(r"\[([^\]]{1,200})\]\((https?://[^)\s]+)\)", str(text or "")):
+        u = _clean_url(m.group(2))
+        if u not in seen:
+            seen.add(u)
+            out.append({"title": m.group(1).strip(), "url": u})
+    return out
+
+
+def web_search(model: str, query: str) -> dict:
+    """{"text", "sources": [{title, url}]} for one query, searched on the plan."""
+    global _SINK
+    slug = _slug(model)
+    body = build_request(slug, [{"role": "system", "content": _SEARCH_INSTRUCTIONS},
+                                {"role": "user", "content": str(query)}])
+    body["tools"] = [{"type": "web_search"}]
+    held = _SINK
+    _SINK = None  # a search answer is a tool result, not the chat reply: keep it off the live stream
+    try:
+        out = _stream(body)
+    finally:
+        _SINK = held
+    text = str(out.get("text") or "")
+    src = citations(out.get("response") or {}) or text_citations(text)
+    for c in src:
+        c["url"] = _clean_url(c["url"])
+    return {"text": text, "sources": src}
 
 
 def install() -> bool:

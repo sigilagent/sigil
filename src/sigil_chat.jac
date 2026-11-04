@@ -213,7 +213,7 @@ def connect_slash(console: any, rest: str) -> str {
     if not pid {
         console.print();
         print_connections(console);
-        console.print("  [dim]/connect <provider> connects one: chatgpt · claude-code · openrouter · ollama · ollama-cloud · openai · anthropic · gemini · zai[/dim]");
+        console.print("  [dim]/connect <provider> connects one: chatgpt · claude-code · openrouter · ollama · ollama-cloud · openai · anthropic · gemini · zai; web search: tavily · exa · parallel · perplexity · serper[/dim]");
         console.print();
         return "";
     }

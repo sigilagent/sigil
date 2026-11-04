@@ -10,7 +10,9 @@ at once:
   (ChatGPT, OpenRouter) is `connect_start`, which runs the loopback listener in
   the server process and returns the link; the page opens it in a tab and polls
   `connect_poll`. A pasted key is `connect_key`; `connect_apply` points the tiers
-  at a connection.
+  at a connection. Rows with role "search" (Tavily, Exa, Parallel, Perplexity,
+  Serper) are what web_search
+  runs on: they get their own card and never feed a tier.
 - keys: the `keys` op (src/sigil_console.jac keys_overview). A value is never
   sent to the browser, only whether it is set, where from, and its last four
   characters. Saving and clearing a value run in the server process
@@ -51,6 +53,7 @@ glob CONN_GROUPS: list[any] = [
     ["Already on this machine", ["claude-code", "ollama"]],
     ["API keys", ["openai", "anthropic", "gemini", "zai", "ollama-cloud"]]
 ];
+glob SEARCH_CONN_IDS: list[str] = ["tavily", "exa", "parallel", "perplexity", "serper"];
 
 # [tier, label, config key, what the tier does]
 glob TIERS: list[any] = [
@@ -805,11 +808,23 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         </div>;
     }
 
+    def searchCard() -> JsxElement {
+        if not cdata { return <span></span>; }
+        rows: list[any] = [r for r in list(cdata.rows or []) if (str(r.id) in SEARCH_CONN_IDS)];
+        return <section aria-labelledby="wsh" className={CARD + " overflow-hidden"}>
+            <div className="px-4.5 py-4 border-b border-line flex flex-col gap-2">
+                <h2 id="wsh" className="m-0 text-[15px] font-semibold">Web search</h2>
+                <span className="text-[12.5px] text-muted leading-relaxed">What the agent's web_search runs on. Signing in needs no API key. Without any of these, web_search uses ChatGPT's own search when a tier runs on your ChatGPT plan, Claude Code's in claude mode, a Brave or Firecrawl key from the Keys page, or Exa with no account as the last resort.</span>
+            </div>
+            {[connRow(r) for r in rows]}
+        </section>;
+    }
+
     def connectionsCard() -> JsxElement {
         if not cdata { return loading(cerr, "Checking your connections…"); }
         rows: list[any] = list(cdata.rows or []);
         tiers: any = cdata.tiers;
-        anyConn = len([r for r in rows if r.connected]) > 0;
+        anyConn = len([r for r in rows if (r.connected and (str(r.role) != "search"))]) > 0;
         sugAll: any = cdata.suggest;
         jc: any = cdata.suggest_for[justConnected] if (justConnected and cdata.suggest_for and (justConnected in cdata.suggest_for)) else None;
         return <section aria-labelledby="ch" className={CARD + " overflow-hidden"}>
@@ -1153,7 +1168,7 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
     }
 
     body: any = None;
-    if sec == "connections" { body = connectionsCard(); }
+    if sec == "connections" { body = <div className="flex flex-col gap-4">{connectionsCard()}{searchCard()}</div>; }
     elif sec == "keys" { body = keysCard(); }
     elif sec == "models" { body = modelsCard(); }
     elif sec == "behaviour" { body = behaviourCard(); }

@@ -14,6 +14,7 @@ import getpass;
 import from .sigil_connect {
     PROVIDERS, KEYED, connections, provider_status, provider_label, suggest_tiers, tiers_for,
     apply_tiers, ready_tiers, model_ready, connect_chatgpt, connect_openrouter, connect_key,
+    connect_search, model_rows, is_search, SEARCH_SIGNIN,
     claude_login, ollama_pull, ollama_signin, is_cloud_tag, disconnect, how_to, gate_on, CHATGPT_USAGE_URL
 }
 import from .sigil_core { describe_soul, configure }
@@ -51,12 +52,22 @@ def _mark(r: dict[str, any]) -> str {
 }
 
 def print_connections(console: any) {
-    rows = connections();
+    allrows = connections();
+    rows = model_rows(allrows);
     console.print("[bold]connections[/bold]");
     for r in rows {
         console.print("  " + _mark(r) + " " + str(r["label"]).ljust(18) + str(r["detail"])
                       + ("" if r["connected"] else ("  [dim]→ sigil connect " + str(r["id"]) + "[/dim]")));
     }
+    console.print();
+    console.print("[bold]web search[/bold] [dim](what web_search runs on)[/dim]");
+    for r in allrows {
+        if not is_search(str(r["id"])) { continue; }
+        console.print("  " + _mark(r) + " " + str(r["label"]).ljust(18) + str(r["detail"])
+                      + ("" if r["connected"] else ("  [dim]→ sigil connect " + str(r["id"]) + "[/dim]")));
+    }
+    console.print("  [dim]also: ChatGPT's own web search when a tier runs on your ChatGPT plan; Claude Code's in claude mode;"
+                  + " Brave/Firecrawl keys; and Exa with no account as the last resort.[/dim]");
     rt = ready_tiers();
     console.print();
     console.print("[bold]tiers[/bold]");
@@ -98,6 +109,15 @@ def connect_cli(console: any, session: any, pid: str, fresh: bool = False, brows
         try {
             r2: dict[str, any] = connect_openrouter(lambda (url: str) { _show_link(console, url); }, browser);
             console.print("[green]  ✓[/green] " + str(r2["detail"]) + ".");
+            return True;
+        } except KeyboardInterrupt as e { console.print("  [dim]cancelled[/dim]"); return False; }
+        except Exception as e { console.print("[red]  ✗[/red] " + str(e)); return False; }
+    }
+    if pid in SEARCH_SIGNIN {
+        console.print("  Opening a " + label + " sign-in in your browser…");
+        try {
+            r7: dict[str, any] = connect_search(pid, lambda (url: str) { _show_link(console, url); }, browser);
+            console.print("[green]  ✓[/green] " + str(r7["detail"]) + ".");
             return True;
         } except KeyboardInterrupt as e { console.print("  [dim]cancelled[/dim]"); return False; }
         except Exception as e { console.print("[red]  ✗[/red] " + str(e)); return False; }
@@ -191,7 +211,7 @@ def offer_tiers(console: any, session: any, pid: str) {
 def _pick_connections(console: any, session: any) -> bool {
     # Step 1, required: loop until at least one route is connected.
     while True {
-        rows = connections();
+        rows = model_rows(connections());   # a search sign-in cannot run a tier
         anyc = len([r for r in rows if r["connected"]]) > 0;
         i = 1;
         for r in rows {
