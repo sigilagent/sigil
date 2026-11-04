@@ -82,6 +82,7 @@ test "a WhatsApp agent send with no peer goes to whoever last wrote to it" {
 }
 
 test "any channel's send with no peer goes to whoever last wrote, so a skill can report back" {
+    import from .channels { skill_channels_json }
     channel_add("_t_tg_back", "telegram", "", "per-peer");
     r = message_send("_t_tg_back", "", "done");
     assert not r["ok"] and ("message the agent on telegram first" in str(r["error"])), str(r);
