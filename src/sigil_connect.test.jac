@@ -126,3 +126,30 @@ test "suggest_tiers: the Ollama Cloud API alone covers every tier" {
     assert t["frontier"].startswith("ollama-cloud/");
     assert t["small"].startswith("ollama-cloud/");
 }
+
+test "search providers: listed as connections, never a tier" {
+    for pid in SEARCH_IDS {
+        assert str(_row(pid)["role"]) == "search", pid;
+        assert tiers_for(pid, [_fake(pid, True, [])]) == {}, pid;
+    }
+    assert str(_row("chatgpt")["role"]) == "model";
+    rows = [_fake("tavily", True, []), _fake("serper", True, []), _fake("openai", True, [])];
+    rows[0]["role"] = "search";
+    rows[1]["role"] = "search";
+    assert [str(r["id"]) for r in model_rows(rows)] == ["openai"];
+    # Connected search alone suggests no model for any tier.
+    t = suggest_tiers([_fake("tavily", True, []), _fake("serper", True, [])]);
+    assert t["frontier"] == "" and t["small"] == "", str(t);
+    assert "sigil connect tavily" in how_to("tavily");
+}
+
+test "tavily: a fresh SIGIL_HOME is not signed in, and the row says so" {
+    import tempfile;
+    prev = os.environ.get("SIGIL_HOME");
+    os.environ["SIGIL_HOME"] = tempfile.mkdtemp();
+    st = provider_status("tavily");
+    if prev is None { os.environ.pop("SIGIL_HOME", None); } else { os.environ["SIGIL_HOME"] = prev; }
+    assert not st["connected"];
+    assert str(st["detail"]) == "not signed in";
+    assert st["models"] == [];
+}

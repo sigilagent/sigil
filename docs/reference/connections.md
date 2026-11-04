@@ -151,6 +151,41 @@ The key goes into `$SIGIL_HOME/secrets.env` (0600, readable by you alone) and
 never onto the graph. A key exported in your shell always wins over the file.
 The Observatory's Keys & secrets page manages the same file.
 
+## Web search: Tavily and Serper
+
+These two connections are not model routes. They are what the agent's
+`web_search` tool runs on, and they never take a tier or count toward the
+setup requirement.
+
+```bash
+sigil connect tavily    # a browser sign-in, no API key
+sigil connect serper    # paste a Serper key (Google results)
+```
+
+**Tavily** connects the way ChatGPT does: a link, a sign-in, and it works.
+Sigil opens Tavily's sign-in in your browser. The browser then comes back to a
+one-time loopback address (`http://127.0.0.1:<port>/callback`). The connection
+goes through Tavily's hosted MCP server (`mcp.tavily.com/mcp`), using the MCP
+authorization spec:
+
+1. Sigil reads the server's OAuth metadata.
+2. Sigil registers itself as a public client during that first sign-in, with no
+   secret (RFC 7591 dynamic client registration).
+3. The sign-in uses PKCE. Its token is good for that MCP server only, and each
+   search is an MCP `tavily_search` call.
+
+Tavily uses one of your existing Tavily API keys behind the scenes, and its free
+plan includes 1,000 searches a month. Sigil checks the token against the server
+before it says "connected". `sigil disconnect tavily` revokes the session at
+Tavily and deletes the token.
+
+**Serper** has no sign-in, only a key from [serper.dev](https://serper.dev/api-key),
+kept in `secrets.env` like any other.
+
+`web_search` tries a signed-in provider first, then the Brave, Serper and
+Firecrawl keys, then Claude Code's own WebSearch in claude mode. See
+[models](models.md#web-search-providers).
+
 ## Tiers, from what is connected
 
 After you connect, setup suggests a model for each tier:
@@ -225,6 +260,7 @@ a remote Sigil, connect from its terminal instead.
 | ChatGPT sign-in | `$SIGIL_HOME/auth/chatgpt.json` (0600) |
 | This machine's ChatGPT host id | `$SIGIL_HOME/auth/host_id`: an opaque `urn:uuid:…`, not a credential |
 | OpenRouter and API keys | `$SIGIL_HOME/secrets.env` (0600) |
+| Tavily sign-in | `$SIGIL_HOME/auth/search-tavily.json` (0600), refreshed under a lock like ChatGPT's |
 | Claude Code | the `claude` CLI's own config; Sigil only reads which account it is |
 
 None of them is ever written to the graph or to `jac.toml`. The ChatGPT access

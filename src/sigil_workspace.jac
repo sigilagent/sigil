@@ -789,8 +789,8 @@ def web_fetch(url: str) -> str {
 
 # Web search goes through a real provider API (keyless engines now serve bot
 # challenges, not results — same reason OpenClaw uses Brave/Firecrawl/LLM-native
-# search, never scraping). Keys come from the environment (document them with
-# `secret add` if you like). Brave is tried first, then Firecrawl.
+# search, never scraping). A browser sign-in (Tavily, `sigil connect tavily`)
+# is tried first, then keys from the environment: Brave, Serper, Firecrawl.
 def _fmt_results(items: list[any]) -> str {
     out: list = [];
     i = 0;
@@ -839,11 +839,36 @@ def _search_claude(query: str) -> list[any] {
     return list(cc_search(query, 6));
 }
 
+def _search_signin(query: str) -> str {
+    # The first search provider the user signed in to, or "" when none answered.
+    # Raw text (a result shape Sigil could not split) is passed on, trimmed.
+    import from .sigil_search { signed_in, search as signin_search }
+    for pid in signed_in() {
+        try {
+            items: list[any] = list(signin_search(pid, query, 6));
+            _trace("web_search", query + " (" + pid + ", " + str(len(items)) + ")");
+            if not items { return "no results for: " + query; }
+            if "raw" in dict(items[0]) { t = str(dict(items[0])["raw"]); return t if len(t) <= 6000 else (t[:6000] + "\n… [truncated]"); }
+            return _fmt_results(items);
+        } except Exception as e { _trace("web_search", pid + " err: " + str(e)[:120], False); }
+    }
+    return "";
+}
+
+def _search_serper(query: str, key: str) -> list[any] {
+    import from .sigil_search { search_serper }
+    return list(search_serper(query, key, 6));
+}
+
 def web_search(query: str) -> str {
-    # Brave and Firecrawl first — a direct search API is faster and cheaper than a
-    # model turn. Claude Code's own WebSearch is the fallback that means claude-mode
-    # users need no search key at all.
+    # A signed-in provider first: the user connected it for exactly this. Then
+    # the direct search APIs, which are faster and cheaper than a model turn.
+    # Claude Code's own WebSearch is the fallback that means claude-mode users
+    # need no search key at all.
+    via = _search_signin(query);
+    if via { return via; }
     brave = os.getenv("BRAVE_API_KEY") or os.getenv("BRAVE_SEARCH_API_KEY");
+    serper = os.getenv("SERPER_API_KEY");
     fire = os.getenv("FIRECRAWL_API_KEY");
     if brave {
         try {
@@ -851,6 +876,13 @@ def web_search(query: str) -> str {
             _trace("web_search", query + " (brave, " + str(len(items)) + ")");
             return _fmt_results(items) if items else "no results for: " + query;
         } except Exception as e { _trace("web_search", "brave err", False); }
+    }
+    if serper {
+        try {
+            items = _search_serper(query, str(serper));
+            _trace("web_search", query + " (serper, " + str(len(items)) + ")");
+            return _fmt_results(items) if items else "no results for: " + query;
+        } except Exception as e { _trace("web_search", "serper err", False); }
     }
     if fire {
         try {
@@ -869,8 +901,10 @@ def web_search(query: str) -> str {
     _trace("web_search", query + " (no provider)", False);
     return ("web_search needs a search provider — keyless engines now block automated queries.\n"
             "Either:\n"
+            "  • Sign in to Tavily   sigil connect tavily         (a browser sign-in, no key; 1,000 free searches a month)\n"
             "  • Run in claude mode  sigil --claude …      (uses your Claude Code CLI's own web search — no key)\n"
             "  • Brave               export BRAVE_API_KEY=…       (free tier: https://brave.com/search/api/)\n"
+            "  • Serper              sigil connect serper         (Google results; https://serper.dev)\n"
             "  • Firecrawl           export FIRECRAWL_API_KEY=…   (https://firecrawl.dev)\n"
             "Without any of those I can still fetch a specific URL with web_fetch — including keyless JSON APIs, "
             "e.g. GitHub: web_fetch('https://api.github.com/repos/<org>/<repo>/pulls').");

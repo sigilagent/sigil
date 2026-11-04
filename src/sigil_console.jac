@@ -334,6 +334,7 @@ glob MODEL_KEYS: list[any] = [
 # [label, env var, what it is for] in the order `web_search` tries them.
 glob SEARCH_KEYS: list[any] = [
     ["Brave Search", "BRAVE_API_KEY", "Search results from Brave's API (free tier available)"],
+    ["Serper", "SERPER_API_KEY", "Google results over Serper's API (free credits on signup)"],
     ["Firecrawl", "FIRECRAWL_API_KEY", "Search plus full-page scraping"]
 ];
 
@@ -483,6 +484,13 @@ def secret_check(env: str) -> dict[str, any] {
             items = _search_brave("sigil skill compiler", val);
             return {"ok": True, "env": env, "detail": "works: " + str(len(items)) + " results"};
         } except Exception as e { return {"ok": False, "env": env, "detail": "Brave refused it: " + str(e)[:120]}; }
+    }
+    if env == "SERPER_API_KEY" {
+        import from .sigil_search { search_serper }
+        try {
+            items = search_serper("sigil skill compiler", val, 3);
+            return {"ok": True, "env": env, "detail": "works: " + str(len(items)) + " results"};
+        } except Exception as e { return {"ok": False, "env": env, "detail": "Serper refused it: " + str(e)[:120]}; }
     }
     if env == "FIRECRAWL_API_KEY" {
         import from .sigil_workspace { _search_firecrawl }
@@ -767,7 +775,10 @@ def connections_view() -> dict[str, any] {
         row = dict(r);
         row["how"] = how_to(str(r["id"]));
         rows.append(row);
-        if r["connected"] { per[str(r["id"])] = tiers_for(str(r["id"]), list(rt["rows"])); }
+        # A search row never has tiers, and an empty {} would still read as "yes" in JS.
+        if r["connected"] and (str(r.get("role") or "model") != "search") {
+            per[str(r["id"])] = tiers_for(str(r["id"]), list(rt["rows"]));
+        }
     }
     return {"rows": rows, "tiers": rt["tiers"], "ok": rt["ok"], "suggest": suggest_tiers(list(rt["rows"])),
             "suggest_for": per, "usage_url": CHATGPT_USAGE_URL};
