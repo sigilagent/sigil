@@ -12,6 +12,7 @@ Slash commands are answered without the model:
   /build            compile the agent drafted in this chat
   /compile <path>   compile a SKILL.md (or its folder) on this machine
   /status           the latest compiles and how they went
+  /stop             stop the turn that is running (the bridge handles it)
   /new              start the conversation over (/reset too)
   /help             these commands
 """
@@ -23,7 +24,7 @@ import time;
 import hashlib;
 import from .sigil_runtime { run_dir, checkpoint }
 
-glob COMMANDS: list[str] = ["new", "reset", "build", "compile", "status", "help"];
+glob COMMANDS: list[str] = ["new", "reset", "stop", "build", "compile", "status", "help"];
 
 def channel_command(text: str) -> dict[str, str] {
     # {cmd, arg} for a slash command this module answers, else cmd "". Anything
@@ -46,6 +47,7 @@ def help_text() -> str {
             + "/build: compile the agent we drafted in this chat\n"
             + "/compile <path>: compile a SKILL.md on this machine\n"
             + "/status: the latest compiles\n"
+            + "/stop: stop what I'm working on\n"
             + "/new: start our conversation over\n"
             + "Anything else goes to the agent.");
 }
@@ -207,6 +209,7 @@ def status_text() -> str {
 def handle_command(channel: str, peer: str, cmd: str, arg: str, base_dir: str) -> str {
     # The reply to a slash command (other than /new, which the inbound loop owns).
     if cmd == "help" { return help_text(); }
+    if cmd == "stop" { return "Nothing is running right now."; }
     if cmd == "status" { return status_text(); }
     if cmd == "build" {
         dr = pending_draft(channel, peer);

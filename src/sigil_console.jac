@@ -221,6 +221,10 @@ def console_dispatch(op: str, a: dict[str, any]) -> any {
         out["pending"] = [p for p in approvals_pending() if float(p["ts"]) >= t0 - 1.0];
         return out;
     }
+    if op == "chat_interrupt" {
+        import from .chat_agent { web_chat_interrupt }
+        return web_chat_interrupt();
+    }
     if op == "compile_run" { return compile_run(str(a.get("job") or "")); }
     return {"ok": False, "error": "unknown op '" + op + "'"};
 }

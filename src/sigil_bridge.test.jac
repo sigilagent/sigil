@@ -121,3 +121,16 @@ test "the model is told where its reply is read" {
     assert "Telegram" in surface_hint("telegram");
     assert "short" in surface_hint("webhook");
 }
+
+test "messages that wait for one person become one turn; commands stay on their own" {
+    ms = [{"peer": "u", "text": "find HN posts", "thread_id": "t1"},
+          {"peer": "u", "text": "only about agents", "thread_id": "t2"},
+          {"peer": "u", "text": "/status"},
+          {"peer": "u", "text": "and send me 3"}];
+    got = merge_messages(ms);
+    assert len(got) == 3, str(got);
+    assert got[0]["text"] == "find HN posts\nonly about agents" and got[0]["thread_id"] == "t1", str(got[0]);
+    assert got[1]["text"] == "/status";
+    assert got[2]["text"] == "and send me 3";
+    assert interrupt_mode() in ["interrupt", "queue"];
+}

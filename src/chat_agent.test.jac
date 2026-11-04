@@ -192,3 +192,15 @@ test "learn_skill goes through the compiler unless switched off" {
     if old is None { os.environ.pop("SIGIL_LEARN_VIA_COMPILER", None); }
     else { os.environ["SIGIL_LEARN_VIA_COMPILER"] = str(old); }
 }
+
+test "an interrupted turn leaves the request and what it had done in the conversation" {
+    CHAT_HISTORY.clear();
+    CHAT_HISTORY.append({"role": "user", "content": "earlier"});
+    CHAT_HISTORY.append({"role": "assistant", "content": "earlier answer"});
+    _note_interrupted("summarise HN for me", "So far: two posts");
+    assert CHAT_HISTORY[-2] == {"role": "user", "content": "summarise HN for me"}, str(CHAT_HISTORY);
+    last = str(CHAT_HISTORY[-1]["content"]);
+    assert CHAT_HISTORY[-1]["role"] == "assistant" and last.startswith("(Interrupted"), last;
+    assert "So far: two posts" in last;
+    CHAT_HISTORY.clear();
+}

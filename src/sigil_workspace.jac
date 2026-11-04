@@ -42,6 +42,7 @@ import from .approvals { check_exec, allowlist_add }
 import from .hooks { fire_hooks }
 import from .sigil_runtime { run_dir, pid_alive, commit_now, checkpoint, cloud_file_hint }
 import from .sigil_secrets { resolve_refs, redact_secrets }
+import from .sigil_interrupt { interrupt_point }
 
 # ---------------------------------------------------------------------------
 # Live tool trace + inline approver (wired by the REPL; None = silent/scripted)
@@ -57,6 +58,7 @@ def set_compile_offload(fn: any) -> None { _COMPILE_OFFLOAD = fn; }
 def set_start_sink(fn: any) -> None { _START_SINK = fn; }
 def set_approver(fn: any) -> None { _APPROVER = fn; }
 def drain_trace() -> list[any] { out = list(TRACE); TRACE = []; return out; }
+def trace_view() -> list[any] { return list(TRACE); }
 
 def ask_approval(subject: str) -> bool {
     # The one door to whoever is at the prompt. Headless (daemon, channel, a
@@ -85,6 +87,9 @@ def _trace(tool: str, detail: str, ok: bool = True) -> None {
     # transaction, so a turn that runs for minutes does not hold graph rows the
     # scheduler and the other channels need (checkpoint in sigil_runtime).
     try { checkpoint("tool " + str(tool)); } except Exception as e3 {  }
+    # ...and a safe point to stop at, when a new message asked (sigil_interrupt):
+    # this call's work is done and saved.
+    interrupt_point();
 }
 
 def _trace_start(tool: str, detail: str) -> None {
@@ -96,6 +101,7 @@ def _trace_start(tool: str, detail: str) -> None {
         try { _START_SINK(tool, detail); } except Exception as e2 {}
     }
     try { checkpoint("before tool " + str(tool)); } except Exception as e3 {  }
+    interrupt_point();
     return None;
 }
 

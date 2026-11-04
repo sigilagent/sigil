@@ -131,6 +131,7 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
     commit_now("channel inbound " + channel);
     reply_thread = thread_id if thread_id else in_mid;
     new_history: any = None;
+    interrupted = False;
     import from .sigil_channel_compile { channel_command, handle_command }
     cmd = channel_command(text);
     if cmd["cmd"] == "new" {
@@ -148,6 +149,7 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
         res = channel_chat_turn(text, history, surface_hint(kind), channel, peer);
         new_history = list(res["history"]);
         reply = str(res["reply"]);
+        interrupted = bool(res.get("interrupted"));
     }
     saved = record_turn(channel, peer, new_history, reply, reply_thread);
     if not saved["ok"] {
@@ -155,7 +157,7 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
     }
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
             "signature": "chat", "in_mid": in_mid, "out_mid": str(saved.get("out_mid") or ""),
-            "thread_id": reply_thread, "saved": bool(saved["ok"])};
+            "thread_id": reply_thread, "saved": bool(saved["ok"]), "interrupted": interrupted};
 }
 
 def record_turn(channel: str, peer: str, history: any, reply: str, thread_id: str) -> dict[str, any] {

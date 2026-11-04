@@ -551,6 +551,11 @@ def graph_write(mutate: any, context: str = "") -> dict[str, any] {
         import from .sigil_errors { log_error }
         log_error("graph_write(" + str(context) + ")", e);
         return {"ok": False, "data": None, "error": str(e)[:300]};
+    } except BaseException as be {
+        # ^C or an interrupted turn (sigil_interrupt): let it through, but never
+        # with the cross-process lock still held by a long-lived process.
+        _lock_release(fh);
+        raise;
     }
     err = commit_now(context);
     _lock_release(fh);

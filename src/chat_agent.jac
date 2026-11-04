@@ -37,11 +37,12 @@ import from .sigil_mcp { dispatch }
 import from .sigil_workspace {
     ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, ws_watch, ws_kill, ws_jobs,
     sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace,
-    set_compile_offload
+    set_compile_offload, trace_view
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
 import from .sigil_skill_tools { run_skill, skill_tools, skill_tool_index, _tail_progress }
 import from .sigil_errors { friendly_llm_error, log_error }
+import from .sigil_interrupt { interrupt_point, interrupted_note, begin_turn, end_turn, request_interrupt }
 
 glob chat_llm: any = Model(model_name="gpt-4o-mini");
 glob CHAT_HISTORY: list[any] = [];
@@ -625,12 +626,14 @@ def chat_turn(message: str) -> dict[str, any] {
             piece = str(tok);
             reply += piece;
             if _TOKEN_SINK is not None { try { _TOKEN_SINK(piece); } except Exception as e {} }
+            interrupt_point();   # a new message on the web or a channel (sigil_interrupt)
         }
     } except KeyboardInterrupt {
         # ^C mid-turn means "stop this answer", not "kill sigil". KeyboardInterrupt
         # is a BaseException, so the clause below never sees it — uncaught it would
         # unwind the whole REPL. Keep whatever streamed and flag the turn.
         interrupted = True;
+        _note_interrupted(message, reply);
     } except Exception as e {
         # The turn died mid-call (bad model name, dead key, no network…). The
         # error log gets which turn and the full traceback — byLLM's own
@@ -645,6 +648,28 @@ def chat_turn(message: str) -> dict[str, any] {
     # keep history bounded (last ~16 turns)
     if len(CHAT_HISTORY) > 32 { CHAT_HISTORY = CHAT_HISTORY[-32:]; }
     return {"reply": str(reply), "trace": drain_trace(), "interrupted": interrupted};
+}
+
+def _note_interrupted(message: str, reply: str) -> None {
+    # The conversation must say what an interrupted turn was asked and had done,
+    # or the next message ("only the top 3") arrives with nothing to apply to.
+    hist = list(CHAT_HISTORY);
+    has_user = False;
+    for m in reversed(hist) {
+        if isinstance(m, dict) and (str(m.get("role", "")) == "user") {
+            has_user = message.strip()[:200] in str(m.get("content") or "");
+            break;
+        }
+    }
+    if not has_user { CHAT_HISTORY.append({"role": "user", "content": message}); }
+    done: list[str] = [];
+    for t in trace_view() {
+        if isinstance(t, dict) and t.get("ok") {
+            done.append(str(t.get("tool")) + " " + " ".join(str(t.get("detail") or "").split())[:60]);
+        }
+    }
+    CHAT_HISTORY.append({"role": "assistant", "content": interrupted_note(reply, done)});
+    return None;
 }
 
 def chat_reset() -> str {
@@ -752,16 +777,27 @@ def channel_chat_turn(message: str, history: list[any], surface: str,
             # this chat (sigil_channel_compile).
             set_compile_offload(_channel_compile);
         }
+        # A new message from this person stops the turn (the bridge writes this
+        # process's flag; sigil_interrupt).
+        import from .sigil_interrupt { channel_scope }
+        begin_turn(channel_scope(os.getpid()));
         try {
             out = chat_turn(message);
         } finally {
             _SURFACE = "";
             _CHANNEL.clear();
             set_compile_offload(None);
+            end_turn();
         }
         out["history"] = _plain_last_user(_starts_clean(_plain_history(list(CHAT_HISTORY))), message);
     }
     return out;
+}
+
+def web_chat_interrupt() -> dict[str, any] {
+    # The console's Stop (and "send while it works"): the running web turn stops
+    # at its next safe point and returns what it had.
+    return {"ok": True, "running": request_interrupt("web")};
 }
 
 def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
@@ -777,10 +813,12 @@ def web_chat_turn(message: str, history: list[any]) -> dict[str, any] {
     with _WEB_TURN {
         CHAT_HISTORY = _starts_clean(_plain_history([h for h in list(history or []) if isinstance(h, dict)][-32:]));
         _WEB_UI = True;
+        begin_turn("web");   # the console's Stop, or a message sent mid-turn
         try {
             out = chat_turn(message);
         } finally {
             _WEB_UI = False;
+            end_turn();
         }
         out["history"] = _plain_last_user(_starts_clean(_plain_history(list(CHAT_HISTORY))), message);
         out["context"] = {**dict(CHAT_INFO), "chat_model": str(describe_soul().get("chat_model") or "")};

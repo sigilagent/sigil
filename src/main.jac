@@ -1460,14 +1460,18 @@ with entry:__main__ {
             # marker is how the bridge finds the reply in the output.
             # With SIGIL_CHANNEL_STREAM=1 (the bridge sets it) the reply also
             # leaves in parts while it is written; see sigil_channel_stream.
-            import from src.sigil_channel_stream { start_channel_stream, stop_channel_stream }
+            # A new message from the same person stops the turn at its next safe
+            # point (sigil_interrupt); the bridge then answers both together, so
+            # an interrupted turn's half-written tail is not sent.
+            import from src.sigil_channel_stream { start_channel_stream, stop_channel_stream, INTERRUPTED_MARKER }
             st = start_channel_stream();
             r: dict[str, any] = {"reply": ""};
             try {
                 r = inbound(_arg(argv, 2), _arg(argv, 3), _arg(argv, 4), _arg(argv, 5));
             } finally {
-                stop_channel_stream(st, str(r.get("reply") or ""));
+                stop_channel_stream(st, str(r.get("reply") or ""), bool(r.get("interrupted")));
             }
+            if r.get("interrupted") { print(INTERRUPTED_MARKER, flush=True); }
             print(REPLY_MARKER);
             print(str(r["reply"]));
         }
