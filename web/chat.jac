@@ -434,6 +434,8 @@ def:pub ChatPane(draft: str, clearDraft: Callable[[], None], refresh: Callable[[
     has clock: int = 0;
     has busy: str = "";
     has err: str = "";
+    has queued: str = "";      # sent while a turn was running: goes once that turn stops
+    has stopping: bool = False;
     has booted: bool = False;
     has showTools: bool = True;
     has panel: bool = False;
@@ -476,9 +478,25 @@ def:pub ChatPane(draft: str, clearDraft: Callable[[], None], refresh: Callable[[
         booted = True;
     }
 
+    async def stop() {
+        # Stop the running turn at its next safe point; it comes back with what
+        # it had, marked as cut short (sigil_interrupt).
+        if (not running) or stopping { return; }
+        stopping = True;
+        await call("chat_interrupt", {});
+    }
+
     async def send(raw: str, auto: bool) {
         t = raw.strip();
-        if (not t) or running { return; }
+        if not t { return; }
+        if running {
+            # Written while Sigil works: stop that turn, then send this with the
+            # interrupted request still in the conversation.
+            queued = (queued + "\n" + t) if queued else t;
+            compose = "";
+            stop();
+            return;
+        }
         fr: any = None if auto else focus;
         sent = _framed(t, fr);
         running = True;
@@ -519,7 +537,13 @@ def:pub ChatPane(draft: str, clearDraft: Callable[[], None], refresh: Callable[[
             save(failed, history, ctx);
         }
         TURN["since"] = 0;
+        stopping = False;
         focusId("chat-input");
+        if queued {
+            q = queued;
+            queued = "";
+            send(q, False);
+        }
     }
 
     def retry(i: int) {
@@ -775,9 +799,13 @@ def:pub ChatPane(draft: str, clearDraft: Callable[[], None], refresh: Callable[[
 
                 {(<div className="flex items-center gap-3" role="status">
                     <Avatar/>
-                    <Spinner label="Sigil is working…"/>
+                    <Spinner label={("Stopping to take in your new message…" if queued else "Stopping…") if stopping else "Sigil is working…"}/>
                     <span className="text-xs text-faint">{_dur(elapsed)}</span>
+                    {(<button type="button" className={BTN_GHOST_SM} onClick={lambda (e: MouseEvent) { stop(); }}>Stop</button>) if not stopping else None}
                 </div>) if running else None}
+                {(<div className="self-end max-w-[88%] rounded-[14px_14px_4px_14px] border border-dashed border-violet-400/40 px-3.5 py-2.5 text-sm leading-relaxed text-fg-2 whitespace-pre-wrap break-words">
+                    <span className="block text-[11px] text-faint mb-1">sends when the current answer stops</span>{queued}
+                </div>) if queued else None}
             </div>
         </div>
 
@@ -806,7 +834,8 @@ def:pub ChatPane(draft: str, clearDraft: Callable[[], None], refresh: Callable[[
                         onChange={lambda (e: ChangeEvent) { compileFiles(e.target.files); }}/>
                     {(<Spinner label="Starting the compile…"/>) if starting else None}
                     <button type="button" aria-label="Send" className={BTN_SM + " ml-auto"}
-                        disabled={running or (busy != "") or (not compose.strip())}
+                        title={"Stops the current answer and sends this" if running else "Send"}
+                        disabled={(busy != "") or (not compose.strip())}
                         onClick={lambda (e: MouseEvent) { send(compose, False); }}>
                         <Icon name="send" size={14}/>Send
                     </button>

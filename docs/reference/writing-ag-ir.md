@@ -281,6 +281,7 @@ the ladder's own rung and skip them.
 | `write_file` | `(path, content) -> str` | ACT·artifact |
 | `run_command` | `(command) -> str` | ACT·artifact |
 | `http_get` | `(url) -> str` | OBSERVE |
+| `send_message` | `(text, channel) -> str` | ACT |
 
 ```yaml
 tools:
@@ -288,6 +289,11 @@ tools:
     surface: ACT·artifact
     serves: [emit_report]
 ```
+
+`send_message` messages the user on a channel Sigil has connected (WhatsApp, Telegram,
+Slack, Discord): use it when the skill says to notify, alert or send something to the user.
+`channel` is the channel's name or kind (`whatsapp`); leave it empty for the first connected
+one. It is a side effect, not the deliverable: a skill that must produce a file still writes it.
 
 Also bind any **registered MCP tool** by its exact name, as an `OBSERVE`/`ACT` node —
 do not re-script it.

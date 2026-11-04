@@ -24,6 +24,7 @@ import json;
 import time;
 
 glob PART_MARKER: str = "<<<SIGIL_PART>>>";
+glob INTERRUPTED_MARKER: str = "<<<SIGIL_INTERRUPTED>>>";
 glob MIN_GAP_S: float = 6.0;
 glob PART_MAX: int = 3500;
 
@@ -187,11 +188,14 @@ def start_channel_stream() -> any {
     return st;
 }
 
-def stop_channel_stream(st: any, reply: str) -> int {
+def stop_channel_stream(st: any, reply: str, interrupted: bool = False) -> int {
     if st is None { return 0; }
     import from .chat_agent { set_token_sink }
     import from .sigil_workspace { set_trace_sink }
     set_token_sink(None);
     set_trace_sink(None);
+    # An interrupted turn is answered again together with the message that
+    # stopped it; its unsent half sentence would only be noise.
+    if interrupted { return st.parts; }
     return st.finish(reply);
 }

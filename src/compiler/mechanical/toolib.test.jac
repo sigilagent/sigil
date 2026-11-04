@@ -186,3 +186,35 @@ test "SIGIL_WRITE_GUARDS=0 writes verbatim, in write_file and in the runtime wri
     rt = _rt_text();
     assert "_sigil_on(\"WRITE_GUARDS\")" in rt and "_sigil_on(\"INPUT_CAPS\")" in rt, "runtime lost its opt-out switches";
 }
+
+test "send_message goes through the Sigil that ran the skill, and only to a connected channel" {
+    import os;
+    import tempfile;
+    keep = {k: os.environ.get(k) for k in ["SIGIL_CHANNELS", "SIGIL_ENTRY", "SIGIL_JAC", "SIGIL_PROJECT", "SIGIL_SENT_COUNT", "SIGIL_SEND_LIMIT"]};
+    try {
+        for k in keep { os.environ.pop(k, None); }
+        # an ejected program or a bench harness: nowhere to send, and it says so
+        out = _call_builtin("send_message", {"text": "hi", "channel": ""});
+        assert "no messaging channel" in out, out;
+        # a stand-in for `jac run main.jac -- channel send <name> "" <text>`
+        d = tempfile.mkdtemp();
+        fake = os.path.join(d, "jac");
+        with open(fake, "w") as f { f.write("#!/bin/sh\necho \"sent to user:1 on $7  mid=m1  [delivered]\"\n"); }
+        os.chmod(fake, 493);
+        os.environ["SIGIL_CHANNELS"] = "[{\"name\": \"wa\", \"kind\": \"whatsapp\"}, {\"name\": \"tg\", \"kind\": \"telegram\"}]";
+        os.environ["SIGIL_ENTRY"] = os.path.join(d, "main.jac");
+        os.environ["SIGIL_JAC"] = fake;
+        assert _call_builtin("send_message", {"text": "hi", "channel": ""}) == "sent on wa";
+        assert _call_builtin("send_message", {"text": "hi", "channel": "telegram"}) == "sent on tg", "by kind";
+        miss = _call_builtin("send_message", {"text": "hi", "channel": "slack"});
+        assert "no connected channel 'slack'" in miss and "wa, tg" in miss, miss;
+        assert "nothing to send" in _call_builtin("send_message", {"text": "  ", "channel": ""});
+        os.environ["SIGIL_SEND_LIMIT"] = "2";
+        capped = _call_builtin("send_message", {"text": "hi", "channel": ""});
+        assert "already sent 2 messages" in capped, capped;
+    } finally {
+        for k in keep {
+            if keep[k] is None { os.environ.pop(k, None); } else { os.environ[k] = str(keep[k]); }
+        }
+    }
+}

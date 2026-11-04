@@ -24,7 +24,7 @@ import time;
 import uuid;
 import shutil;
 import subprocess;
-import from .sigil_runtime { sigil_home, _jac_bin, entry_script, project_root }
+import from .sigil_runtime { sigil_home, _jac_bin, entry_script, project_root, checkpoint, commit_now }
 import from .sigil_api { report_for, _foreign_request, child_env }
 import from .sigil_secrets {
     secret_value_set, secret_value_clear, secret_source, secret_tail, env_name_ok,
@@ -220,6 +220,10 @@ def console_dispatch(op: str, a: dict[str, any]) -> any {
         # The approvals this turn queued, so the reply can carry their cards.
         out["pending"] = [p for p in approvals_pending() if float(p["ts"]) >= t0 - 1.0];
         return out;
+    }
+    if op == "chat_interrupt" {
+        import from .chat_agent { web_chat_interrupt }
+        return web_chat_interrupt();
     }
     if op == "compile_run" { return compile_run(str(a.get("job") or "")); }
     return {"ok": False, "error": "unknown op '" + op + "'"};
@@ -996,7 +1000,9 @@ def _copy_tree(src_dir: str, dest: str) -> int {
     return n;
 }
 
-def compile_start(files: list[any], mode: str, path: str = "") -> dict[str, any] {
+def compile_start(files: list[any], mode: str, path: str = "", notify: dict[str, any] = {}) -> dict[str, any] {
+    # `notify` {channel, peer}: who to message on a channel when the compile ends
+    # (a compile started from WhatsApp or Telegram, see sigil_channel_compile).
     m = mode if mode in MODES else "decide";
     job = str(int(time.time() * 1000)) + "-" + uuid.uuid4().hex[:6];
     d = _job_dir(job);
@@ -1046,8 +1052,12 @@ def compile_start(files: list[any], mode: str, path: str = "") -> dict[str, any]
     folder = os.path.basename(os.path.dirname(os.path.join(skill, skill_md))) or "skill";
     if folder == "skill" and path.strip() { folder = os.path.basename(os.path.abspath(os.path.expanduser(path.strip()))); }
     name = _skill_name(first, folder);
-    meta = {"job": job, "name": name, "mode": m, "entry": skill_md, "files": count,
+    meta: dict[str, any] = {"job": job, "name": name, "mode": m, "entry": skill_md, "files": count,
             "created_ms": int(time.time() * 1000)};
+    if notify and str(dict(notify).get("channel") or "") {
+        meta["notify"] = {"channel": str(dict(notify).get("channel") or ""),
+                          "peer": str(dict(notify).get("peer") or "")};
+    }
     _write_json(os.path.join(d, "job.json"), meta);
     argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "api", "console",
             json.dumps({"op": "compile_run", "args": {"job": job}})];
@@ -1176,6 +1186,11 @@ def _job_event(ev: dict[str, any]) {
     try {
         with open(os.path.join(_JOB, "events.jsonl"), "a") as f { f.write(json.dumps(rec, `default=str) + "\n"); }
     } except Exception as e { }
+    # A compile runs for minutes of model calls; a stage boundary is where it can
+    # let go of the graph (checkpoint in sigil_runtime).
+    if str(rec.get("state") or "") == "done" {
+        try { checkpoint("compile stage " + st); } except Exception as e1 { }
+    }
 }
 
 def _job_spec_event(ev: dict[str, any]) {
@@ -1242,8 +1257,24 @@ def compile_run(job: str) -> dict[str, any] {
         out = {"ok": False, "status": "failed", "error": friendly_llm_error(e, "", "compile")};
     }
     set_spec_progress(None);
+    # Save the new skill now, not at process exit: a save refused there was
+    # silent, and the console (or a phone) would already have said "compiled".
+    if out.get("ok") {
+        warn = commit_now("console compile " + job);
+        if warn { out["save_warning"] = warn; }
+    }
     out["finished_ms"] = int(time.time() * 1000);
     _write_json(os.path.join(d, "result.json"), out);
     _job_event({"stage": "job", "state": "done", "status": out.get("status")});
+    note = dict(meta).get("notify");
+    if note {
+        try {
+            import from .sigil_channel_compile { notify_compile_done }
+            notify_compile_done(dict(note), dict(meta), out);
+        } except Exception as en {
+            import from .sigil_errors { log_error }
+            log_error("compile notify " + job, en);
+        }
+    }
     return {"ok": bool(out.get("ok")), "status": out.get("status")};
 }

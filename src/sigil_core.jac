@@ -25,7 +25,7 @@ import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt, plan_model 
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
-    skill_description, graph_write, commit_now
+    skill_description, graph_write, commit_now, checkpoint
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
@@ -602,13 +602,20 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str
     } except Exception as e { shelf = ""; }
     # Commit first: the run takes minutes, and a transaction left open across
     # it (recall has already bumped memory uses) fails its commit as soon as
-    # any other process writes what it read.
+    # any other process writes what it read. The run's record is saved the same
+    # way right after it (checkpoint, sigil_runtime).
+    chans = "";
+    try {
+        import from .channels { skill_channels_json }
+        chans = skill_channels_json();
+    } except Exception as e2 { chans = ""; }
     commit_now("before skill run");
-    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf);
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf, chans);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
     tg +>:Ran:+> a;
+    checkpoint("skill run " + tg.signature);
     return res;
 }
 

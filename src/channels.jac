@@ -74,6 +74,18 @@ def channel_list() -> list[any] {
     return out;
 }
 
+def skill_channels_json() -> str {
+    # The channels a compiled skill may message the user on (its `send_message`
+    # builtin), as JSON [{name, kind}]: the enabled ones. "" when there are none
+    # or SIGIL_SKILL_CHANNELS=0, and then the run is told it has nowhere to send.
+    import os;
+    import json;
+    v = str(os.environ.get("SIGIL_SKILL_CHANNELS") or "").strip().lower();
+    if v in ["0", "false", "no", "off"] { return ""; }
+    rows = [{"name": str(c.name), "kind": str(c.kind)} for c in _channels(awaken()) if c.enabled];
+    return json.dumps(rows) if rows else "";
+}
+
 def _get_channel(soul: Soul, name: str) -> Channel {
     for c in _channels(soul) { if c.name == name { return c; } }
     ch = Channel(name=name, kind="webhook");
@@ -119,14 +131,25 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
     commit_now("channel inbound " + channel);
     reply_thread = thread_id if thread_id else in_mid;
     new_history: any = None;
-    if str(text).strip().lower() in ["/new", "/reset"] {
+    interrupted = False;
+    import from .sigil_channel_compile { channel_command, handle_command }
+    cmd = channel_command(text);
+    if cmd["cmd"] == "new" {
         new_history = [];
         reply = "Started a new conversation.";
+    } elif cmd["cmd"] {
+        # /build, /compile, /status, /help: answered here, without the model, and
+        # kept in the conversation so the agent knows a compile is under way.
+        import from .sigil_workspace { ws_root }
+        reply = handle_command(channel, peer, cmd["cmd"], cmd["arg"], ws_root());
+        new_history = list(history or []) + [{"role": "user", "content": str(text)},
+                                             {"role": "assistant", "content": reply}];
     } else {
         import from .chat_agent { channel_chat_turn };
-        res = channel_chat_turn(text, history, surface_hint(kind));
+        res = channel_chat_turn(text, history, surface_hint(kind), channel, peer);
         new_history = list(res["history"]);
         reply = str(res["reply"]);
+        interrupted = bool(res.get("interrupted"));
     }
     saved = record_turn(channel, peer, new_history, reply, reply_thread);
     if not saved["ok"] {
@@ -134,7 +157,7 @@ def inbound(channel: str, peer: str, text: str, thread_id: str = "") -> dict[str
     }
     return {"ok": True, "channel": channel, "peer": peer, "reply": reply,
             "signature": "chat", "in_mid": in_mid, "out_mid": str(saved.get("out_mid") or ""),
-            "thread_id": reply_thread, "saved": bool(saved["ok"])};
+            "thread_id": reply_thread, "saved": bool(saved["ok"]), "interrupted": interrupted};
 }
 
 def record_turn(channel: str, peer: str, history: any, reply: str, thread_id: str) -> dict[str, any] {
@@ -204,13 +227,15 @@ def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dic
     soul = awaken();
     ch = _get_channel(soul, channel);
     creds = channel_credentials(ch);
-    if (not str(peer or "").strip()) and (str(ch.kind) == "whatsapp") and (not str(creds[1])) {
-        # A WhatsApp agent can only talk to the person who created it, at the
-        # user:<id> WhatsApp puts on their messages, which nobody can type
-        # in. So an empty peer means "them": the sender of the latest inbound.
+    if not str(peer or "").strip() {
+        # An empty peer means "the user": the sender of the latest inbound. A
+        # WhatsApp agent can only talk to the person who created it, at the
+        # user:<id> WhatsApp puts on their messages, which nobody can type in;
+        # a Telegram chat id or a Slack channel is just as unknown to a skill
+        # that wants to report back, or to a scheduled job.
         peer = _last_inbound_peer(ch);
         if not peer {
-            return {"ok": False, "error": "message your agent from WhatsApp first; Sigil learns where to reply from your message"};
+            return {"ok": False, "error": "message the agent on " + str(ch.kind) + " first; Sigil learns where to reply from your message"};
         }
     }
     m = _record(ch, "out", peer, text, thread_id);

@@ -20,6 +20,7 @@ import sys;
 import json;
 import time;
 import signal;
+import threading;
 import subprocess;
 import from pathlib { Path }
 import from .sigil_core { awaken }
@@ -29,7 +30,9 @@ import from .sigil_runtime {
     run_dir, write_pidfile, clear_pidfile, process_running, read_pid, pid_alive,
     _jac_bin, entry_script, project_root
 }
-import from .sigil_channel_stream { PART_MARKER }
+import from .sigil_channel_stream { PART_MARKER, INTERRUPTED_MARKER }
+import from .sigil_interrupt { request_interrupt, clear_interrupt, channel_scope }
+import from .sigil_channel_compile { channel_command }
 import from .sigil_transports {
     deliver, normalize_inbound, poll_telegram, poll_whatsapp_agent, supports_polling, acknowledge
 }
@@ -146,7 +149,7 @@ def channel_config(name: str) -> dict[str, any] {
 # Handing one message to the agent
 # ---------------------------------------------------------------------------
 def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
-              timeout_s: int = 900, on_part: any = None) -> dict[str, any] {
+              timeout_s: int = 900, on_part: any = None, on_start: any = None) -> dict[str, any] {
     # A fresh process, the current graph, one reply. Returns {ok, reply, error,
     # parts}. With `on_part`, the process streams the reply in parts (see
     # sigil_channel_stream) and each one is handed over the moment it is printed,
@@ -163,9 +166,12 @@ def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
                              stderr=errf, stdin=subprocess.DEVNULL, text=True, bufsize=1);
     } except Exception as ex {
         errf.close();
-        return {"ok": False, "reply": "", "error": str(ex)[:300], "parts": 0};
+        return {"ok": False, "reply": "", "error": str(ex)[:300], "parts": 0, "interrupted": False};
     }
-    state: dict[str, any] = {"timed_out": False, "parts": 0};
+    if on_start is not None {
+        try { on_start(int(p.pid)); } except Exception as e0 { _log("turn start hook raised: " + str(e0)[:200]); }
+    }
+    state: dict[str, any] = {"timed_out": False, "parts": 0, "interrupted": False};
     def _kill() -> None { state["timed_out"] = True; p.kill(); }
     timer = threading.Timer(float(timeout_s), _kill);
     timer.start();
@@ -181,11 +187,13 @@ def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
                 }
                 continue;
             }
+            if line.startswith(INTERRUPTED_MARKER) { state["interrupted"] = True; continue; }
             kept.append(line);
         }
         p.wait();
     } finally {
         timer.cancel();
+        clear_interrupt(channel_scope(int(p.pid)));
     }
     errf.seek(0);
     err = str(errf.read());
@@ -193,12 +201,13 @@ def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
     out = "".join(kept);
     if state["timed_out"] {
         return {"ok": False, "reply": "", "error": "the agent took longer than " + str(timeout_s) + "s",
-                "parts": state["parts"]};
+                "parts": state["parts"], "interrupted": False};
     }
     if REPLY_MARKER in out {
-        return {"ok": True, "reply": out.split(REPLY_MARKER, 1)[1].strip(), "error": "", "parts": state["parts"]};
+        return {"ok": True, "reply": out.split(REPLY_MARKER, 1)[1].strip(), "error": "",
+                "parts": state["parts"], "interrupted": bool(state["interrupted"])};
     }
-    return {"ok": False, "reply": "", "parts": state["parts"],
+    return {"ok": False, "reply": "", "parts": state["parts"], "interrupted": bool(state["interrupted"]),
             "error": (str(err or out)[-2000:] or "the agent produced no reply")};
 }
 
@@ -225,7 +234,11 @@ def _log(msg: str) -> None {
     return None;
 }
 
-def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
+def _handle(channel: str, cfg: dict[str, any], m: dict[str, any],
+            on_start: any = None, stopped: any = None) -> None {
+    # One turn, start to finish. `on_start(pid)` learns the turn's process (so a
+    # new message can interrupt it); `stopped()` says it was asked to stop, and
+    # then its partial answer and any error are not sent: the next turn answers.
     peer = str(m.get("peer") or "anon");
     text = str(m.get("text") or "");
     thread = str(m.get("thread_id") or "");
@@ -243,7 +256,12 @@ def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
         else { _log("DELIVERY FAILED to " + channel + "/" + peer + ": " + str(r["error"])[:200]); }
         return None;
     }
-    res = ask_agent(channel, peer, text, thread, 900, _part);
+    res = ask_agent(channel, peer, text, thread, 900, _part, on_start);
+    was_stopped = bool(res.get("interrupted")) or ((stopped is not None) and bool(stopped()));
+    if was_stopped {
+        _log("turn for " + channel + "/" + peer + " stopped by a newer message");
+        return None;
+    }
     if not res["ok"] {
         _log("agent failed: " + str(res["error"])[-2000:]);
         # Say something. Silence on a chat channel is indistinguishable from the
@@ -258,6 +276,195 @@ def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
     r = deliver(kind, token, peer, reply, thread, target);
     if r["ok"] { _log("out " + channel + "/" + peer + ": " + reply[:120]); }
     else { _log("DELIVERY FAILED to " + channel + "/" + peer + ": " + str(r["error"])[:200]); }
+    return None;
+}
+
+# ---------------------------------------------------------------------------
+# One conversation per person, and messages that arrive mid-turn.
+#
+# A turn runs in a worker thread, so the bridge keeps receiving while it works.
+# A message from someone whose turn is still running does not wait its turn as a
+# separate question. SIGIL_CHANNEL_INTERRUPT picks what happens:
+#   interrupt (default)  the running turn stops at its next safe point (a token,
+#                        or a tool call's start or end), and the new message is
+#                        answered with the interrupted request in view: what was
+#                        asked, what was already done (sigil_interrupt)
+#   queue                the turn finishes; the messages that came in meanwhile
+#                        are then answered together
+# A turn that does not reach a safe point within SIGIL_CHANNEL_INTERRUPT_GRACE
+# seconds (default 120: a long skill run) is stopped with SIGINT.
+# /stop stops the running turn and starts nothing; /status and /help are
+# answered at once, beside it.
+# ---------------------------------------------------------------------------
+glob _PEERS: dict[str, any] = {};
+glob _PEERS_LOCK: any = threading.Lock();
+glob _WORKERS: list[any] = [];
+
+def interrupt_mode() -> str {
+    v = str(os.environ.get("SIGIL_CHANNEL_INTERRUPT") or "").strip().lower();
+    return "queue" if v == "queue" else "interrupt";
+}
+
+def interrupt_grace_s() -> int {
+    try { return max(5, int(str(os.environ.get("SIGIL_CHANNEL_INTERRUPT_GRACE") or "120"))); }
+    except Exception as e { return 120; }
+}
+
+def merge_messages(ms: list[any]) -> list[any] {
+    # The messages waiting for one person, as the turns to run: plain messages
+    # in a row become one turn (they were written as one thought, in pieces); a
+    # slash command stays on its own.
+    out: list[any] = [];
+    buf: list[any] = [];
+    for m in ms {
+        d = dict(m);
+        if channel_command(str(d.get("text") or ""))["cmd"] {
+            if buf { out.append(_joined(buf)); buf = []; }
+            out.append(d);
+        } else { buf.append(d); }
+    }
+    if buf { out.append(_joined(buf)); }
+    return out;
+}
+
+def _joined(ms: list[any]) -> dict[str, any] {
+    if len(ms) == 1 { return dict(ms[0]); }
+    first = dict(ms[0]);
+    first["text"] = "\n".join([str(dict(x).get("text") or "") for x in ms]);
+    return first;
+}
+
+def _signal_stop(peer_key: str) -> None {
+    # Ask the running turn to stop; caller holds _PEERS_LOCK.
+    st = _PEERS.get(peer_key);
+    if st is None { return None; }
+    st["stop_asked"] = True;
+    pid = int(st.get("pid") or 0);
+    if pid <= 0 { return None; }   # not started yet: on_start signals it
+    request_interrupt(channel_scope(pid));
+    grace = interrupt_grace_s();
+    def _hard() -> None {
+        with _PEERS_LOCK {
+            cur = _PEERS.get(peer_key);
+            still = (cur is not None) and (int(cur.get("pid") or 0) == pid);
+        }
+        if still and pid_alive(pid) {
+            _log("turn " + str(pid) + " reached no safe point in " + str(grace) + "s; interrupting it");
+            try { os.kill(pid, signal.SIGINT); } except Exception as e { }
+        }
+        return None;
+    }
+    t = threading.Timer(float(grace), _hard);
+    t.daemon = True;
+    t.start();
+    return None;
+}
+
+def _dispatch(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
+    # Every inbound message comes through here, from the poll loop and the
+    # webhook listener alike. Never blocks on a turn.
+    peer = str(m.get("peer") or "anon");
+    text = str(m.get("text") or "");
+    cmd = str(channel_command(text)["cmd"]);
+    kind = str(cfg["kind"]);
+    token = str(cfg["token"]);
+    target = str(cfg["target"]);
+    say = "";
+    side = False;
+    start = False;
+    with _PEERS_LOCK {
+        st = _PEERS.get(peer);
+        if st is None {
+            if cmd == "stop" { say = "Nothing is running right now."; }
+            else {
+                _PEERS[peer] = {"pid": 0, "pending": [], "stop_only": False, "stop_asked": False, "noted": False};
+                start = True;
+            }
+        } elif cmd in ["status", "help"] {
+            side = True;
+        } elif cmd == "stop" {
+            st["pending"] = [];
+            st["stop_only"] = True;
+            _signal_stop(peer);
+        } else {
+            st["pending"].append(dict(m));
+            if (interrupt_mode() == "interrupt") or (cmd == "new") { _signal_stop(peer); }
+            if not st["noted"] {
+                st["noted"] = True;
+                say = ("Got it, taking that into account." if ((interrupt_mode() == "interrupt") or (cmd == "new"))
+                       else "Got it. I'll get to that when I've finished the current request.");
+            }
+        }
+    }
+    if say or (not start and not side) {
+        _log("in  " + channel + "/" + peer + " (mid-turn): " + text[:120]);
+        acknowledge(kind, token, target, str(m.get("thread_id") or ""));
+    }
+    if say { deliver(kind, token, peer, say, "", target); }
+    if side {
+        t = threading.Thread(target=_handle, args=(channel, cfg, dict(m)), daemon=True);
+        t.start();
+        _WORKERS.append(t);
+    }
+    if start {
+        t2 = threading.Thread(target=_peer_worker, args=(channel, cfg, peer, [dict(m)]), daemon=True);
+        t2.start();
+        _WORKERS.append(t2);
+    }
+    return None;
+}
+
+def _peer_worker(channel: str, cfg: dict[str, any], peer: str, first: list[any]) -> None {
+    # This person's turns, one at a time, until nothing is waiting.
+    queue: list[any] = merge_messages(first);
+    while queue {
+        m = queue.pop(0);
+        def _started(pid: int) -> None {
+            with _PEERS_LOCK {
+                st = _PEERS.get(peer);
+                if st is not None {
+                    st["pid"] = pid;
+                    if st["stop_asked"] { _signal_stop(peer); }
+                }
+            }
+            return None;
+        }
+        def _stopped() -> bool {
+            with _PEERS_LOCK {
+                st = _PEERS.get(peer);
+                return bool(st is not None and st["stop_asked"]);
+            }
+        }
+        try { _handle(channel, cfg, m, _started, _stopped); }
+        except Exception as e { _log("turn for " + channel + "/" + peer + " raised: " + str(e)[:300]); }
+        stop_only = False;
+        with _PEERS_LOCK {
+            st = _PEERS.get(peer);
+            if st is None { return None; }
+            waiting = list(st["pending"]);
+            stop_only = bool(st["stop_only"]) and (not waiting);
+            st["pending"] = [];
+            st["pid"] = 0;
+            st["stop_asked"] = False;
+            st["stop_only"] = False;
+            st["noted"] = False;
+            if waiting { queue = queue + merge_messages(waiting); }
+            if not queue { del _PEERS[peer]; }
+        }
+        if stop_only {
+            deliver(str(cfg["kind"]), str(cfg["token"]), peer, "Stopped.", "", str(cfg["target"]));
+        }
+    }
+    return None;
+}
+
+def _join_workers(timeout_s: float = 5.0) -> None {
+    end = time.time() + timeout_s;
+    for t in list(_WORKERS) {
+        left = end - time.time();
+        if left <= 0 { break; }
+        try { t.join(left); } except Exception as e { }
+    }
     return None;
 }
 
@@ -286,12 +493,13 @@ def bridge_poll(channel: str, cfg: dict[str, any], max_rounds: int = 0) -> dict[
             }
             for m in list(r["messages"]) {
                 if _STOP["now"] { break; }
-                _handle(channel, cfg, dict(m));
+                _dispatch(channel, cfg, dict(m));
             }
         }
         rounds += 1;
         if (max_rounds > 0) and (rounds >= max_rounds) { break; }
     }
+    _join_workers();
     return {"rounds": rounds};
 }
 
@@ -326,7 +534,7 @@ def bridge_webhook(channel: str, cfg: dict[str, any], port: int) -> dict[str, an
             # Acknowledge FIRST. Slack retries anything it does not hear back
             # from in 3 seconds, and the agent takes longer than that to think.
             self._reply(200, {"ok": True});
-            if m.get("text") { _handle(channel, cfg, m); }
+            if m.get("text") { _dispatch(channel, cfg, m); }
             return None;
         }
         def _reply(self: Handler, code: int, payload: dict[str, any]) -> None {

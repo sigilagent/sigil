@@ -391,6 +391,86 @@ def commit_now(context: str = "") -> str {
 }
 
 # ---------------------------------------------------------------------------
+# Transaction checkpoints — never hold the graph across slow work.
+#
+# Every graph read joins this process's open transaction, and the store runs it
+# SERIALIZABLE, so a transaction stays open until something commits it. A cron
+# fire read the skill, ran it for minutes in a subprocess, bumped its run count,
+# then called the judge and the distiller (two more model calls) before anything
+# committed. Every graph read in between flushed that bumped row into the still-open
+# transaction, so the row stayed locked, and everything that touched the skill
+# meanwhile either waited ("canceling statement due to lock timeout ... relation
+# anchors") or lost a version race ("WriteConflict: anchor <TaskGraph> changed
+# concurrently"). Measured on one install: every scheduled fire's own save failed
+# for a day, and channel turns failed beside them.
+#
+# A checkpoint commits what this process has written so far and ends its
+# transaction, so the next read starts a fresh one. It goes at the edges of slow
+# work: before and after a skill run, when a tool call finishes, between compile
+# stages, before the daemon waits on a tick. SIGIL_TXN_CHECKPOINTS=0 turns them off.
+# ---------------------------------------------------------------------------
+def txn_checkpoints_on() -> bool {
+    v = str(os.environ.get("SIGIL_TXN_CHECKPOINTS") or "").strip().lower();
+    return v not in ["0", "false", "no", "off"];
+}
+
+def checkpoint(context: str = "") -> str {
+    # "" when committed (or there was nothing to commit, or checkpoints are off);
+    # otherwise commit_now's message for a write that lost a race.
+    if not txn_checkpoints_on() { return ""; }
+    return commit_now(context);
+}
+
+# ---------------------------------------------------------------------------
+# iCloud Drive files that are not on this Mac.
+#
+# With "Optimize Mac Storage" on, iCloud evicts files it thinks are unused (the
+# Desktop and Documents too, when they sync) and leaves "dataless" placeholders.
+# A process macOS has not allowed to download one gets EDEADLK ("Resource
+# deadlock avoided") on read instead of the file. Sigil's daemon runs detached,
+# so a scheduled skill that appends to a log on the Desktop worked for weeks and
+# then failed once iCloud evicted the log, and so did the chat agent reading it.
+# The policy is per process and children inherit it (shell tools, skill runs,
+# bridges), so every Sigil process sets it once at import.
+# SIGIL_CLOUD_DOWNLOADS=0 leaves the system default.
+# ---------------------------------------------------------------------------
+glob _CLOUD_POLICY: dict[str, any] = {"set": False, "ok": False};
+
+def allow_cloud_downloads() -> bool {
+    # True when this process may now download dataless files on read. Never raises.
+    if _CLOUD_POLICY["set"] { return bool(_CLOUD_POLICY["ok"]); }
+    _CLOUD_POLICY["set"] = True;
+    if sys.platform != "darwin" { return False; }
+    v = str(os.environ.get("SIGIL_CLOUD_DOWNLOADS") or "").strip().lower();
+    if v in ["0", "false", "no", "off"] { return False; }
+    try {
+        import ctypes;
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True);
+        # <sys/resource.h>: IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES = 3,
+        # IOPOL_SCOPE_PROCESS = 0, IOPOL_MATERIALIZE_DATALESS_FILES_ON = 2
+        _CLOUD_POLICY["ok"] = (int(libc.setiopolicy_np(3, 0, 2)) == 0);
+    } except Exception as e {
+        _CLOUD_POLICY["ok"] = False;
+    }
+    return bool(_CLOUD_POLICY["ok"]);
+}
+
+def cloud_file_hint(err: any, path: str = "") -> str {
+    # A sentence to add to a read error that is really "this is in iCloud and not
+    # downloaded", or "" for any other error.
+    import errno;
+    if getattr(err, "errno", None) != errno.EDEADLK { return ""; }
+    where = path if path else "the file";
+    return (where + " is in iCloud Drive and not downloaded to this Mac. Open it in Finder, "
+            + "or run `brctl download '" + where + "'`, then try again. To stop iCloud evicting it, "
+            + "right-click it in Finder and choose Keep Downloaded.");
+}
+
+with entry {
+    allow_cloud_downloads();
+}
+
+# ---------------------------------------------------------------------------
 # Cross-process write serialization.
 #
 # Every sigil surface is a separate OS process against ONE store: the CLI, each
@@ -471,6 +551,11 @@ def graph_write(mutate: any, context: str = "") -> dict[str, any] {
         import from .sigil_errors { log_error }
         log_error("graph_write(" + str(context) + ")", e);
         return {"ok": False, "data": None, "error": str(e)[:300]};
+    } except BaseException as be {
+        # ^C or an interrupted turn (sigil_interrupt): let it through, but never
+        # with the cross-process lock still held by a long-lived process.
+        _lock_release(fh);
+        raise;
     }
     err = commit_now(context);
     _lock_release(fh);
@@ -525,7 +610,7 @@ def module_cwd(workdir: str) -> str {
 def execute_module(module_path: str, task: str, model_name: str,
                    skill: str = "", workdir: str = ".", timeout: int = 1800,
                    mcp_json: str = "", signature: str = "",
-                   skill_tools: str = "") -> dict[str, any] {
+                   skill_tools: str = "", channels: str = "") -> dict[str, any] {
     mod = Path(module_path).stem;
     wd = os.path.abspath(str(workdir));
     driver = Path(wd) / f"_driver_{mod}.jac";
@@ -548,6 +633,15 @@ def execute_module(module_path: str, task: str, model_name: str,
         env["SIGIL_SKILL_TOOLS"] = skill_tools;
     }
     jacbin = _jac_bin();
+    if channels {
+        # The user's connected channels, for the `send_message` builtin
+        # (compiler/mechanical/toolib.jac), and the way back to this Sigil it
+        # sends through. Without them the builtin says it has nowhere to send.
+        env["SIGIL_CHANNELS"] = channels;
+        env["SIGIL_ENTRY"] = entry_script();
+        env["SIGIL_PROJECT"] = project_root();
+        env["SIGIL_JAC"] = jacbin;
+    }
     try {
         p = subprocess.run(module_argv(jacbin, str(driver)), cwd=module_cwd(wd), env=env,
                            capture_output=True, text=True, timeout=timeout);
