@@ -29,6 +29,7 @@ import from .sigil_runtime {
     run_dir, write_pidfile, clear_pidfile, process_running, read_pid, pid_alive,
     _jac_bin, entry_script, project_root
 }
+import from .sigil_channel_stream { PART_MARKER }
 import from .sigil_transports {
     deliver, normalize_inbound, poll_telegram, poll_whatsapp_agent, supports_polling, acknowledge
 }
@@ -145,25 +146,60 @@ def channel_config(name: str) -> dict[str, any] {
 # Handing one message to the agent
 # ---------------------------------------------------------------------------
 def ask_agent(channel: str, peer: str, text: str, thread_id: str = "",
-              timeout_s: int = 900) -> dict[str, any] {
-    # A fresh process, the current graph, one reply. Returns {ok, reply, error}.
+              timeout_s: int = 900, on_part: any = None) -> dict[str, any] {
+    # A fresh process, the current graph, one reply. Returns {ok, reply, error,
+    # parts}. With `on_part`, the process streams the reply in parts (see
+    # sigil_channel_stream) and each one is handed over the moment it is printed,
+    # so a long answer reaches the phone while it is still being written.
+    import tempfile;
+    import threading;
     argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "channel", "inbound",
             channel, peer, text, thread_id];
+    env = dict(os.environ);
+    if on_part is not None { env["SIGIL_CHANNEL_STREAM"] = "1"; }
+    errf = tempfile.TemporaryFile(mode="w+");
     try {
-        p = subprocess.run(argv, cwd=project_root(), capture_output=True,
-                           text=True, timeout=timeout_s);
-    } except subprocess.TimeoutExpired as e {
-        return {"ok": False, "reply": "", "error": "the agent took longer than "
-                + str(timeout_s) + "s"};
+        p = subprocess.Popen(argv, cwd=project_root(), env=env, stdout=subprocess.PIPE,
+                             stderr=errf, stdin=subprocess.DEVNULL, text=True, bufsize=1);
     } except Exception as ex {
-        return {"ok": False, "reply": "", "error": str(ex)[:300]};
+        errf.close();
+        return {"ok": False, "reply": "", "error": str(ex)[:300], "parts": 0};
     }
-    out = str(p.stdout or "");
+    state: dict[str, any] = {"timed_out": False, "parts": 0};
+    def _kill() -> None { state["timed_out"] = True; p.kill(); }
+    timer = threading.Timer(float(timeout_s), _kill);
+    timer.start();
+    kept: list[str] = [];
+    try {
+        for line in p.stdout {
+            if line.startswith(PART_MARKER) {
+                piece = "";
+                try { piece = str(json.loads(line[len(PART_MARKER):])); } except Exception as e { piece = ""; }
+                if piece and (on_part is not None) {
+                    try { on_part(piece); } except Exception as e2 { _log("part delivery raised: " + str(e2)[:200]); }
+                    state["parts"] = int(state["parts"]) + 1;
+                }
+                continue;
+            }
+            kept.append(line);
+        }
+        p.wait();
+    } finally {
+        timer.cancel();
+    }
+    errf.seek(0);
+    err = str(errf.read());
+    errf.close();
+    out = "".join(kept);
+    if state["timed_out"] {
+        return {"ok": False, "reply": "", "error": "the agent took longer than " + str(timeout_s) + "s",
+                "parts": state["parts"]};
+    }
     if REPLY_MARKER in out {
-        return {"ok": True, "reply": out.split(REPLY_MARKER, 1)[1].strip(), "error": ""};
+        return {"ok": True, "reply": out.split(REPLY_MARKER, 1)[1].strip(), "error": "", "parts": state["parts"]};
     }
-    return {"ok": False, "reply": "",
-            "error": (str(p.stderr or out)[-2000:] or "the agent produced no reply")};
+    return {"ok": False, "reply": "", "parts": state["parts"],
+            "error": (str(err or out)[-2000:] or "the agent produced no reply")};
 }
 
 # ---------------------------------------------------------------------------
@@ -193,23 +229,35 @@ def _handle(channel: str, cfg: dict[str, any], m: dict[str, any]) -> None {
     peer = str(m.get("peer") or "anon");
     text = str(m.get("text") or "");
     thread = str(m.get("thread_id") or "");
+    kind = str(cfg["kind"]);
+    token = str(cfg["token"]);
+    target = str(cfg["target"]);
     _log("in  " + channel + "/" + peer + ": " + text[:120]);
-    acknowledge(str(cfg["kind"]), str(cfg["token"]), str(cfg["target"]), thread);
-    res = ask_agent(channel, peer, text, thread);
+    acknowledge(kind, token, target, thread);
+    sent: dict[str, any] = {"n": 0};
+    def _part(piece: str) -> None {
+        # Only the first part replies to the message; the rest follow it.
+        r = deliver(kind, token, peer, piece, (thread if int(sent["n"]) == 0 else ""), target);
+        sent["n"] = int(sent["n"]) + 1;
+        if r["ok"] { _log("out " + channel + "/" + peer + " [part " + str(sent["n"]) + "]: " + piece[:120]); }
+        else { _log("DELIVERY FAILED to " + channel + "/" + peer + ": " + str(r["error"])[:200]); }
+        return None;
+    }
+    res = ask_agent(channel, peer, text, thread, 900, _part);
     if not res["ok"] {
         _log("agent failed: " + str(res["error"])[-2000:]);
         # Say something. Silence on a chat channel is indistinguishable from the
         # bot being dead, and the person is still waiting.
-        deliver(str(cfg["kind"]), str(cfg["token"]), peer,
-                "I hit an error handling that and could not finish it.", thread,
-                str(cfg["target"]));
+        note = "I hit an error before I could finish that." if int(sent["n"]) else "I hit an error handling that and could not finish it.";
+        deliver(kind, token, peer, note, ("" if int(sent["n"]) else thread), target);
         return None;
     }
+    if int(res["parts"]) > 0 { return None; }   # streamed: every part has gone out
     reply = str(res["reply"]);
     if not reply { _log("out " + channel + "/" + peer + ": (empty reply, nothing sent)"); return None; }
-    sent = deliver(str(cfg["kind"]), str(cfg["token"]), peer, reply, thread, str(cfg["target"]));
-    if sent["ok"] { _log("out " + channel + "/" + peer + ": " + reply[:120]); }
-    else { _log("DELIVERY FAILED to " + channel + "/" + peer + ": " + str(sent["error"])[:200]); }
+    r = deliver(kind, token, peer, reply, thread, target);
+    if r["ok"] { _log("out " + channel + "/" + peer + ": " + reply[:120]); }
+    else { _log("DELIVERY FAILED to " + channel + "/" + peer + ": " + str(r["error"])[:200]); }
     return None;
 }
 
