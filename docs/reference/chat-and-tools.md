@@ -67,10 +67,14 @@ When analyzing a codebase the agent surveys with `ws_tree`, locates with
 
 ### Web
 
-- `web_search(query)` — open-web search. Uses a Tavily sign-in
-  (`sigil connect tavily`, no key) if there is one, then `BRAVE_API_KEY` /
-  `SERPER_API_KEY` / `FIRECRAWL_API_KEY`, and otherwise Claude Code's own
-  WebSearch in claude mode, so `sigil --claude` needs no search key at all. See
+- `web_search(query)` — open-web search. Tries these in order:
+  1. a search sign-in (`sigil connect tavily` · `exa` · `parallel` · `perplexity`, no key)
+  2. `BRAVE_API_KEY` / `SERPER_API_KEY` / `FIRECRAWL_API_KEY`
+  3. ChatGPT's own search, when a tier runs on your plan
+  4. Claude Code's WebSearch, in claude mode
+  5. Exa with no account, so it works with nothing set up
+
+  See
   [models](models.md#web-search-providers).
 - `web_fetch(url)` — read a specific URL, SSRF-guarded. Works on keyless JSON
   APIs such as `api.github.com`, so "new PRs/issues in a repo" needs no search key.

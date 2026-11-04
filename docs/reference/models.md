@@ -79,17 +79,22 @@ fails over primary → fallbacks.
 
 Open-web search (`web_search`) is not an LLM tier. Sigil tries these routes, in order:
 
-1. **Tavily, signed in.** `sigil connect tavily` is a browser sign-in with no key, and
-   the free plan includes 1,000 searches a month. See
-   [connections](connections.md#web-search-tavily-and-serper).
+1. **A signed-in search provider.** `sigil connect tavily`, `exa`, `parallel` or
+   `perplexity` is a browser sign-in with no key. See
+   [connections](connections.md#web-search).
 2. **Brave.** `BRAVE_API_KEY` (free tier at brave.com/search/api)
 3. **Serper.** `SERPER_API_KEY`, for Google results (`sigil connect serper`)
 4. **Firecrawl.** `FIRECRAWL_API_KEY`
-5. **Claude Code's own WebSearch.** No key, but only in claude mode (`sigil --claude …`)
+5. **ChatGPT's own web search.** Used only when a tier runs on your ChatGPT plan;
+   each search counts against that plan.
+6. **Claude Code's own WebSearch.** No key, but only in claude mode (`sigil --claude …`)
+7. **Exa with no account.** The last resort: rate-limited, but it needs nothing.
 
 A sign-in comes first because you connected it for exactly this. A direct search API
 is faster and cheaper than a model turn, which is why the keyed providers come next.
-The last route exists so that claude mode needs no second signup:
+A subscription comes next only when the tiers already run on it, so a search never
+spends a plan you did not point Sigil at. The Claude Code route means claude mode
+needs no second signup:
 the machine already has a search-capable agent you are paying for. See
 [claude-code](claude-code.md#web-search-without-a-key).
 

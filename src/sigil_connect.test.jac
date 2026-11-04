@@ -141,6 +141,11 @@ test "search providers: listed as connections, never a tier" {
     t = suggest_tiers([_fake("tavily", True, []), _fake("serper", True, [])]);
     assert t["frontier"] == "" and t["small"] == "", str(t);
     assert "sigil connect tavily" in how_to("tavily");
+    import from .sigil_search { SPECS }
+    for pid in SEARCH_SIGNIN {
+        assert pid in SEARCH_IDS and pid in dict(SPECS), pid;
+        assert ("sigil connect " + pid) in how_to(pid), pid;
+    }
 }
 
 test "tavily: a fresh SIGIL_HOME is not signed in, and the row says so" {

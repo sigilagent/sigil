@@ -855,6 +855,43 @@ def _search_signin(query: str) -> str {
     return "";
 }
 
+def _flag_on(name: str) -> bool {
+    v = str(os.getenv(name) or "").strip().lower();
+    return v not in ["0", "false", "no", "off"];
+}
+
+def _chatgpt_search_model() -> str {
+    # The ChatGPT model to search on, or "" when Sigil should not. Like the
+    # claude route: only when a tier already runs on the ChatGPT plan, so a
+    # search never spends a plan the user did not point Sigil at.
+    # SIGIL_CHATGPT_SEARCH=0 turns it off.
+    if not _flag_on("SIGIL_CHATGPT_SEARCH") { return ""; }
+    try {
+        import from .sigil_chatgpt { auth_status as cg_status, plan_model }
+        if str(dict(cg_status())["mode"]) != "plan" { return ""; }
+        soul = awaken();
+        # Small first: a search is a light turn, and the small model costs the plan least.
+        for m in [str(soul.small_model or ""), str(soul.chat_model or ""), str(soul.frontier_model or "")] {
+            if m.startswith("chatgpt-plan/") or m.startswith("chatgpt/") { return str(plan_model(m)); }
+        }
+    } except Exception as e { return ""; }
+    return "";
+}
+
+def _search_chatgpt(query: str, model: str) -> str {
+    import from .sigil_chatgpt { web_search as cg_search }
+    r: dict[str, any] = dict(cg_search(model, query));
+    lines: list[str] = [str(r["text"]).strip()];
+    src: list[any] = list(r["sources"]);
+    if src {
+        lines.append("");
+        lines.append("Sources:");
+        i = 1;
+        for c in src[:8] { lines.append(str(i) + ". " + str(c["title"]) + "\n   " + str(c["url"])); i += 1; }
+    }
+    return chr(10).join(lines);
+}
+
 def _search_serper(query: str, key: str) -> list[any] {
     import from .sigil_search { search_serper }
     return list(search_serper(query, key, 6));
@@ -863,8 +900,10 @@ def _search_serper(query: str, key: str) -> list[any] {
 def web_search(query: str) -> str {
     # A signed-in provider first: the user connected it for exactly this. Then
     # the direct search APIs, which are faster and cheaper than a model turn.
-    # Claude Code's own WebSearch is the fallback that means claude-mode users
-    # need no search key at all.
+    # Then a subscription the tiers already run on (ChatGPT's hosted web_search,
+    # or Claude Code's WebSearch in claude mode). Last, Exa's MCP server with no
+    # account at all (rate-limited; SIGIL_KEYLESS_SEARCH=0 turns it off), so a
+    # fresh install can still search.
     via = _search_signin(query);
     if via { return via; }
     brave = os.getenv("BRAVE_API_KEY") or os.getenv("BRAVE_SEARCH_API_KEY");
@@ -891,6 +930,14 @@ def web_search(query: str) -> str {
             return _fmt_results(items) if items else "no results for: " + query;
         } except Exception as e { _trace("web_search", "firecrawl err", False); }
     }
+    cgm = _chatgpt_search_model();
+    if cgm {
+        try {
+            out = _search_chatgpt(query, cgm);
+            _trace("web_search", query + " (chatgpt plan)");
+            if out.strip() { return out; }
+        } except Exception as e { _trace("web_search", "chatgpt search: " + str(e)[:120], False); }
+    }
     if _claude_search_ready() {
         try {
             items = _search_claude(query);
@@ -898,10 +945,22 @@ def web_search(query: str) -> str {
             return _fmt_results(items) if items else "no results for: " + query;
         } except Exception as e { _trace("web_search", "claude search: " + str(e)[:120], False); }
     }
+    import from .sigil_search { keyless_on, search_keyless }
+    if keyless_on() {
+        try {
+            kitems: list[any] = list(search_keyless(query, 6));
+            _trace("web_search", query + " (exa, no account, " + str(len(kitems)) + ")");
+            if kitems and ("raw" not in dict(kitems[0])) {
+                return _fmt_results(kitems) + "\n(searched through Exa with no account, which is rate-limited — `sigil connect exa` or tavily raises the limits)";
+            }
+            if kitems { return str(dict(kitems[0])["raw"])[:6000]; }
+        } except Exception as e { _trace("web_search", "exa (no account): " + str(e)[:120], False); }
+    }
     _trace("web_search", query + " (no provider)", False);
     return ("web_search needs a search provider — keyless engines now block automated queries.\n"
             "Either:\n"
-            "  • Sign in to Tavily   sigil connect tavily         (a browser sign-in, no key; 1,000 free searches a month)\n"
+            "  • Sign in to a search provider  sigil connect tavily | exa | parallel | perplexity   (a browser sign-in, no key)\n"
+            "  • Use ChatGPT for a tier       its plan's web search is used then (sigil connect chatgpt)\n"
             "  • Run in claude mode  sigil --claude …      (uses your Claude Code CLI's own web search — no key)\n"
             "  • Brave               export BRAVE_API_KEY=…       (free tier: https://brave.com/search/api/)\n"
             "  • Serper              sigil connect serper         (Google results; https://serper.dev)\n"

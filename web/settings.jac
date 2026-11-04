@@ -10,7 +10,8 @@ at once:
   (ChatGPT, OpenRouter) is `connect_start`, which runs the loopback listener in
   the server process and returns the link; the page opens it in a tab and polls
   `connect_poll`. A pasted key is `connect_key`; `connect_apply` points the tiers
-  at a connection. Rows with role "search" (Tavily, Serper) are what web_search
+  at a connection. Rows with role "search" (Tavily, Exa, Parallel, Perplexity,
+  Serper) are what web_search
   runs on: they get their own card and never feed a tier.
 - keys: the `keys` op (src/sigil_console.jac keys_overview). A value is never
   sent to the browser, only whether it is set, where from, and its last four
@@ -52,7 +53,7 @@ glob CONN_GROUPS: list[any] = [
     ["Already on this machine", ["claude-code", "ollama"]],
     ["API keys", ["openai", "anthropic", "gemini", "zai", "ollama-cloud"]]
 ];
-glob SEARCH_CONN_IDS: list[str] = ["tavily", "serper"];
+glob SEARCH_CONN_IDS: list[str] = ["tavily", "exa", "parallel", "perplexity", "serper"];
 
 # [tier, label, config key, what the tier does]
 glob TIERS: list[any] = [
@@ -813,7 +814,7 @@ def:pub SettingsPage(route: list[str], go: Callable[[str], None], ask: Callable[
         return <section aria-labelledby="wsh" className={CARD + " overflow-hidden"}>
             <div className="px-4.5 py-4 border-b border-line flex flex-col gap-2">
                 <h2 id="wsh" className="m-0 text-[15px] font-semibold">Web search</h2>
-                <span className="text-[12.5px] text-muted leading-relaxed">What the agent's web_search runs on. Signing in to Tavily needs no API key. A Brave or Firecrawl key on the Keys page works too, and so does Claude Code in claude mode.</span>
+                <span className="text-[12.5px] text-muted leading-relaxed">What the agent's web_search runs on. Signing in needs no API key. Without any of these, web_search uses ChatGPT's own search when a tier runs on your ChatGPT plan, Claude Code's in claude mode, a Brave or Firecrawl key from the Keys page, or Exa with no account as the last resort.</span>
             </div>
             {[connRow(r) for r in rows]}
         </section>;

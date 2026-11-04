@@ -234,3 +234,15 @@ test "plan_model: litellm never sees the chatgpt/ prefix it owns" {
     assert plan_model("openai/gpt-5") == "openai/gpt-5";
     assert PROVIDER != "chatgpt";
 }
+
+test "web search on the plan: sources from inline citations, utm tag dropped" {
+    t = "The latest is 0.16.7. ([pypi.org](https://pypi.org/project/jaclang/?utm_source=openai)) "
+        + "and [docs](https://jaclang.org/x?a=1&utm_source=openai), again [pypi.org](https://pypi.org/project/jaclang/?utm_source=openai).";
+    src: list[any] = list(text_citations(t));
+    assert src == [{"title": "pypi.org", "url": "https://pypi.org/project/jaclang/"},
+                   {"title": "docs", "url": "https://jaclang.org/x?a=1"}], str(src);
+    resp = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "x",
+            "annotations": [{"type": "url_citation", "url": "https://a.example/", "title": "A"}]}]}]};
+    assert list(citations(resp)) == [{"title": "A", "url": "https://a.example/"}];
+    assert list(citations({})) == [];
+}

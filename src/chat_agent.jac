@@ -300,13 +300,13 @@ def model_connections() -> str {
 }
 
 sem connect_model = """Start connecting a model provider, or a web search provider (tavily,
-serper), for the user. ChatGPT, OpenRouter and Tavily
+exa, parallel, perplexity, serper), for the user. ChatGPT, OpenRouter and the search sign-ins
 connect by a browser sign-in, which this opens on the machine Sigil runs on; tell the user
 to finish it there, then check with model_connections. It never takes an API key: a key
 typed into chat would be sent to the model and kept in the transcript, so for key
 providers it tells the user the safe way (`/connect <provider>`, which asks without
 echoing). Claude Code and Ollama are set up outside Sigil; it says how.""";
-sem connect_model.provider = "chatgpt | openrouter | claude-code | ollama | ollama-cloud | openai | anthropic | gemini | zai | tavily (web search) | serper (web search)";
+sem connect_model.provider = "chatgpt | openrouter | claude-code | ollama | ollama-cloud | openai | anthropic | gemini | zai | tavily | exa | parallel | perplexity | serper  (the last five are web search)";
 def connect_model(provider: str) -> str {
     _trace("connect", provider);
     import from .sigil_connect { PROVIDERS, KEYED, provider_status, provider_label, connect_start, how_to }
@@ -318,7 +318,7 @@ def connect_model(provider: str) -> str {
     label = provider_label(pid);
     st: dict[str, any] = provider_status(pid);
     if st["connected"] { return label + " is already connected (" + str(st["detail"]) + ")."; }
-    if pid in ["chatgpt", "openrouter", "tavily"] {
+    if pid in ["chatgpt", "openrouter", "tavily", "exa", "parallel", "perplexity"] {
         # The sign-in comes back to a listener in THIS process. An Observatory
         # request or a channel message runs in a child that exits with the reply,
         # taking the listener with it — send those to a place that stays up.
@@ -340,9 +340,9 @@ def connect_model(provider: str) -> str {
         if not opened {
             return "Could not open a browser here. Run /connect " + pid + " in the terminal chat; it prints the sign-in link.";
         }
-        if pid == "tavily" {
-            return ("Opened the Tavily sign-in in the browser on this machine. Once the user finishes it there, "
-                    + "web_search runs on Tavily; model_connections shows it connected.");
+        if pid in ["tavily", "exa", "parallel", "perplexity"] {
+            return ("Opened the " + label + " sign-in in the browser on this machine. Once the user finishes it there, "
+                    + "web_search runs on " + label + "; model_connections shows it connected.");
         }
         return ("Opened the " + label + " sign-in in the browser on this machine. Once the user finishes it there, "
                 + "model_connections will show it connected, and use_model_provider points the tiers at it.");
@@ -462,7 +462,8 @@ Guidance:
   concerns as well as strengths, and don't flatter. When asked for a document or report,
   WRITE it to the workspace with ws_write (and say where), don't just print it.
 - Web: web_search covers the open web (it needs a search provider — if it reports none,
-  say so; connect_model("tavily") opens a no-key browser sign-in for one). web_fetch reads a specific URL, INCLUDING keyless JSON APIs — for
+  say so; connect_model("tavily"), "exa", "parallel" or "perplexity" opens a no-key browser
+  sign-in for one). web_fetch reads a specific URL, INCLUDING keyless JSON APIs — for
   "new PRs/issues in a repo" fetch GitHub's API directly, e.g.
   web_fetch("https://api.github.com/repos/<org>/<repo>/pulls?state=open"), no key needed.
 - Recurring or future work: use schedule_task (cron). "every morning", "in 2 hours",

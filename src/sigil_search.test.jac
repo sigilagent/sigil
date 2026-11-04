@@ -93,3 +93,45 @@ test "credential record: status, expiry and sign-out without the network" {
     assert "access_token" not in kept and kept["registration"]["client_id"] == "c", str(kept);
     if prev is None { os.environ.pop("SIGIL_HOME", None); } else { os.environ["SIGIL_HOME"] = prev; }
 }
+
+test "build_args: each provider's search tool shape" {
+    exa = {"properties": {"query": {"type": "string"}, "numResults": {"type": "number"}, "objective": {"type": "string"}},
+           "required": ["query", "objective"]};
+    assert dict(build_args(exa, "q1", 4)) == {"query": "q1", "numResults": 4, "objective": "q1"};
+    par = {"properties": {"objective": {"type": "string"}, "search_queries": {"type": "array"}, "session_id": {"type": "string"}},
+           "required": ["objective", "search_queries"]};
+    assert dict(build_args(par, "q2", 4)) == {"objective": "q2", "search_queries": ["q2"]};
+    ask = {"properties": {"messages": {"type": "array"}}, "required": ["messages"]};
+    assert dict(build_args(ask, "q3", 4)) == {"messages": [{"role": "user", "content": "q3"}]};
+    odd = {"properties": {"topic": {"type": "string"}}, "required": ["topic"]};
+    assert dict(build_args(odd, "q4", 4)) == {"topic": "q4"};    # unfamiliar required text: the query
+    assert dict(build_args({}, "q5", 4)) == {};                    # no schema: the spec's own args are used
+}
+
+test "SPECS: every sign-in provider names its MCP server, scope and search tool" {
+    for pid in ["tavily", "exa", "parallel", "perplexity"] {
+        sp: dict[str, any] = dict(dict(SPECS)[pid]);
+        assert str(sp["mcp"]).startswith("https://"), pid;
+        assert bool(sp["scope"]) and len(list(sp["tools"])) > 0, pid;
+        assert len(dict(sp["args"]("q", 3))) > 0, pid;
+    }
+    keyless = [p for p in dict(SPECS).keys() if dict(dict(SPECS)[p]).get("keyless")];
+    assert keyless == ["exa"], str(keyless);
+}
+
+test "_fresh: a token with no expiry lasts until the server refuses it" {
+    assert _fresh({"access_token": "t", "expires_at": 0});
+    assert _fresh({"access_token": "t", "expires_at": time.time() + 3600});
+    assert not _fresh({"access_token": "t", "expires_at": time.time() + 10});
+    assert not _fresh({"expires_at": 0});
+}
+
+test "keyless_on: on unless turned off" {
+    prev = os.environ.get("SIGIL_KEYLESS_SEARCH");
+    os.environ.pop("SIGIL_KEYLESS_SEARCH", None);
+    on_default = bool(keyless_on());
+    os.environ["SIGIL_KEYLESS_SEARCH"] = "0";
+    off = bool(keyless_on());
+    if prev is None { os.environ.pop("SIGIL_KEYLESS_SEARCH", None); } else { os.environ["SIGIL_KEYLESS_SEARCH"] = prev; }
+    assert on_default and not off;
+}

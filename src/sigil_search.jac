@@ -16,7 +16,13 @@ They do it through their hosted MCP server, using the MCP authorization spec:
 
 The token is good for that MCP server alone, not the provider's REST API, so the
 search itself is an MCP `tools/call`. Each provider is one entry in `SPECS`:
-Tavily today; Exa and Parallel publish the same flow and would be entries too.
+Tavily, Exa, Parallel and Perplexity all publish this flow. Their search tools
+differ in shape (`query` + `max_results`, `objective` + `search_queries`, ...),
+so the arguments come from the tool's own input schema, saved at sign-in
+(`build_args`); `args` in the spec is the fallback when there is none.
+
+Exa's server also answers with no sign-in at all (rate-limited), which is the
+floor `web_search` falls back to when nothing else is set up (`search_keyless`).
 
 `sigil_oauth` runs the loopback listener between `build_authorize` and
 `finish_signin` (composed in `sigil_connect`). The credential is one 0600 record
@@ -39,15 +45,38 @@ import secrets
 import time
 import urllib.parse
 
-# id -> what Sigil needs to know about one sign-in search provider.
+# id -> what Sigil needs to know about one sign-in search provider. `tools` are
+# the search tool's possible names, first match wins (Perplexity's are not
+# documented). `keyless` marks a server that also answers with no token.
 SPECS = {
     "tavily": {
         "label": "Tavily",
         "mcp": "https://mcp.tavily.com/mcp",
         "scope": "openid offline_access",
-        "tool": "tavily_search",
+        "tools": ["tavily_search"],
         "args": lambda q, n: {"query": q, "max_results": n},
-        "home": "https://app.tavily.com",
+    },
+    "exa": {
+        "label": "Exa",
+        "mcp": "https://mcp.exa.ai/mcp",
+        "scope": "mcp:tools",
+        "tools": ["web_search_exa"],
+        "args": lambda q, n: {"query": q, "objective": q, "numResults": n},
+        "keyless": True,
+    },
+    "parallel": {
+        "label": "Parallel",
+        "mcp": "https://search.parallel.ai/mcp-oauth",
+        "scope": "key:read",
+        "tools": ["web_search"],
+        "args": lambda q, n: {"objective": q, "search_queries": [q]},
+    },
+    "perplexity": {
+        "label": "Perplexity",
+        "mcp": "https://api.perplexity.ai/mcp",
+        "scope": "perplexity_api offline_access",
+        "tools": ["perplexity_search", "search", "web_search", "perplexity_ask"],
+        "args": lambda q, n: {"query": q, "max_results": n},
     },
 }
 CALLBACK_PATH = "/callback"
@@ -305,7 +334,9 @@ def _save_tokens(rec: dict, tok: dict) -> dict:
     for k in ("access_token", "refresh_token", "id_token", "token_type"):
         if tok.get(k):
             rec[k] = tok[k]
-    rec["expires_at"] = now + int(tok.get("expires_in") or 3600)
+    # No expires_in (Parallel hands back a long-lived key): 0 means "until the
+    # server says otherwise", and a 401 is what triggers a refresh or re-sign-in.
+    rec["expires_at"] = (now + int(tok["expires_in"])) if tok.get("expires_in") else 0
     rec["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     return rec
 
@@ -346,13 +377,17 @@ def finish_signin(pid: str, params: dict, ctx: dict) -> dict:
     # Prove it before saying "connected": a token the MCP server refuses (an
     # account with no API key, say) would otherwise fail on the first search.
     try:
-        tools = list_tools(spec["mcp"], str(rec["access_token"]))
+        tools = list_tool_specs(spec["mcp"], str(rec["access_token"]))
     except Exception as e:
         raise SearchAuthError("%s signed you in, but its search server refused the token: %s"
                               % (spec["label"], str(e)[:200]))
-    if spec["tool"] not in tools:
-        raise SearchAuthError("%s signed you in, but its server offers no %s tool (it has: %s)"
-                              % (spec["label"], spec["tool"], ", ".join(tools[:8]) or "none"))
+    names = [str(t.get("name")) for t in tools]
+    pick = next((n for n in spec["tools"] if n in names), "")
+    if not pick:
+        raise SearchAuthError("%s signed you in, but its server offers no search tool Sigil knows (it has: %s)"
+                              % (spec["label"], ", ".join(names[:8]) or "none"))
+    rec["tool"] = pick
+    rec["tool_schema"] = next((t.get("inputSchema") or {} for t in tools if t.get("name") == pick), {})
     with _Lock(pid):
         _write(creds_path(pid), rec)
     who = (" as " + account) if account else ""
@@ -366,17 +401,22 @@ def _forget_tokens(pid: str, rec: dict) -> None:
     _write(creds_path(pid), keep)
 
 
+def _fresh(rec: dict) -> bool:
+    exp = float(rec.get("expires_at") or 0)
+    return bool(rec.get("access_token")) and (exp == 0 or exp - time.time() > 60)
+
+
 def access_token(pid: str, force_refresh: bool = False) -> str:
     """A live access token, refreshed first when it is about to expire."""
     spec = _spec(pid)
     rec = load_creds(pid)
     if not rec.get("access_token"):
         raise SearchAuthError("not signed in to %s — run `sigil connect %s`" % (spec["label"], pid))
-    if not force_refresh and float(rec.get("expires_at") or 0) - time.time() > 60:
+    if not force_refresh and _fresh(rec):
         return str(rec["access_token"])
     with _Lock(pid):
         cur = load_creds(pid)
-        if not force_refresh and float(cur.get("expires_at") or 0) - time.time() > 60:
+        if not force_refresh and _fresh(cur):
             return str(cur["access_token"])
         if force_refresh and str(cur.get("access_token") or "") != str(rec.get("access_token") or ""):
             return str(cur["access_token"])  # another process already refreshed it
@@ -518,7 +558,8 @@ def _close(url: str, h: dict) -> None:
         pass
 
 
-def list_tools(url: str, token: str) -> list:
+def list_tool_specs(url: str, token: str) -> list:
+    """[{name, inputSchema, ...}] the server offers this token."""
     h = _session(url, token)
     try:
         msg, _ = _rpc(url, h, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
@@ -526,7 +567,39 @@ def list_tools(url: str, token: str) -> list:
         _close(url, h)
     if msg.get("error"):
         raise RuntimeError("tools/list: " + str(msg["error"]))
-    return [str(t.get("name")) for t in list((msg.get("result") or {}).get("tools") or []) if isinstance(t, dict)]
+    return [t for t in list((msg.get("result") or {}).get("tools") or []) if isinstance(t, dict)]
+
+
+def list_tools(url: str, token: str) -> list:
+    return [str(t.get("name")) for t in list_tool_specs(url, token)]
+
+
+_QUERY_KEYS = ("query", "q", "search_query", "objective", "question", "prompt", "search_term", "input")
+_MANY_KEYS = ("search_queries", "queries")
+_COUNT_KEYS = ("max_results", "maxresults", "numresults", "num_results", "limit", "count", "top_k", "n")
+
+
+def build_args(schema: dict, query: str, n: int) -> dict:
+    """A search tool's arguments from its JSON input schema: the query into
+    every query-like field, the result count into a count field, and a
+    one-message list for a chat-shaped tool. {} when the schema says nothing."""
+    props = dict((schema or {}).get("properties") or {})
+    out = {}
+    for k, v in props.items():
+        kl = str(k).lower()
+        t = (v or {}).get("type") if isinstance(v, dict) else None
+        if kl in _QUERY_KEYS and t in (None, "string"):
+            out[k] = query
+        elif kl in _MANY_KEYS:
+            out[k] = [query]
+        elif kl in _COUNT_KEYS and t in (None, "integer", "number"):
+            out[k] = n
+        elif kl == "messages":
+            out[k] = [{"role": "user", "content": query}]
+    for k in list((schema or {}).get("required") or []):
+        if k not in out and isinstance(props.get(k), dict) and props[k].get("type") == "string":
+            out[k] = query  # an unfamiliar required text field: the query is the best guess
+    return out
 
 
 def mcp_call(url: str, token: str, tool: str, args: dict) -> dict:
@@ -554,9 +627,12 @@ def _content_text(res: dict) -> str:
 
 
 def _norm(r: dict) -> dict:
+    desc = r.get("content") or r.get("snippet") or r.get("description") or r.get("text") or ""
+    if not desc and isinstance(r.get("excerpts") or r.get("highlights"), list):
+        desc = " ".join(str(x) for x in (r.get("excerpts") or r.get("highlights")))  # Parallel, Exa JSON
     return {"title": str(r.get("title") or ""),
             "url": str(r.get("url") or r.get("link") or ""),
-            "desc": str(r.get("content") or r.get("snippet") or r.get("description") or r.get("text") or "")}
+            "desc": " ".join(str(desc).split())[:600]}
 
 
 _FIELD = re.compile(r"^(Title|URL|Content|Text|Snippet|Description|Summary|Highlights):\s?(.*)$", re.I)
@@ -609,13 +685,31 @@ def parse_results(res: dict) -> list:
 def search(pid: str, query: str, n: int = 6) -> list:
     """Search through a signed-in provider's MCP server, refreshing once on a 401."""
     spec = _spec(pid)
-    args = spec["args"](query, n)
+    rec = load_creds(pid)
+    tool = str(rec.get("tool") or spec["tools"][0])
+    args = build_args(rec.get("tool_schema") or {}, query, n) or spec["args"](query, n)
     tok = access_token(pid)
     try:
-        res = mcp_call(spec["mcp"], tok, spec["tool"], args)
+        res = mcp_call(spec["mcp"], tok, tool, args)
     except McpUnauthorized:
-        res = mcp_call(spec["mcp"], access_token(pid, True), spec["tool"], args)
+        res = mcp_call(spec["mcp"], access_token(pid, True), tool, args)
     return parse_results(res)
+
+
+def keyless_on() -> bool:
+    # Default ON (SIGIL_KEYLESS_SEARCH=0 turns it off): with nothing set up,
+    # web_search still answers, from a server that needs no account.
+    v = (os.environ.get("SIGIL_KEYLESS_SEARCH") or "").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def search_keyless(query: str, n: int = 6) -> list:
+    """Search through the first provider whose MCP server answers with no
+    token (Exa, rate-limited). Raises when none does."""
+    for pid, spec in SPECS.items():
+        if spec.get("keyless"):
+            return parse_results(mcp_call(spec["mcp"], "", spec["tools"][0], spec["args"](query, n)))
+    raise RuntimeError("no keyless search provider")
 
 
 # ---------------------------------------------------------------------------

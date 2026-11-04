@@ -14,10 +14,10 @@ working route under them.
 | Ollama | local | a running Ollama here; `ollama signin` adds its `:cloud` models |
 | Ollama Cloud | key | ollama.com's hosted models over the API, no local Ollama (`ollama-cloud/<model>`) |
 | OpenAI, Anthropic, Gemini, Z.ai | key | a pasted key, kept in $SIGIL_HOME/secrets.env (0600) |
-| Tavily | sign-in, search | a browser link to Tavily's hosted MCP server (`sigil_search`) |
+| Tavily, Exa, Parallel, Perplexity | sign-in, search | a browser link to the provider's hosted MCP server (`sigil_search`) |
 | Serper | key, search | a pasted key for Google results over Serper's API |
 
-The last two are not model routes: they are what `web_search` runs on. They sit
+The search rows are not model routes: they are what `web_search` runs on. They sit
 here because connecting one is the same act, but rows with `role == "search"`
 never feed a tier, a tier suggestion or the setup gate.
 
@@ -57,11 +57,16 @@ glob PROVIDERS: list[any] = [
     ["gemini", "Google Gemini API", "key", "Pay-as-you-go Gemini API key."],
     ["zai", "Z.ai API", "key", "Pay-as-you-go Z.ai (GLM) API key."],
     ["tavily", "Tavily", "signin", "Web search for the agent. Sign in with your browser; no API key (1,000 free searches a month)."],
+    ["exa", "Exa", "signin", "Web search for the agent. Works without an account at low limits; signing in raises them."],
+    ["parallel", "Parallel", "signin", "Web search for the agent, built for AI agents. Sign in with your browser; no API key."],
+    ["perplexity", "Perplexity", "signin", "Web search for the agent through your Perplexity API account. Sign in with your browser."],
     ["serper", "Serper", "key", "Web search for the agent: Google results over Serper's API."]
 ];
 
-# The rows above that are web_search providers, not model routes.
-glob SEARCH_IDS: list[str] = ["tavily", "serper"];
+# The rows above that are web_search providers, not model routes, and the ones
+# among them that connect by a browser sign-in (sigil_search.SPECS).
+glob SEARCH_IDS: list[str] = ["tavily", "exa", "parallel", "perplexity", "serper"];
+glob SEARCH_SIGNIN: list[str] = ["tavily", "exa", "parallel", "perplexity"];
 
 # Key providers: id -> [env var, frontier model, small model, where to get a key]
 glob KEYED: dict[str, any] = {
@@ -207,7 +212,7 @@ def provider_status(pid: str) -> dict[str, any] {
         elif _reachable_ollama() { r["detail"] = "running, but no models pulled yet"; }
         elif shutil.which("ollama") { r["detail"] = "installed, not running"; }
         else { r["detail"] = "not installed"; }
-    } elif pid == "tavily" {
+    } elif pid in SEARCH_SIGNIN {
         ts: dict[str, any] = search_auth(pid);
         r["connected"] = bool(ts["connected"]);
         r["account"] = str(ts["account"]);
@@ -405,11 +410,16 @@ def _or_finish(params: dict[str, any], ctx: dict[str, any]) -> dict[str, any] {
             "detail": "OpenRouter key saved to " + str(saved.get("file") or "the secrets file")};
 }
 
-def _tv_build(redirect: str) -> tuple[str, dict[str, any]] { return search_build("tavily", redirect); }
-def _tv_finish(params: dict[str, any], ctx: dict[str, any]) -> dict[str, any] { return search_finish("tavily", params, ctx); }
+def _search_pair(pid: str) -> tuple[any, any] {
+    # (build, finish) for one sign-in search provider, as sigil_oauth wants them.
+    def build(redirect: str) -> tuple[str, dict[str, any]] { return search_build(pid, redirect); }
+    def finish(params: dict[str, any], ctx: dict[str, any]) -> dict[str, any] { return search_finish(pid, params, ctx); }
+    return (build, finish);
+}
 
-def connect_tavily(on_url: any = None, open_browser: bool = True) -> dict[str, any] {
-    return browser_flow(_tv_build, _tv_finish, SEARCH_CALLBACK, "127.0.0.1", 600, on_url, open_browser);
+def connect_search(pid: str, on_url: any = None, open_browser: bool = True) -> dict[str, any] {
+    pair = _search_pair(pid);
+    return browser_flow(pair[0], pair[1], SEARCH_CALLBACK, "127.0.0.1", 600, on_url, open_browser);
 }
 
 def connect_chatgpt(on_url: any = None, fresh: bool = False, open_browser: bool = True) -> dict[str, any] {
@@ -431,8 +441,9 @@ def connect_start(pid: str, fresh: bool = False) -> dict[str, any] {
     if pid == "openrouter" {
         return dict(start_flow("openrouter", _or_build, _or_finish, "/callback", "localhost"));
     }
-    if pid == "tavily" {
-        return dict(start_flow("tavily", _tv_build, _tv_finish, SEARCH_CALLBACK, "127.0.0.1"));
+    if pid in SEARCH_SIGNIN {
+        pair = _search_pair(pid);
+        return dict(start_flow(pid, pair[0], pair[1], SEARCH_CALLBACK, "127.0.0.1"));
     }
     return {"id": "", "url": "", "error": provider_label(pid) + " does not connect through a browser link"};
 }
@@ -487,7 +498,7 @@ def ollama_signin() -> dict[str, any] {
 
 def disconnect(pid: str) -> dict[str, any] {
     if pid == "chatgpt" { return dict(chatgpt_sign_out()); }
-    if pid == "tavily" { return dict(search_sign_out(pid)); }
+    if pid in SEARCH_SIGNIN { return dict(search_sign_out(pid)); }
     if pid in KEYED {
         env = str(KEYED[pid][0]);
         if secret_source(env) == "shell" {
@@ -507,7 +518,7 @@ def how_to(pid: str) -> str {
     # One line: what connecting this route takes, for a screen that cannot do it.
     if pid == "chatgpt" { return "sigil connect chatgpt — opens a ChatGPT sign-in in your browser"; }
     if pid == "openrouter" { return "sigil connect openrouter — opens an OpenRouter sign-in in your browser"; }
-    if pid == "tavily" { return "sigil connect tavily — opens a Tavily sign-in in your browser"; }
+    if pid in SEARCH_SIGNIN { return "sigil connect " + pid + " — opens a " + provider_label(pid) + " sign-in in your browser"; }
     if pid == "claude-code" { return "install Claude Code, then `claude auth login` (or `sigil connect claude-code`)"; }
     if pid == "ollama" { return "install Ollama (ollama.com/download), then `ollama pull qwen3:8b`, or `ollama signin` for :cloud models"; }
     if pid in KEYED { return "sigil connect " + pid + " — paste a key from " + str(KEYED[pid][3]); }
