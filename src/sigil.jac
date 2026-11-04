@@ -19,7 +19,7 @@ import from .compiler.mechanical.compiler { transpile_ir }
 import from .compiler.mechanical.toolib { builtin_catalogue }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
-    skill_description
+    skill_description, checkpoint
 }
 import from .sigil_api { report_for }
 import from .sigil_cron { now_ms }
@@ -562,6 +562,7 @@ walker solve {
                 ev = judge_result(self.task, str(res["report"]));
                 tg.last_score = ev.score;
                 tg.last_eval = ev.reason;
+                checkpoint("solve eval " + tg.signature);
                 self.trace += "eval -> " + str(ev.score) + "/100 (" + ev.reason + ")\n";
                 if ev.score < soul.eval_threshold {
                     self.trace += "eval FAIL -> relearn + retry\n";
@@ -585,7 +586,10 @@ walker solve {
             try {
                 facts = distill(self.task, self.result);
                 for f in facts { remember(soul, f, "fact"); }
-                if facts { self.trace += "learned -> " + str(len(facts)) + " memory\n"; }
+                if facts {
+                    checkpoint("solve learn");
+                    self.trace += "learned -> " + str(len(facts)) + " memory\n";
+                }
             } except Exception as e {
                 self.trace += "learn skipped (" + str(e)[:80] + ")\n";
             }

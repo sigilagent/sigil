@@ -73,12 +73,23 @@ test "a WhatsApp agent send with no peer goes to whoever last wrote to it" {
     # so an empty peer resolves to the sender of the latest inbound message.
     channel_add("_t_wa_agent", "whatsapp", "", "per-peer");
     r = message_send("_t_wa_agent", "", "hello");
-    assert not r["ok"] and ("message your agent" in str(r["error"])), str(r);
+    assert not r["ok"] and ("message the agent on whatsapp first" in str(r["error"])), str(r);
     ch = _get_channel(awaken(), "_t_wa_agent");
     _record(ch, "in", "user:7", "hi agent", "wamid.T");
     r2 = message_send("_t_wa_agent", "", "hello");
     assert r2["ok"] and (r2["peer"] == "user:7"), str(r2);
     channel_remove("_t_wa_agent");
+}
+
+test "any channel's send with no peer goes to whoever last wrote, so a skill can report back" {
+    channel_add("_t_tg_back", "telegram", "", "per-peer");
+    r = message_send("_t_tg_back", "", "done");
+    assert not r["ok"] and ("message the agent on telegram first" in str(r["error"])), str(r);
+    _record(_get_channel(awaken(), "_t_tg_back"), "in", "12345", "hi", "");
+    r2 = message_send("_t_tg_back", "", "done");
+    assert r2["ok"] and (r2["peer"] == "12345"), str(r2);
+    assert "_t_tg_back" in skill_channels_json();
+    channel_remove("_t_tg_back");
 }
 
 test "/new on a channel starts its conversation over without a model call" {
@@ -89,6 +100,19 @@ test "/new on a channel starts its conversation over without a model call" {
     assert r["ok"] and ("new conversation" in str(r["reply"])), str(r);
     assert chat_history("_t_chat_new", "42", "per-peer") == [];
     channel_remove("_t_chat_new");
+}
+
+test "/help and /build are answered without a model call, and stay in the conversation" {
+    import from .sigil_sessions { chat_history, chat_history_save }
+    channel_add("_t_chat_cmd", "telegram", "", "per-peer");
+    chat_history_save("_t_chat_cmd", "42", "per-peer", [{"role": "user", "content": "earlier"}]);
+    r = inbound("_t_chat_cmd", "42", "/help", "");
+    assert r["ok"] and ("/build" in str(r["reply"])), str(r);
+    b = inbound("_t_chat_cmd", "42", "/build", "");
+    assert "no drafted agent" in str(b["reply"]), str(b);
+    h = chat_history("_t_chat_cmd", "42", "per-peer");
+    assert [m["content"] for m in h][:3] == ["earlier", "/help", str(r["reply"])], str(h);
+    channel_remove("_t_chat_cmd");
 }
 
 test "the model is told where its reply is read" {

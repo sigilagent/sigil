@@ -120,3 +120,27 @@ test "a compiled skill runs standalone, off the agent's graph, unless switched o
     if was is None { os.environ.pop("SIGIL_SKILL_STANDALONE", None); }
     else { os.environ["SIGIL_SKILL_STANDALONE"] = was; }
 }
+
+test "a read refused because the file is in iCloud says so; other errors add nothing" {
+    import errno;
+    hint = cloud_file_hint(OSError(errno.EDEADLK, "Resource deadlock avoided"), "/Users/x/Desktop/log.txt");
+    assert "iCloud" in hint and "brctl download '/Users/x/Desktop/log.txt'" in hint, hint;
+    assert cloud_file_hint(OSError(errno.ENOENT, "No such file"), "/x") == "";
+    assert cloud_file_hint(ValueError("nope"), "/x") == "";
+}
+
+test "the iCloud download policy is set once and never raises" {
+    first = allow_cloud_downloads();
+    assert allow_cloud_downloads() == first, "a second call reports the first result";
+    if sys.platform != "darwin" { assert first == False; }
+}
+
+test "checkpoints can be switched off" {
+    was = os.environ.get("SIGIL_TXN_CHECKPOINTS");
+    os.environ["SIGIL_TXN_CHECKPOINTS"] = "0";
+    assert txn_checkpoints_on() == False;
+    assert checkpoint("unit") == "";
+    os.environ.pop("SIGIL_TXN_CHECKPOINTS", None);
+    assert txn_checkpoints_on() == True;
+    if was is not None { os.environ["SIGIL_TXN_CHECKPOINTS"] = was; }
+}

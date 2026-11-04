@@ -128,15 +128,20 @@ test "chat's slash commands say connect for models and channel for channels" {
     assert "/connections" in usages;
 }
 
-test "propose_agent: offered only to web-console turns, and switchable off" {
+test "propose_agent: offered to web-console and channel turns, and switchable off" {
     old = os.environ.get("SIGIL_CHAT_PROPOSE");
     if "SIGIL_CHAT_PROPOSE" in os.environ { del os.environ["SIGIL_CHAT_PROPOSE"]; }
     _WEB_UI = False;
+    _CHANNEL.clear();
     assert not _propose_on();          # the REPL has no Build button to press
     _WEB_UI = True;
     assert _propose_on();              # default on in the console
+    _WEB_UI = False;
+    _CHANNEL["channel"] = "whatsapp";
+    assert _propose_on();              # a chat app builds with /build
     os.environ["SIGIL_CHAT_PROPOSE"] = "0";
     assert not _propose_on();
+    _CHANNEL.clear();
     _WEB_UI = False;
     if old is None { del os.environ["SIGIL_CHAT_PROPOSE"]; }
     else { os.environ["SIGIL_CHAT_PROPOSE"] = str(old); }
@@ -176,4 +181,14 @@ test "a history saved with repr'd tool calls is repaired on the way back in" {
     # plain dicts pass through untouched, and a string that is not a repr is dropped
     ok = {"id": "c", "type": "function", "function": {"name": "ws_read", "arguments": "{}"}};
     assert _plain_history([{"role": "assistant", "tool_calls": [ok, "junk"]}])[0]["tool_calls"] == [ok];
+}
+
+test "learn_skill goes through the compiler unless switched off" {
+    old = os.environ.get("SIGIL_LEARN_VIA_COMPILER");
+    os.environ.pop("SIGIL_LEARN_VIA_COMPILER", None);
+    assert _learn_via_compiler();
+    os.environ["SIGIL_LEARN_VIA_COMPILER"] = "0";
+    assert not _learn_via_compiler();
+    if old is None { os.environ.pop("SIGIL_LEARN_VIA_COMPILER", None); }
+    else { os.environ["SIGIL_LEARN_VIA_COMPILER"] = str(old); }
 }

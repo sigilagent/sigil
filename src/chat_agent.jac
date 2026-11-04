@@ -36,7 +36,8 @@ import from .sigil_docs { list_docs, read_doc }
 import from .sigil_mcp { dispatch }
 import from .sigil_workspace {
     ws_read, ws_write, ws_edit, ws_list, ws_tree, ws_grep, ws_exec, ws_watch, ws_kill, ws_jobs,
-    sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace
+    sigil_compile, web_fetch, web_search, workspace_info, ws_root, _trace, drain_trace,
+    set_compile_offload
 }
 import from .sigil_subagents { spawn_subagent, spawn_parallel }
 import from .sigil_skill_tools { run_skill, skill_tools, skill_tool_index, _tail_progress }
@@ -48,6 +49,7 @@ glob CHAT_INFO: dict[str, any] = {};   # the soul, injected into every turn via 
 glob _TOKEN_SINK: any = None; # callback(token) — the REPL renders streamed tokens live (None = collect silently)
 glob _WEB_UI: bool = False;   # this turn came from the web console, which can show a Build button
 glob _SURFACE: str = "";     # where this turn's reply is read (a channel), for formatting
+glob _CHANNEL: dict[str, str] = {};   # {channel, peer} of a channel turn; empty elsewhere
 glob _WEB_TURN: any = threading.Lock();   # the server runs requests on threads; a web turn owns the chat state
 
 def set_token_sink(fn: any) -> None { _TOKEN_SINK = fn; }
@@ -151,7 +153,8 @@ def recall_memory(query: str) -> str {
 }
 
 sem propose_agent = """Offer the user an agent to build: the web console shows it as a
-card with a Build button. Use this, not learn_skill, when the user asks you to build an
+card with a Build button; on a chat app it is saved as this chat's draft and the user
+replies /build. Use this, not learn_skill, when the user asks you to build an
 agent from a description. SCOPE IT FIRST: before calling this, be confident you know what
 the agent takes in, what it must produce and where, the rules it must follow (what it must
 always do, must never do, and do only in some cases), and how it handles the edge cases
@@ -171,21 +174,64 @@ def propose_agent(name: str = "", summary: str = "", skill_md: str = "") -> str 
         return "propose_agent needs `skill_md`: the complete SKILL.md to compile. Nothing was proposed.";
     }
     _trace("propose", str(name or "agent"));
+    if _on_channel() {
+        import from .sigil_channel_compile { save_draft }
+        try {
+            path = save_draft(str(_CHANNEL.get("channel")), str(_CHANNEL.get("peer")),
+                              str(name or "agent"), skill_md, ws_root());
+        } except Exception as e {
+            return "could not save the draft: " + str(e)[:200];
+        }
+        return ("Saved the draft to " + path + ". Do not compile it yourself. In your reply, say "
+                + "in a sentence or two what it will do, and that they can reply /build to compile "
+                + "it, or tell you what to change.");
+    }
     return ("Proposed '" + str(name or "agent") + "' to the user as a card with a Build button. "
             + "Do not compile it yourself. In your reply, say in a sentence or two what it will do "
             + "and that they can press Build, or tell you what to change.");
 }
 
 def _propose_on() -> bool {
-    # Offered only to web-console turns (the REPL has no button to press), and
-    # switchable off with SIGIL_CHAT_PROPOSE=0.
+    # Offered to web-console turns (a Build button) and channel turns (/build);
+    # the REPL has neither. Switchable off with SIGIL_CHAT_PROPOSE=0.
     v = str(os.environ.get("SIGIL_CHAT_PROPOSE", "1")).strip().lower();
-    return _WEB_UI and (v not in ["0", "false", "no", "off"]);
+    return (_WEB_UI or _on_channel()) and (v not in ["0", "false", "no", "off"]);
 }
 
+def _on_channel() -> bool { return bool(_CHANNEL.get("channel")); }
+
+def _channel_compile(full: str) -> str {
+    # sigil_compile's background route on a channel turn (set_compile_offload).
+    import from .sigil_channel_compile { start_channel_compile }
+    r = start_channel_compile(str(_CHANNEL.get("channel")), str(_CHANNEL.get("peer")), full);
+    if not r.get("ok") { return "could not start the compile: " + str(r.get("error") or ""); }
+    return ("Started compiling " + str(r.get("name") or full) + " in the background (job "
+            + str(r.get("job")) + "). Tell the user it takes a few minutes and that a message "
+            + "arrives in this chat when it finishes. Do not wait for it or check on it.");
+}
+
+def _learn_via_compiler() -> bool {
+    # learn_skill drafts a SKILL.md and compiles it through the gated compiler.
+    # SIGIL_LEARN_VIA_COMPILER=0 restores the old solve-loop authoring (frontier
+    # AG-IR straight from the description, no gates, then a run).
+    v = str(os.environ.get("SIGIL_LEARN_VIA_COMPILER", "1")).strip().lower();
+    return v not in ["0", "false", "no", "off"];
+}
+
+sem draft_skill_md = """Write a complete SKILL.md for the class of task described: YAML
+frontmatter with `name` (snake_case) and `description` (one sentence: what it does and
+when to use it), then the sections ## Inputs, ## Outputs, ## Procedure (numbered steps)
+and ## Rules (each rule stated as MUST, MUST NOT or SHOULD, with the edge cases). Be
+faithful to the description: do not invent requirements it does not imply, keep concrete
+values it gives (paths, sites, times, counts, formats), and state any choice it leaves
+open as a SHOULD default. Return only the document.""";
+sem draft_skill_md.description = "What the skill must do, in the user's words.";
+def draft_skill_md(description: str) -> str by chat_llm();
+
 sem learn_skill = """Author a NEW reusable skill from a DESCRIPTION, when no skill
-document exists: the frontier model writes a typed procedure for the class of task, runs
-it, and persists it so future requests of the same kind are handled cheaply. Use this only
+document exists: it drafts a SKILL.md for the class of task into the workspace and
+compiles it with Sigil's compiler (the same gates as sigil_compile), so future requests
+of the same kind are handled by the compiled skill. Run it afterwards with its tool. Use this only
 when the user wants a durable, repeatable procedure and there is nothing written down yet
 — for a one-off, just do the work with the other tools. If a SKILL.md already exists (in
 the workspace, or in a repo you can fetch), use sigil_compile on that file instead: it
@@ -203,6 +249,20 @@ def learn_skill(task: str = "") -> str {
                + "class of work to compile. Nothing was compiled.";
     }
     _trace("learn", task);
+    if _learn_via_compiler() {
+        import from .sigil_core { compiler_available }
+        if compiler_available() {
+            import from .sigil_channel_compile { strip_fences, frontmatter_name, slug, write_skill_draft }
+            try { md = strip_fences(draft_skill_md(task)); }
+            except Exception as e {
+                _trace("learn", "draft failed: " + str(e)[:80], False);
+                return "could not draft a SKILL.md: " + friendly_llm_error(e, "", "learn_skill");
+            }
+            name = slug(frontmatter_name(md, " ".join(str(task).split()[:6])));
+            path = write_skill_draft(ws_root(), name, md, True);
+            return "Drafted a SKILL.md for this at " + path + ".\n" + sigil_compile(path);
+        }
+    }
     r = run_task(task, "");
     warn = commit_now("learn_skill");
     out = "skill '" + str(r["signature"]) + "': " + str(r["result"])[:600];
@@ -448,7 +508,11 @@ Guidance:
   ws_write it into the workspace, then sigil_compile that path. It runs in this process
   on this graph, takes several minutes with no time limit, and streams each stage. It
   becomes a tool of yours the moment it compiles. Only when NOTHING is written down do
-  you use learn_skill, which authors a fresh procedure from a description.
+  you use learn_skill, which drafts a SKILL.md from a description and compiles it the same way.
+  On a chat app (replying_on is set) a compile runs in the background: sigil_compile and
+  learn_skill return at once, the user gets a message in that chat when it finishes, and
+  you must not wait for it or poll it. The user can also send /build, /compile <path>,
+  /status and /help, which are answered without you.
 - Analyzing a codebase/repo: SURVEY FIRST with ws_tree, LOCATE with ws_grep, then READ
   SEVERAL representative files (page large ones — a partial read shows "lines X-Y of N",
   so keep reading rather than concluding from the first page). Never judge a codebase from
@@ -470,9 +534,9 @@ Guidance:
   look them up.
 - Independent sub-tasks: use spawn_parallel to run them at once; spawn_subagent for one.
 - Reusable procedures: learn_skill only when the user wants a durable, repeatable skill.
-  When propose_agent is among your tools (the web console), building an agent from a
-  description goes through it instead: scope the agent with the user until you are
-  confident, then propose it, and the user presses Build.
+  When propose_agent is among your tools (the web console, or a chat app), building an
+  agent from a description goes through it instead: scope the agent with the user until you
+  are confident, then propose it, and the user presses Build (on a chat app, replies /build).
 - External tools: mcp_call for connected MCP servers.
 - Model providers: model_connections says what is connected and whether each tier can run;
   connect_model starts a connection (it opens a browser sign-in, or explains the safe way to
@@ -669,7 +733,8 @@ def _plain_history(h: list[any]) -> list[any] {
     return out;
 }
 
-def channel_chat_turn(message: str, history: list[any], surface: str) -> dict[str, any] {
+def channel_chat_turn(message: str, history: list[any], surface: str,
+                      channel: str = "", peer: str = "") -> dict[str, any] {
     # One turn of a channel's own ongoing conversation: the same agent, tools and
     # approvals as `sigil chat`, continuing from `history` (the channel's stored
     # messages) and handing the new history back to be stored. `surface` tells
@@ -679,10 +744,20 @@ def channel_chat_turn(message: str, history: list[any], surface: str) -> dict[st
     with _WEB_TURN {
         CHAT_HISTORY = _starts_clean(_plain_history([h for h in list(history or []) if isinstance(h, dict)][-32:]));
         _SURFACE = str(surface or "");
+        _CHANNEL.clear();
+        if channel {
+            _CHANNEL["channel"] = str(channel);
+            _CHANNEL["peer"] = str(peer or "");
+            # A compile from a phone runs in the background and reports back to
+            # this chat (sigil_channel_compile).
+            set_compile_offload(_channel_compile);
+        }
         try {
             out = chat_turn(message);
         } finally {
             _SURFACE = "";
+            _CHANNEL.clear();
+            set_compile_offload(None);
         }
         out["history"] = _plain_last_user(_starts_clean(_plain_history(list(CHAT_HISTORY))), message);
     }

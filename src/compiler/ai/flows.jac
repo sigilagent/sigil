@@ -181,7 +181,7 @@ with neither body nor command nor content is a prose-pointer and will be
 rejected. A demand to consult a LIVE source stays a live tool (name it after
 the fetch, leave body empty, note the URL in the skill knowledge). PREFER A STANDARD TOOL: the
 context lists tools that always exist (read_file, grep, glob_files, list_dir,
-write_file, run_command, http_get). If a step is one of those, emit a tool with
+write_file, run_command, http_get, send_message). If a step is one of those, emit a tool with
 that EXACT name, `serves` naming its nodes, and NO body or command — the compiler
 supplies the implementation. Hand-write a body only for what the library does not
 already do. EVERY

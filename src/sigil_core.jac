@@ -25,7 +25,7 @@ import from .sigil_chatgpt { install as install_chatgpt, is_chatgpt, plan_model 
 import from jaclang.byllm.lib { Model, ModelPool }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
-    skill_description, graph_write
+    skill_description, graph_write, checkpoint
 }
 import from .sigil_cron { now_ms }
 import from .views { VNode, VEdge, VGraph, VCall, VObs }
@@ -600,11 +600,21 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str
         import from .sigil_skill_tools { skill_manifest }
         shelf = skill_manifest(tg.signature);
     } except Exception as e { shelf = ""; }
-    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf);
+    # The run takes minutes in a subprocess. End this process's transaction on
+    # both sides of it, so nothing here sits locked while it runs and the run's
+    # record is saved at once (see checkpoint in sigil_runtime).
+    chans = "";
+    try {
+        import from .channels { skill_channels_json }
+        chans = skill_channels_json();
+    } except Exception as e2 { chans = ""; }
+    checkpoint("before skill run " + tg.signature);
+    res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf, chans);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
     a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
     tg +>:Ran:+> a;
+    checkpoint("skill run " + tg.signature);
     return res;
 }
 

@@ -37,7 +37,7 @@ import from pathlib { Path }
 import from .sigil_runtime {
     sigil_home, run_dir, log_dir, pid_path, read_pid, pid_alive, write_pidfile,
     clear_pidfile, process_running, project_root, entry_script, _jac_bin, store_path,
-    _lock_acquire, _lock_release
+    _lock_acquire, _lock_release, checkpoint
 }
 import from .cron { tick_isolated, next_due_ms, cron_list, cron_daemon_running }
 import from .channels { channel_list as cron_channel_list }
@@ -288,6 +288,10 @@ def daemon_run(interval_s: int = 30, max_ticks: int = 0) -> dict[str, any] {
         while not _STOP["now"] {
             try {
                 _supervise_children();
+                # Reading the channels opened a transaction; a tick that fires a
+                # job blocks here for minutes, and Postgres drops a connection
+                # left idle inside one ("connection lost mid-transaction").
+                checkpoint("daemon supervise");
                 res = tick_isolated();
                 if not res["ok"] {
                     _log("tick failed: " + _tick_error(str(res["err"])));

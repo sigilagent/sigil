@@ -340,6 +340,68 @@ except Exception as _e:
     return "[http_get failed: %s]" % str(_e)[:200]
 return _body if len(_body) <= 20000000 else (_body[:20000000] + "\\n... [truncated]")
 """
+    },
+    # Messages the user over a channel Sigil has connected (WhatsApp, Telegram,
+    # Slack, Discord). Sigil hands a run its channels in SIGIL_CHANNELS and the
+    # way back to itself in SIGIL_ENTRY / SIGIL_PROJECT / SIGIL_JAC; the send is
+    # a short `channel send` through that Sigil, so the token never enters the
+    # run and the message lands in the channel's history like any other. With no
+    # Sigil around (an ejected program, a bench harness) it says so instead of
+    # pretending. At most SIGIL_SEND_LIMIT (default 5) messages per run.
+    "send_message": {
+        "sig": "(text: str, channel: str = \"\") -> str",
+        "surface": "ACT",
+        "doc": "Send a message to the user on a channel Sigil has connected (WhatsApp, Telegram, Slack, Discord); channel is its name or kind, empty for the first connected one.",
+        "body": """
+import os
+import sys
+import json as _js
+import subprocess as _sp
+_text = str(text or "").strip()
+if not _text:
+    return "[send_message: nothing to send]"
+try:
+    _rows = _js.loads(os.environ.get("SIGIL_CHANNELS") or "[]")
+except Exception:
+    _rows = []
+_rows = [_r for _r in _rows if isinstance(_r, dict) and _r.get("name")]
+if not _rows:
+    return "[send_message: no messaging channel is connected to Sigil for this run]"
+_want = str(channel or "").strip().lower()
+_pick = None
+for _r in _rows:
+    if _want and _want in (str(_r.get("name")).lower(), str(_r.get("kind") or "").lower()):
+        _pick = _r
+        break
+if _pick is None:
+    if _want:
+        return "[send_message: no connected channel '%s'; connected: %s]" % (_want, ", ".join(str(_r.get("name")) for _r in _rows))
+    _pick = _rows[0]
+_entry = os.environ.get("SIGIL_ENTRY") or ""
+if not _entry:
+    return "[send_message: this run has no Sigil to send through]"
+_sent = int(os.environ.get("SIGIL_SENT_COUNT") or "0")
+_cap = int(os.environ.get("SIGIL_SEND_LIMIT") or "5")
+if _sent >= _cap:
+    return "[send_message: this run already sent %d messages; not sending more]" % _sent
+os.environ["SIGIL_SENT_COUNT"] = str(_sent + 1)
+_env = dict(os.environ)
+for _k in ("SIGIL_SKILL_TOOLS", "SIGIL_CHANNELS", "SIGIL_TASK", "AGIR_PROGRESS"):
+    _env.pop(_k, None)
+_env.update({"SIGIL_CHILD": "1", "SIGIL_AUTOSTART": "0", "SIGIL_NO_SERVE": "1", "SIGIL_NO_DAEMON": "1"})
+_argv = [os.environ.get("SIGIL_JAC") or sys.executable, "run", "--no-serve", _entry, "--",
+         "channel", "send", str(_pick.get("name")), "", _text[:4000]]
+try:
+    _p = _sp.run(_argv, cwd=(os.environ.get("SIGIL_PROJECT") or None), env=_env,
+                 capture_output=True, text=True, timeout=180)
+except Exception as _e:
+    return "[send_message failed: %s]" % str(_e)[:200]
+_out = _p.stdout or ""
+_done = [_l for _l in _out.splitlines() if _l.startswith("sent to ")]
+if _done and _done[-1].rstrip().endswith("[delivered]"):
+    return "sent on %s" % _pick.get("name")
+return "[send_message: not delivered on %s: %s]" % (_pick.get("name"), (_out + (_p.stderr or ""))[-300:].strip())
+"""
     }
 };
 

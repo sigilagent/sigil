@@ -40,7 +40,7 @@ import from .sigil_core {
 }
 import from .approvals { check_exec, allowlist_add }
 import from .hooks { fire_hooks }
-import from .sigil_runtime { run_dir, pid_alive, commit_now }
+import from .sigil_runtime { run_dir, pid_alive, commit_now, checkpoint, cloud_file_hint }
 import from .sigil_secrets { resolve_refs, redact_secrets }
 
 # ---------------------------------------------------------------------------
@@ -49,9 +49,11 @@ import from .sigil_secrets { resolve_refs, redact_secrets }
 glob TRACE: list[any] = [];        # [{tool, detail, ok}] — every tool call this process
 glob _SINK: any = None;       # callback(tool, detail, ok) — live render hook
 glob _START_SINK: any = None; # callback(tool, detail) — a tool has STARTED (the full-screen chat's status row)
+glob _COMPILE_OFFLOAD: any = None;   # callback(path) -> str: compile elsewhere (a channel turn backgrounds it)
 glob _APPROVER: any = None;   # callback(command)->bool — inline approve of a pending exec
 
 def set_trace_sink(fn: any) -> None { _SINK = fn; }
+def set_compile_offload(fn: any) -> None { _COMPILE_OFFLOAD = fn; }
 def set_start_sink(fn: any) -> None { _START_SINK = fn; }
 def set_approver(fn: any) -> None { _APPROVER = fn; }
 def drain_trace() -> list[any] { out = list(TRACE); TRACE = []; return out; }
@@ -79,6 +81,10 @@ def _trace(tool: str, detail: str, ok: bool = True) -> None {
     # the tool's result down with it.
     try { fire_hooks("after_tool" if ok else "tool_failed", str(tool) + ": " + str(detail)[:200]); }
     except Exception as e2 {  }
+    # A tool call is the unit of work in a turn: commit what it wrote and end the
+    # transaction, so a turn that runs for minutes does not hold graph rows the
+    # scheduler and the other channels need (checkpoint in sigil_runtime).
+    try { checkpoint("tool " + str(tool)); } except Exception as e3 {  }
 }
 
 def _trace_start(tool: str, detail: str) -> None {
@@ -89,6 +95,7 @@ def _trace_start(tool: str, detail: str) -> None {
     if _START_SINK is not None {
         try { _START_SINK(tool, detail); } except Exception as e2 {}
     }
+    try { checkpoint("before tool " + str(tool)); } except Exception as e3 {  }
     return None;
 }
 
@@ -168,7 +175,11 @@ def ws_read(path: str, offset: int = 0, limit: int = 0) -> str {
     if not os.path.isfile(full) { _trace("read", path + " (missing)", False); return "no such file: " + path; }
     try {
         with open(full, "r") as f { data = f.read(); }
-    } except Exception as e { _trace("read", str(e), False); return "error reading " + path + ": " + str(e); }
+    } except Exception as e {
+        _trace("read", str(e), False);
+        hint = cloud_file_hint(e, full);
+        return "error reading " + path + ": " + str(e) + ((". " + hint) if hint else "");
+    }
     lines = data.split(chr(10));
     total = len(lines);
     start = (offset - 1) if offset > 0 else 0;
@@ -208,7 +219,13 @@ def ws_write(path: str, content: str) -> str {
 def ws_edit(path: str, old: str, new: str) -> str {
     try { full = _resolve(path); } except Exception as e { _trace("edit", str(e), False); return "error: " + str(e); }
     if not os.path.isfile(full) { _trace("edit", path + " (missing)", False); return "no such file: " + path; }
-    with open(full, "r") as f { data = f.read(); }
+    try {
+        with open(full, "r") as f { data = f.read(); }
+    } except Exception as e {
+        _trace("edit", str(e), False);
+        hint = cloud_file_hint(e, full);
+        return "error reading " + path + ": " + str(e) + ((". " + hint) if hint else "");
+    }
     n = data.count(old);
     if n == 0 { _trace("edit", path + " (no match)", False); return "no occurrence of the target text in " + path; }
     if n > 1 { _trace("edit", path + " (" + str(n) + " matches)", False); return "target text is not unique in " + path + " (" + str(n) + " matches) — include more context"; }
@@ -682,7 +699,11 @@ def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
     if not os.path.isfile(full) { _trace("compile", path + " (missing)", False); return "no such file: " + path; }
     try {
         with open(full, "r") as f { src = f.read(); }
-    } except Exception as e { _trace("compile", str(e), False); return "error reading " + path + ": " + str(e); }
+    } except Exception as e {
+        _trace("compile", str(e), False);
+        hint = cloud_file_hint(e, full);
+        return "error reading " + path + ": " + str(e) + ((". " + hint) if hint else "");
+    }
     if not compiler_available() {
         # An ejected runtime ships skills; it does not author them. Say which
         # build this is rather than failing on a missing name.
@@ -690,6 +711,14 @@ def sigil_compile(path: str, eject_path: str = "", eject: bool = False) -> str {
         return ("This agent was ejected without the compiler, so it cannot compile "
                 + "a SKILL.md. It runs the skills it shipped with — list_skills() "
                 + "shows them.");
+    }
+    if _COMPILE_OFFLOAD is not None {
+        # A channel turn: compile in the background and report back to the chat
+        # (sigil_channel_compile). Ejecting is a terminal or console job.
+        _trace("compile", _rel(full) + " (background)");
+        out = str(_COMPILE_OFFLOAD(full));
+        if bool(eject) or bool(eject_path) { out += " Ejecting is not done from a chat; run `sigil compile " + _rel(full) + " -e` on the machine for that."; }
+        return out;
     }
     _trace("compile", _rel(full));
     want_eject = bool(eject) or bool(eject_path);
