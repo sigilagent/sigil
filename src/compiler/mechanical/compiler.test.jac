@@ -908,7 +908,8 @@ test "a slot keeps every declared read, and its call site matches its arity" {
 # the blank by NAMING it instead of dropping it.
 test "a list-returning slot's result is stripped of contentless elements" {
     src = transpile_ir(REPAIR_IR, "fixer");
-    assert "_clean_strlist(propose(" in src;
+    # cleaned at the source, after a JSON-text reply is parsed back into a list
+    assert "_clean_strlist(_as_list_carry(propose(" in src;
 }
 
 # A code-owned verification step writing a bool verdict — the shape every "check

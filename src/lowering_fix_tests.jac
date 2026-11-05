@@ -1862,8 +1862,8 @@ test "record field lists are taken only from explicit prose" {
     assert _record_fields("Output a list of {sheet, cell, value, comment}.") == ["sheet", "cell", "value", "comment"];
     assert _record_fields("Each record has a short title and some notes about it.") == [];
     assert _record_fields("Parse every entry.") == [];
-    # a Jac-reserved name would be renamed in the obj and break the consumer's .get("type")
-    assert _record_fields("Each item has type, value.") == [];
+    # a Jac-reserved name would be renamed in the obj and break the consumer's .get("node")
+    assert _record_fields("Each item has node, value.") == [];
 }
 
 obj ParseEntriesItem { has story_id: str = ""; has title: str = ""; }
