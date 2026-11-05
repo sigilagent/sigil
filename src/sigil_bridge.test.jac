@@ -90,6 +90,12 @@ test "any channel's send with no peer goes to whoever last wrote, so a skill can
     r2 = message_send("_t_tg_back", "", "done");
     assert r2["ok"] and (r2["peer"] == "12345"), str(r2);
     assert "_t_tg_back" in skill_channels_json();
+    # no token, so the transport refused it: that is in the daemon log, where a
+    # send from a skill or a cron job (whose output nobody reads) can be found
+    assert not r2["delivered"], str(r2);
+    import from .sigil_runtime { log_dir }
+    with open(os.path.join(log_dir(), "daemon.log")) as f { logged = f.read()[-4000:]; }
+    assert "DELIVERY FAILED to _t_tg_back/12345" in logged, logged[-400:];
     channel_remove("_t_tg_back");
 }
 

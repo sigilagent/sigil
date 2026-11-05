@@ -242,9 +242,29 @@ def message_send(channel: str, peer: str, text: str, thread_id: str = "") -> dic
     sent = deliver(ch.kind, str(creds[0]), peer, text, thread_id, str(creds[1]));
     out = {"ok": True, "channel": channel, "peer": peer, "text": text,
            "mid": m.mid, "thread_id": thread_id, "delivered": bool(sent["ok"])};
-    if not sent["ok"] { out["delivery_error"] = str(sent["error"]); }
+    if not sent["ok"] {
+        out["delivery_error"] = str(sent["error"]);
+        note_delivery_failure(channel, peer, str(sent["error"]));
+    }
     if sent.get("note") { out["note"] = str(sent["note"]); }
     return out;
+}
+
+def note_delivery_failure(channel: str, peer: str, error: str) -> None {
+    # A send the provider refused, in the daemon log beside the bridge's own
+    # "DELIVERY FAILED" lines. A send from a skill or a cron job runs in a child
+    # whose output nobody reads, and the Message on the graph looks the same
+    # either way, so without this a skill "sent" and nothing arrived, silently.
+    import os;
+    import time;
+    import from .sigil_runtime { log_dir }
+    try {
+        with open(os.path.join(log_dir(), "daemon.log"), "a") as f {
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "  DELIVERY FAILED to " + str(channel)
+                    + "/" + str(peer) + ": " + " ".join(str(error or "").split())[:300] + "\n");
+        }
+    } except Exception as e { }
+    return None;
 }
 
 def _last_inbound_peer(ch: Channel) -> str {

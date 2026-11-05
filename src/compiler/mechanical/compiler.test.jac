@@ -495,6 +495,91 @@ tools:
           return int(round or 0) + 1
 """;
 
+# A BRANCH on a dict carry read by key. Both guards used to lower to `True`, so
+# the first arm always ran: given a topic, the skill still asked for one, sent
+# that, and ended without searching (hackernews_topic_log v9, caught live).
+glob DICT_GATE_IR: str = """---
+name: dict_gate
+description: Branch on a key of a code-produced dict.
+---
+agir_version: 0.1
+standalone: true
+shape: pipeline
+types: {}
+walker:
+  name: DictGate
+  carries:
+    task: {type: str, role: input}
+    ctx: {type: dict, produced_by: init}
+    question: {type: str, produced_by: ask}
+    result: {type: str, produced_by: work}
+nodes:
+  - id: init
+    type: COMPUTE
+    tool: init
+    reads: [task]
+    writes: [ctx]
+  - id: gate
+    type: BRANCH
+    reads: [ctx]
+  - id: ask
+    type: COMPUTE
+    tool: ask
+    reads: []
+    writes: [question]
+  - id: work
+    type: COMPUTE
+    tool: work
+    reads: [ctx]
+    writes: [result]
+  - id: done
+    type: TERMINAL
+edges:
+  - {from: init, to: gate, modality: mandatory}
+  - {from: gate, to: ask, guard: "ctx['has_topic'] == False", modality: conditional}
+  - {from: gate, to: work, guard: "ctx['has_topic'] == True", modality: conditional}
+  - {from: ask, to: done, modality: mandatory}
+  - {from: work, to: done, modality: mandatory}
+tools:
+  init:
+    sig: (task) -> ctx
+    body: |
+      def init(task):
+          return {"has_topic": bool(str(task).strip())}
+  ask:
+    sig: () -> question
+    body: |
+      def ask():
+          return "which topic?"
+  work:
+    sig: (ctx) -> result
+    body: |
+      def work(ctx):
+          return "searched"
+""";
+
+test "a guard on a dict carry's key lowers to that key, not to True" {
+    src = transpile_ir(DICT_GATE_IR, "dict_gate");
+    assert "self.ctx['has_topic'] == False" in src, src;
+    assert "self.ctx['has_topic'] == True" in src;
+    assert "if True {" not in src;
+    assert "elif True {" not in src;
+}
+
+test "guard paths take subscripts and .get() in every guard form" {
+    cs = {"ctx": {"type": "dict"}, "n": {"type": "int"}, "rows": {"type": "list"}};
+    assert _guard_expr('ctx["mode"] == "fast"', {}, cs, {}) == 'self.ctx["mode"] == "fast"';
+    assert _guard_expr("ctx.get('n') > 2", {}, cs, {}) == "self.ctx.get('n') > 2";
+    assert _guard_expr("rows[0] != ''", {}, cs, {}) == "self.rows[0] != ''";
+    assert _guard_expr("not ctx['done']", {}, cs, {}) == "not self.ctx['done']";
+    assert _guard_expr("ctx['done']", {}, cs, {}) == "self.ctx['done']";
+    assert _guard_expr("n < ctx['limit']", {}, cs, {}) == "self.n < self.ctx['limit']";
+    assert _guard_expr("ctx['kind'] in {a, b}", {}, cs, {}) == "self.ctx['kind'] in [\"a\", \"b\"]";
+    # the shapes that already worked are unchanged
+    assert _guard_expr("n < 3", {}, cs, {}) == "self.n < 3";
+    assert _guard_expr("spec.size == 4", {}, cs, {}) == "self.spec.size == 4";
+}
+
 # A ROUTE guard the enum/equality shapes don't recognize used to fall through to
 # a bare `True`, which is an ALWAYS-TAKEN branch: the repair edge lost its round
 # budget (unbounded loop) and every edge behind it went unreachable. Numeric and

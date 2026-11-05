@@ -71,9 +71,10 @@ test "_rearm: a recurring job whose schedule went unschedulable parks itself" {
 test "parse_target: channel, channel:peer, and nothing" {
     assert parse_target("") == ["", ""];
     assert parse_target("   ") == ["", ""];
-    assert parse_target("ops") == ["ops", "cron"];
+    # no peer: the person who last wrote on the channel (message_send resolves "")
+    assert parse_target("ops") == ["ops", ""];
     assert parse_target("telegram:12345") == ["telegram", "12345"];
-    assert parse_target("telegram:") == ["telegram", "cron"];
+    assert parse_target("telegram:") == ["telegram", ""];
     assert parse_target(":12345") == ["", ""];
 }
 

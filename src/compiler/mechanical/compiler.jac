@@ -35,6 +35,13 @@ glob GEN_TYPES: list[any] = ["GENERATE", "SELECT", "EXTRACT", "MUTATE", "DELEGAT
 
 # guard values that mean "unconditional" — never lower as a literal condition
 glob GUARD_SENTINELS: list[any] = ["", "otherwise", "default", "else", "always", "true", "_"];
+# The left side of a guard: a carry, then any mix of `.field`, `['key']` /
+# `["key"]` / `[0]` and `.get('key')`. A dict carry is read by key in the IR as
+# often as an obj carry by field, and a guard on `ctx['has_topic']` that the
+# lowerer could not parse became `True` — on BOTH arms of the route, so every
+# run took the first one (caught live: a topic logger that always asked for its
+# topic, given one, and never searched).
+glob GUARD_PATH: str = r"[A-Za-z_]\w*(?:\.\w+(?:\(\s*(?:'[^']*'|\"[^\"]*\")\s*\))?|\[\s*(?:'[^']*'|\"[^\"]*\"|-?\d+)\s*\])*";
 
 # Max carries handed to a by-llm slot. ONE constant on purpose: the slot's
 # declared arity and every call site that invokes it must agree, and when this
@@ -1977,9 +1984,10 @@ def _bool_guard(fld: str, rhs: str, op: str, carries: any, types: any) -> str {
 # an unparseable guard never breaks compilation.
 def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str {
     s = str(g).strip();
-    mi: any = re.match(r"(\w+)\s+in\s+\{(.+)\}$", s);
+    mi: any = re.match(r"(" + GUARD_PATH + r")\s+in\s+\{(.+)\}$", s);
     if mi {
-        fld = _safe(mi.group(1));
+        fp = str(mi.group(1));
+        fld = _safe(fp) if re.match(r"^\w+$", fp) else fp;
         terms: list = [];
         for mem in [x.strip() for x in str(mi.group(2)).split(",") if x.strip()] {
             en = m2e.get(mem, "");
@@ -1987,7 +1995,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         }
         return f"self.{fld} in [{_j(', ', terms)}]";
     }
-    mc: any = re.match(r"(not\s+)?([A-Za-z_][\w.]*)\s*(==|!=|>=|<=|>|<)\s*(.+)$", s);
+    mc: any = re.match(r"(not\s+)?(" + GUARD_PATH + r")\s*(==|!=|>=|<=|>|<)\s*(.+)$", s);
     if mc {
         neg = "not " if mc.group(1) else "";
         left = "self." + str(mc.group(2));
@@ -2001,7 +2009,7 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         }
         # true/false RHS — bare OR quoted — is a verdict: translate by carry type
         # (see _bool_guard) so a bool carry never gets compared to a string.
-        if (op in ["==", "!="]) and ("." not in str(mc.group(2))) {
+        if (op in ["==", "!="]) and re.match(r"^\w+$", str(mc.group(2))) {
             bg = _bool_guard(_safe(str(mc.group(2))), rt.strip("\"'"), op, carries, types);
             if bg { return neg + bg; }
         }
@@ -2015,11 +2023,11 @@ def _guard_expr(g: any, m2e: any, carries: any = None, types: any = None) -> str
         # RHS naming a CARRY compares against the carry's VALUE, not the quoted
         # name (caught live: `input_tokens_estimate > context_window` lowered to
         # `> "context_window"` — int>str TypeError killed all 9 claude-api cells)
-        elif carries and (rt.split(".")[0] in list(carries)) { rv = "self." + str(rt); }
+        elif carries and (re.split(r"[.\[]", rt)[0] in list(carries)) { rv = "self." + str(rt); }
         else { rv = _q(rt); }
         return f"{neg}{left} {op} {rv}";
     }
-    mb: any = re.match(r"(not\s+)?([A-Za-z_][\w.]*)$", s);
+    mb: any = re.match(r"(not\s+)?(" + GUARD_PATH + r")$", s);
     if mb {
         neg = "not " if mb.group(1) else "";
         return neg + "self." + str(mb.group(2));

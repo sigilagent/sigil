@@ -186,15 +186,20 @@ def parse_target(spec: str) -> list[str] {
     # is how a Telegram chat id or a Slack channel id rides along without adding a
     # field to CronJob (and without the schema drift that would cost every
     # existing install). Returns ["", ""] for no target.
+    #
+    # No peer means "the person": message_send resolves an empty peer to whoever
+    # last wrote on that channel. The old default peer "cron" was a recipient no
+    # provider has: WhatsApp refuses anything but a user:<id>, Telegram has no
+    # chat "cron", so a job set to deliver on a bare channel reached nobody.
     raw = str(spec or "").strip();
     if not raw { return ["", ""]; }
     if ":" in raw {
         bits = raw.split(":", 1);
         chan = bits[0].strip();
-        peer = bits[1].strip() or "cron";
+        peer = bits[1].strip();
         return [chan, peer] if chan else ["", ""];
     }
-    return [raw, "cron"];
+    return [raw, ""];
 }
 
 def _deliver(job: CronJob, text: str) -> None {
@@ -202,7 +207,13 @@ def _deliver(job: CronJob, text: str) -> None {
     target = str(parts[0]);
     if not target { return None; }
     try {
-        message_send(target, str(parts[1]), text);
+        r = message_send(target, str(parts[1]), text);
+        # A refused transport is already in the daemon log (message_send); a
+        # send that never got that far (no one has written on the channel yet)
+        # is said here, or the job "delivers" its results to nobody.
+        if not r.get("ok") {
+            print("tick: " + job.name + " result not delivered on '" + target + "': " + str(r.get("error") or "")[:160], flush=True);
+        }
     } except Exception as e {
         print("cron: delivery to '" + target + "' failed: " + str(e)[:160]);
     }
