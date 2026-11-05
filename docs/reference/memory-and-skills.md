@@ -54,6 +54,7 @@ sigil library                 # compiled skills with run stats
 sigil tools skills            # …as tools: the name each answers to, and its gate
 sigil eval <sig> [probe]      # grounded-eval a skill (run + judge the artifact)
 sigil relearn <sig> [hint]    # recompile a skill fresh with the frontier
+sigil relower [sig]           # re-lower stored AG-IR with the current compiler, in place (no model call)
 sigil forget <sig>            # remove a skill entirely (all versions + files)
 ```
 

@@ -15,7 +15,7 @@ import os;
 import json;
 import from .sigil_mcp { digest, tools_for }
 import from .sigil_claude_cc { install as install_claude_cc, is_claude_cc }
-import from .compiler.mechanical.compiler { transpile_ir }
+import from .compiler.mechanical.compiler { transpile_ir, unparseable_tools }
 import from .compiler.mechanical.toolib { builtin_catalogue }
 import from .sigil_runtime {
     write_module, execute_module, default_contract, repo_root, agir_name, install_osp,
@@ -42,7 +42,7 @@ import from .sigil_core {
     tool_group_set, tool_allowed, tools_policy_info, forget, teach, recollect,
     graph_snapshot, observability_tail, solve_known, solve_known_task,
     solve_task, compile_stage_label, compile_stage_line, compile_stage_secs,
-    set_solver, set_compiler, compiler_available
+    set_solver, set_compiler, compiler_available, fail_reason
 }
 
 sem name_signature = """Coin a short, stable, kebab-case signature naming the CLASS
@@ -166,8 +166,12 @@ def _lower(agir: str, sig: str) -> dict[str, any] {
     for i in range(3) {
         try {
             osp = transpile_ir(cur, sig);
-            if "def run(" in osp { return {"ok": True, "osp": osp, "agir": cur}; }
-            err = "compiled module has no run() entrypoint";
+            # a tool body that does not parse lowers to a stub raising SyntaxError
+            # at run time — the same gap compile_gate closes for raise2
+            bad = unparseable_tools(osp);
+            if bad { err = chr(10).join(bad); }
+            elif "def run(" in osp { return {"ok": True, "osp": osp, "agir": cur}; }
+            else { err = "compiled module has no run() entrypoint"; }
         } except Exception as e { err = _transpile_error(e); }
         cur = fix_agir(cur, err, CONTRACT);
     }
@@ -547,10 +551,32 @@ walker solve {
 
         # --- escalation valve: cheap model fails -> frontier mutate + retry --
         if not res["ok"] {
-            self.trace += "small-model FAIL -> frontier mutate + retry\n";
-            tg = mutate(reg, tg, self.task, str(res["error"]));
-            res = run_compiled(tg, self.task, ctx, self.skill);
-            self.signature = tg.signature;
+            why1 = fail_reason(res);
+            self.trace += "small-model FAIL: " + why1 + "\n";
+            self.trace += "-> frontier mutate + retry\n";
+            mutated = False;
+            try {
+                tg = mutate(reg, tg, self.task, str(res["error"]) if res["error"] else why1);
+                mutated = True;
+            } except Exception as me {
+                # a revision that does not compile keeps the prior version; say so
+                # instead of aborting the walker with nothing on the trace
+                self.trace += "mutate failed: " + str(me)[:240] + "\n";
+            }
+            if mutated {
+                res = run_compiled(tg, self.task, ctx, self.skill);
+                self.signature = tg.signature;
+                if not res["ok"] {
+                    why2 = fail_reason(res);
+                    self.trace += "retry FAIL: " + why2 + "\n";
+                    if why2 == why1 {
+                        # The revised AG-IR died exactly where the old one did:
+                        # the defect is in the code the compiler emitted, which a
+                        # mutation of the contract cannot reach.
+                        self.trace += "same failure after mutate: likely a compiler (lowering) defect, not the skill\n";
+                    }
+                }
+            }
         }
 
         # --- grounded-eval valve: a run can EXIT ok yet be WRONG (empty / echoed /
@@ -671,6 +697,60 @@ def relearn(signature: str, hint: str = "") -> dict[str, any] {
     nt = _recompile(reg, tg, hint, "relearn");
     nt +>:MutatedFrom:+> tg;
     return {"ok": True, "signature": signature, "version": nt.version, "origin": "relearn", "module": nt.module};
+}
+
+# RE-LOWER: AG-IR -> code again for every skill, with no model call. A skill's
+# contract is its AG-IR; the module on disk is only what the compiler of the day
+# made of it. A lowering fix therefore reached nothing already compiled: every
+# existing skill kept the old defect until someone paid for a fresh compile
+# (hackernews_chat_summary kept splitting its record list into characters).
+# This re-emits each skill's latest version from its stored AG-IR through the
+# same COMPILE gate a compile uses, and rewrites the module IN PLACE — same
+# version, same contract, so routing, run stats and lineage are untouched. A
+# skill whose new lowering fails the gate keeps its current module, unchanged.
+# Returns one row per skill: {signature, version, status, detail}, status in
+# relowered | unchanged | kept | skipped.
+def relower_all(only: str = "", check: bool = True, dry_run: bool = False) -> list[dict[str, any]] {
+    import from pathlib { Path }
+    import from .compiler.ai.gates { compile_gate }
+    awaken();
+    regs = [root -->][?:Registry];
+    out: list[dict[str, any]] = [];
+    if not regs { return out; }
+    changed = False;
+    for tg in latest_by_sig([regs[0] -->][?:TaskGraph]) {
+        if only and (tg.signature != only) { continue; }
+        row: dict[str, any] = {"signature": tg.signature, "version": tg.version, "status": "", "detail": ""};
+        out.append(row);
+        if not str(tg.agir).strip() {
+            row["status"] = "skipped"; row["detail"] = "no AG-IR (registered as a prebuilt module)";
+            continue;
+        }
+        v = compile_gate(str(tg.agir), tg.signature, check);
+        osp = str(v.module_src or "");
+        if (not v.ok) or ("def run(" not in osp) {
+            row["status"] = "kept";
+            row["detail"] = "new lowering failed the compile gate, module left as is: "
+                            + (str(v.errors).strip().splitlines()[0][:200] if str(v.errors).strip() else "no run()");
+            continue;
+        }
+        cur = "";
+        mp = Path(str(tg.module)) if str(tg.module) else None;
+        try { if mp and mp.exists() { cur = mp.read_text(); } } except Exception as e { cur = ""; }
+        if cur == osp { row["status"] = "unchanged"; continue; }
+        row["status"] = "relowered";
+        if dry_run { row["detail"] = "would rewrite " + str(tg.module); continue; }
+        if mp and mp.parent.exists() {
+            mp.write_text(osp);
+        } else {
+            # the recorded path is gone (moved install): re-home it where runs look
+            tg.module = write_module(osp, tg.signature, tg.version, WORKDIR);
+            changed = True;
+        }
+        row["detail"] = str(tg.module);
+    }
+    if changed { checkpoint("relower"); }
+    return out;
 }
 
 

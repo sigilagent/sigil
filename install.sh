@@ -266,6 +266,25 @@ if [ "${SIGIL_PRECOMPILE:-1}" != 0 ]; then
   fi
 fi
 
+# ---- 5b. re-lower existing skills with the compiler just installed -------------
+# A skill's contract is its AG-IR; the module beside it is what the compiler of
+# its day made of that. An update that fixes the lowering would otherwise reach
+# no skill already compiled. `relower` re-emits each one from its stored AG-IR,
+# with no model call, through the same compile gate; a skill whose new lowering
+# fails the gate keeps its module. Updates only, and SIGIL_RELOWER=0 skips it.
+if [ "$FRESH" = 0 ] && [ "${SIGIL_RELOWER:-1}" != 0 ]; then
+  rlog="$STATE_DIR/log/install-relower.log"
+  mkdir -p "$STATE_DIR/log"
+  info "Re-lowering your compiled skills with this version's compiler…"
+  if ( SIGIL_NO_DAEMON=1 SIGIL_NO_SERVE=1 SIGIL_AUTOSTART=0 run_sigil local relower ) >"$rlog" 2>&1; then
+    summary="$(grep '^relower' "$rlog" | tail -1)"
+    info "${summary:-relower: no compiled skills}"
+  else
+    warn "re-lowering did not finish; your skills keep their current modules."
+    warn "  log: $rlog   (retry: sigil relower)"
+  fi
+fi
+
 # ---- 6. first-run wizard -------------------------------------------------------
 # `curl … | bash` gives this script the pipe as stdin, so questions are read from
 # the terminal itself. No terminal (CI, a provisioning script): no questions.

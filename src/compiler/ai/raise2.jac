@@ -31,6 +31,7 @@ import from .author_direct { author_direct, pin_direct_llm }
 import from .author_buildout { author_buildout, pin_buildout_llm, repair_localized }
 import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untraced_prohibitions, gap_score }
 import from .gates { compile_gate }
+import from .repair { repair_compile_loop, pin_repair_llm }
 import from .autofix { canonicalize_ir, autofix_ir }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
@@ -56,6 +57,7 @@ def pin_raise2_llms(m: any) -> None {
     pin_direct_llm(m);
     pin_buildout_llm(m);
     pin_adjudge_llm(m);
+    pin_repair_llm(m);
 }
 
 
@@ -328,8 +330,29 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
     _t = time.time();
     _emit({"stage": "gates", "state": "start"});
     v = compile_gate(ir, name);
+    _nrep = 0;
+    # A FAITHFUL document that does not compile gets the bounded compile-repair
+    # loop (repair_ir: fix only what the diagnostic names), not an immediate
+    # "uncompilable": an unparseable tool body is a one-line fix, and without
+    # this the only way out was a whole recompile. The repaired IR is adopted
+    # only if it compiles AND stays faithful, so the oracle and the proof both
+    # keep the last word.
+    if fr.ok and (not v.ok) {
+        ro = repair_compile_loop(ir, name);
+        _nrep = len(ro.attempts);
+        for a in ro.attempts { repairs.append("compile " + str(a)); }
+        if ro.verdict.ok {
+            frr = faithfulness_report(spec, ro.ir_text);
+            if frr.ok {
+                ir = ro.ir_text; fr = frr; v = ro.verdict;
+                repairs.append("compile repair: adopted (still faithful)");
+            } else {
+                repairs.append("compile repair: compiled but lost faithfulness — keeping prior");
+            }
+        }
+    }
     _emit({"stage": "gates", "state": "done", "secs": time.time() - _t,
-           "g4": v.ok, "g1_issues": 0, "repairs": 0});
+           "g4": v.ok, "g1_issues": 0, "repairs": _nrep});
     if not fr.ok { status = "unfaithful"; }
     elif not v.ok { status = "uncompilable"; }
     else { status = "faithful"; }

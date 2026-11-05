@@ -585,6 +585,31 @@ def mcp_status() -> list[any] {
 # Each becomes a TaskGraph on the graph, routable on the next task.
 # ---------------------------------------------------------------------------
 
+# One line saying WHY a compiled run failed, for the trace and the chat. The run's
+# stderr tail used to be handed to mutate and then dropped, so the trace said
+# "small-model FAIL" and the chat agent, seeing only "skill ... finished", could
+# not tell a crash from an empty search (hackernews_chat_summary, caught live).
+# The exception's last line, plus the walker step it died in when the traceback
+# names one (every node ability is `n_<id>`).
+def fail_reason(res: dict[str, any]) -> str {
+    import re;
+    err = str(res.get("error") or "").strip();
+    rep = str(res.get("report") or "").strip();
+    if not err {
+        if rep.startswith("INCOMPLETE") { return rep.splitlines()[0][:240]; }
+        return "the run returned an empty report" if not rep else ("no result: " + rep.splitlines()[0][:200]);
+    }
+    lines: list[str] = [str(l).strip() for l in err.splitlines() if str(l).strip()];
+    exc = "";
+    for l in reversed(lines) {
+        if re.match(r"^(?:[A-Za-z_][\w.]*\.)?[A-Za-z_]\w*(?:Error|Exception|Exit|Interrupt|Conflict)\b", l) { exc = l; break; }
+    }
+    if not exc { exc = lines[-1] if lines else "unknown error"; }
+    steps: list[str] = re.findall(r"\bn_([A-Za-z0-9_]+)\b", err);
+    at_step = (" (in step " + steps[-1] + ")") if steps else "";
+    return exc[:240] + at_step;
+}
+
 def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str, any] {
     # Small model executes the compiled OSP. The compiled PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run
@@ -976,6 +1001,7 @@ walker solve_known {
         self.trace += "HIT " + target.signature + " -> run\n";
         res = run_compiled(target, self.task, ctx, self.skill);
         self.result = str(res["report"]);
+        if not res["ok"] { self.trace += "FAIL: " + fail_reason(res) + "\n"; }
         if res["ok"] and soul.auto_eval {
             try {
                 ev = judge_result(self.task, self.result);

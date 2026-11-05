@@ -19,7 +19,7 @@ import traceback;
 import yaml;
 # absolute import (main.jac style): a parent-relative `..mechanical` breaks under
 # `jac test`, which roots the package at the module's own directory.
-import from src.compiler.mechanical.compiler { transpile_ir, _load_ir }
+import from src.compiler.mechanical.compiler { transpile_ir, _load_ir, unparseable_tools }
 import from src.sigil_agir_yaml { dump_agir }
 import from src.compiler.mechanical.envbind { extract_manifest, probe_manifest, scraped_path_inputs }
 import from src.compiler.mechanical.concurrency { extract_concurrency }
@@ -869,6 +869,13 @@ def compile_gate(ir_text: str, name: str, check: bool = True) -> CompileVerdict 
     # instead (the same choice sigil's _lower makes): require ≥1 lowered node.
     if "can n_" not in osp {
         return CompileVerdict(ok=False, module_src=osp, errors="lowered module has no nodes (empty/unparseable IR)");
+    }
+    # A tool whose body did not parse lowers to a stub that raises SyntaxError —
+    # valid Python, so `jac check` below passes and the skill would ship FAITHFUL
+    # and die on first use. Reject it here, naming the tool and the line.
+    _bad: list[str] = unparseable_tools(osp);
+    if _bad {
+        return CompileVerdict(ok=False, module_src=osp, errors="\n".join(_bad));
     }
     if not check { return CompileVerdict(ok=True, module_src=osp); }
     tmp = tempfile.mkdtemp(prefix="sigil_g4_");

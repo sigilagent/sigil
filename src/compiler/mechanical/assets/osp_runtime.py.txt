@@ -422,6 +422,57 @@ def _record_items(v):
         out.append(x)
     return out
 
+def _as_list_carry(v):
+    # Total coercion for a list-typed carry. list() of a STRING is its characters:
+    # a slot that returned its record list as JSON text (hackernews_chat_summary's
+    # parse_entries, caught live) handed prioritize ['[', '{', '"', ...] and the
+    # first record.get() died. A JSON-array string becomes that array, any other
+    # text ONE element, None/blank nothing; a mapping is one record.
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.startswith("```"):
+            s = s.strip("`").strip()
+            if s[:4].lower() == "json":
+                s = s[4:].strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                p = _json.loads(s)
+            except Exception:
+                p = None
+            if isinstance(p, list):
+                return p
+        return [v]
+    if isinstance(v, dict):
+        return [v]
+    try:
+        return list(v)
+    except Exception:
+        return [v]
+
+def _record_dicts(v, cls):
+    # A record slot's elements come back as the generated record obj `cls` (the
+    # compiler's _record_fields); every consumer of a record list .get()s its
+    # fields from a dict. Only instances of that one generated class convert —
+    # an IR-declared object type keeps its attribute access.
+    if not isinstance(v, (list, tuple)):
+        return v
+    out = []
+    for x in v:
+        if type(x).__name__ == cls:
+            try:
+                out.append({k: val for k, val in vars(x).items() if not str(k).startswith("_")})
+                continue
+            except Exception:
+                pass
+        out.append(x)
+    return out
+
 def _clean_strlist(v):
     # byLLM's structured output over a small local model leaks JSON structure into
     # list elements: a 5-item answer comes back with a trailing "" or a fragment

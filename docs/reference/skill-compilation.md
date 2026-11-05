@@ -299,6 +299,7 @@ sigil register-skill ./x.agir agir       # hand-authored AG-IR, no model call
 sigil register-skill ./y.jac osp         # drop in a precompiled module
 sigil gate ./x.agir                      # run COMPILE, the compile oracle, on its own
 sigil relearn <signature>                # recompile a stored skill at a bumped version
+sigil relower [sig]                      # re-lower stored AG-IR with the current compiler, in place (no model call)
 ```
 
 There is one compile pathway: `compile`, `register-skill <SKILL.md>` and the

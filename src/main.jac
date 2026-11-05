@@ -25,7 +25,7 @@ import subprocess;
 import from src.sigil {
     solve_task, library, describe_soul, configure, teach, recollect,
     add_mcp, remove_mcp, mcp_status, register_skill, compile_skill, lint_skill,
-    eval_skill, relearn, forget,
+    eval_skill, relearn, relower_all, forget,
     model_alias, model_set_fallback, models_info, use_claude_code,
     tool_group_set, tool_allowed, tools_policy_info,
     compile_stage_label, compile_stage_line, compile_stage_secs, verbose_mode
@@ -943,6 +943,31 @@ with entry:__main__ {
             if not r["ok"] { print(str(r["error"])); }
             else { print("relearned " + str(r["signature"]) + " -> v" + str(r["version"]) + " [" + str(r["origin"]) + "]"); }
         }
+    } elif cmd == "relower" {
+        # relower [signature] [--dry-run] [--no-check] — AG-IR -> code again for
+        # every skill (or one), no model call; modules rewritten in place
+        _only = ""; _dry = False; _chk = True;
+        _ri = 1;
+        while _ri < len(argv) {
+            _a = _arg(argv, _ri);
+            if _a == "--dry-run" { _dry = True; }
+            elif _a == "--no-check" { _chk = False; }
+            elif _a and (not _a.startswith("-")) { _only = _a; }
+            _ri += 1;
+        }
+        rows = relower_all(_only, _chk, _dry);
+        if not rows { print("(no compiled skills" + ((" named " + _only) if _only else "") + ")"); }
+        _cnt: dict[str, int] = {};
+        for _row in rows {
+            _rst = str(_row["status"]);
+            _cnt[_rst] = int(_cnt.get(_rst, 0)) + 1;
+            print("  " + _rst.ljust(10) + " " + str(_row["signature"]) + " v" + str(_row["version"])
+                  + (("  " + str(_row["detail"])) if (_row["detail"] and _rst != "relowered") else ""));
+        }
+        if rows {
+            print("relower" + (" (dry run)" if _dry else "") + ": "
+                  + ", ".join([str(k) + "=" + str(_cnt[k]) for k in sorted(_cnt.keys())]));
+        }
     } elif cmd == "forget" {
         # forget <signature>  — remove a skill entirely (all versions + module files)
         sig = _arg(argv, 1);
@@ -1694,6 +1719,7 @@ with entry:__main__ {
         print("  library                             list compiled skills, with run stats");
         print("  eval <sig> [probe]                  grounded-eval a skill — run it and judge the artifact");
         print("  relearn <sig> [hint]                recompile a skill fresh through the main compiler (task-born skills re-author via frontier)");
+        print("  relower [sig] [--dry-run]           re-lower skills from their stored AG-IR with the current compiler (no model call)");
         print("  forget <sig>                        remove a skill entirely (all versions + files)");
         print("  gate <file.agir> [name]             run COMPILE (compile oracle) + G4 (type unification) on one AG-IR (exits nonzero if either fails)");
         print("");
