@@ -37,3 +37,16 @@ test "awaken leaves no critical section behind" {
     assert h is not None;
     _lock_release(h);
 }
+
+# --- why a run failed ---------------------------------------------------------
+# The trace used to say "small-model FAIL" and drop the run's stderr, so the
+# chat agent could not tell a crash from an empty search (hackernews_chat_summary).
+test "fail_reason names the exception and the walker step it died in" {
+    err = "Traceback (most recent call last):\n  File \"/x/hn_v5.jac\", line 2050, in n_prioritize\n    self.ordered_records = list(...)\n  File \"/x/hn_v5.jac\", line 144, in order_records\nAttributeError: 'str' object has no attribute 'get'\n";
+    why = fail_reason({"ok": False, "report": "", "error": err});
+    assert why.startswith("AttributeError: 'str' object has no attribute 'get'"), why;
+    assert why.endswith("(in step prioritize)"), why;
+    assert fail_reason({"ok": False, "report": "", "error": ""}) == "the run returned an empty report";
+    assert fail_reason({"ok": False, "report": "INCOMPLETE: no log", "error": ""}).startswith("INCOMPLETE");
+    assert fail_reason({"ok": False, "report": "", "error": "timeout after 1800s"}) == "timeout after 1800s";
+}

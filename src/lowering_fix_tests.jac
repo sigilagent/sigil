@@ -1782,3 +1782,145 @@ test "the tuning hooks are default-on with an opt-out, and SIGIL_THINK stays opt
     pf = preflight_src({"py": {"pandas": {"pip": "pandas"}}, "bin": {}});
     assert "SIGIL_VERSION_PARITY" in pf, "version parity has no opt-out";
 }
+
+# ---------------------------------------------------------------------------
+# Record slots (hackernews_chat_summary, caught live): a model node writing an
+# untyped `list` of records plus a `dict` report lowered BOTH object fields to
+# `str`, and the walker's `list(...)` split the model's JSON reply into
+# characters — prioritize's first `record.get()` died on every run.
+# ---------------------------------------------------------------------------
+glob RECORDS_IR: str = """---
+name: hn
+description: Parse log records and order them.
+---
+agir_version: 0.2
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  order_records:
+    sig: "(parsed_records) -> list"
+    body: |
+      def order_records(parsed_records: list) -> list:
+          return sorted(parsed_records, key=lambda r: r.get("publication_timestamp") or "", reverse=True)
+walker:
+  name: HnAgent
+  carries:
+    task:            { type: str, role: input }
+    parsed_records:  { type: list, produced_by: parse_entries }
+    parse_report:    { type: dict, produced_by: parse_entries }
+    ordered_records: { type: list, produced_by: prioritize }
+nodes:
+  - id: parse_entries
+    type: EXTRACT
+    reads: [task]
+    writes: [parsed_records, parse_report]
+    doc: |
+      Parse the log. Each record has story_id, title, url,
+      publication_timestamp and source_limitations. Report counts in parse_report.
+  - id: prioritize
+    type: COMPUTE
+    reads: [parsed_records]
+    writes: [ordered_records]
+    tool: order_records
+edges:
+  - {from: parse_entries, to: prioritize}
+""";
+
+test "a multi-write record list gets a typed element obj; no field collapses to str" {
+    src = transpile_ir(RECORDS_IR, "hn");
+    assert "obj ParseEntriesItem {" in src, "record element obj missing";
+    for f in ["story_id", "title", "url", "publication_timestamp", "source_limitations"] {
+        assert ("    has " + f + ": str = \"\";") in src, "record field missing: " + f;
+    }
+    assert "has parsed_records: list[ParseEntriesItem] = [];" in src, "list field must be typed by its element obj";
+    assert "has parse_report: dict[str, str] = {};" in src, "dict field must stay a dict";
+    assert "has parsed_records: str" not in src and "has parse_report: str" not in src;
+    assert "_record_dicts(" in src and "\"ParseEntriesItem\")" in src, "records must come back as dicts";
+    assert "self.parsed_records = list(_field(" not in src, "bare list() of a field splits a string into characters";
+}
+
+test "a multi-write list without a field list is list[str], never str" {
+    vague = RECORDS_IR.replace("Each record has story_id, title, url,\n      publication_timestamp and source_limitations.", "Parse every entry.");
+    src = transpile_ir(vague, "hn");
+    assert "obj ParseEntriesItem" not in src;
+    assert "has parsed_records: list[str] = [];" in src;
+    assert "_record_items(_clean_strlist(_as_list_carry(_field(_rw, \"parsed_records\"))))" in src;
+}
+
+test "a single-write record list returns list of the element obj" {
+    single = RECORDS_IR.replace("    writes: [parsed_records, parse_report]", "    writes: [parsed_records]").replace("    parse_report:    { type: dict, produced_by: parse_entries }\n", "");
+    src = transpile_ir(single, "hn");
+    assert "obj ParseEntriesItem {" in src;
+    assert "-> list[ParseEntriesItem] by llm" in src, "single-write slot must return the record obj list";
+    assert "_record_dicts(" in src;
+}
+
+test "record field lists are taken only from explicit prose" {
+    import from .compiler.mechanical.compiler { _record_fields }
+    assert _record_fields("Each record has story_id, title and url.") == ["story_id", "title", "url"];
+    assert _record_fields("Output a list of {sheet, cell, value, comment}.") == ["sheet", "cell", "value", "comment"];
+    assert _record_fields("Each record has a short title and some notes about it.") == [];
+    assert _record_fields("Parse every entry.") == [];
+    # a Jac-reserved name would be renamed in the obj and break the consumer's .get("type")
+    assert _record_fields("Each item has type, value.") == [];
+}
+
+obj ParseEntriesItem { has story_id: str = ""; has title: str = ""; }
+obj Plan { has x: int = 0; }
+
+test "list carries never become a list of characters at run time" {
+    ns = _runtime_ns();
+    L = ns["_as_list_carry"];
+    assert L("[{\"a\": 1}]") == [{"a": 1}];
+    assert L("```json\n[1, 2]\n```") == [1, 2];
+    assert L("plain text") == ["plain text"];
+    assert L(None) == [] and L("") == [] and L("  ") == [];
+    assert L({"a": 1}) == [{"a": 1}];
+    assert L((1, 2)) == [1, 2];
+    RD = ns["_record_dicts"];
+    o = ParseEntriesItem(story_id="1", title="t");
+    p = Plan(x=1);
+    got = RD([o, p, "s"], "ParseEntriesItem");
+    assert got[0] == {"story_id": "1", "title": "t"}, got;
+    assert got[1] is p and got[2] == "s", "only the generated record class converts";
+}
+
+glob BAD_BODY_IR: str = """---
+name: bad
+description: A tool body that does not parse.
+---
+agir_version: 0.2
+standalone: true
+shape: pipeline
+types: {}
+tools:
+  order_records:
+    sig: "(items) -> list"
+    body: |
+      def order_records(items: list) -> list:
+          from datetime import datetime import datetime, timezone
+          return sorted(items)
+walker:
+  name: BadAgent
+  carries:
+    items:   { type: list, role: input }
+    ordered: { type: list, produced_by: order }
+nodes:
+  - id: order
+    type: COMPUTE
+    reads: [items]
+    writes: [ordered]
+    tool: order_records
+edges: []
+""";
+
+test "an unparseable tool body is named as a gate error, not shipped as a stub" {
+    import from .compiler.mechanical.compiler { unparseable_tools }
+    src = transpile_ir(BAD_BODY_IR, "bad");
+    assert "raise SyntaxError(" in src, "the stub still refuses at run time";
+    bad = unparseable_tools(src);
+    assert len(bad) == 1, bad;
+    assert "order_records" in bad[0] and "line 2" in bad[0], bad[0];
+    assert unparseable_tools(transpile_ir(RECORDS_IR, "hn")) == [];
+}

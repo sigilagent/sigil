@@ -639,12 +639,88 @@ def _multi_out_type(nid: any, types: any) -> str {
     return _arch(nid, types) + "Out";
 }
 
+# RECORD SLOTS. A model slot whose untyped `list` carry holds RECORDS ("Each
+# record has story_id, title, url, publication_timestamp, source_limitations")
+# has no element type to give byLLM, and both fallbacks are broken by
+# construction: `list[str]` hands every consumer strings to `.get()` on, and
+# the multi-write object typed the field `str`, so the walker's `list(...)` of
+# the model's JSON reply split it into characters (hackernews_chat_summary's
+# parse_entries -> prioritize: "'str' object has no attribute 'get'", every
+# run, caught live). A generated obj with one field per named key is what
+# byLLM fills reliably (measured 4/4, vs 0/4 for list[dict[str, str]]).
+# Field names come only from an explicit list in the prose: `{a, b, c}` or
+# "each record/item/entry ... has a, b and c". Anything vaguer yields no fields
+# and the slot keeps the list[str] + _record_items fallback.
+def _record_fields(text: any) -> list[str] {
+    t = re.sub(r"\s+", " ", str(text or ""));
+    ident = r"[A-Za-z_][A-Za-z0-9_]*";
+    cands: list[str] = [];
+    mb: any = re.search(r"\{\s*(" + ident + r"(?:\s*,\s*" + ident + r")+)\s*\}", t);
+    if mb { cands.append(str(mb.group(1))); }
+    for m2 in re.finditer(r"\b(?:each|every)\s+(?:[A-Za-z-]+\s+){0,2}?(?:record|item|entry|object|row|element|result)s?\s+(?:has|have|contains|includes|carries|holds|with)\s*:?\s*([^.;]+)", t, re.I) {
+        cands.append(str(m2.group(1)));
+    }
+    for c in cands {
+        toks: list[str] = [str(x).strip().strip("`'\"").strip() for x in re.split(r",|\band\b|\bor\b", c)];
+        toks = [x for x in toks if x];
+        if (len(toks) < 2) or (len(toks) > 24) or (len(set(toks)) != len(toks)) { continue; }
+        # every token must be a bare identifier the module can declare as-is: a
+        # renamed field (`type` -> `type_`) would break the consumer's .get("type")
+        if all([(re.fullmatch(ident, x) is not None) and (_safe(x) == x) for x in toks]) {
+            return toks;
+        }
+    }
+    return [];
+}
+
+# The record fields of carry `w` written by model node `n`, or [] — only when
+# `w` is the node's ONE untyped list write (the prose can't say which of two
+# lists its field list describes). The carry's own doc wins over the node's.
+def _record_fields_for(n: any, w: str, carries: any, types: any) -> list[str] {
+    lists: list[str] = [];
+    for x in _list(n.get("writes")) {
+        if (str(x) in list(carries)) and (str(_jac_type(carries[str(x)].get("type"), types)[0]) == "list[any]") {
+            lists.append(str(x));
+        }
+    }
+    if lists != [str(w)] { return []; }
+    c = carries.get(str(w));
+    cdoc = str(c.get("doc") or "") if isinstance(c, dict) else "";
+    f = _record_fields(cdoc);
+    return f if f else _record_fields(n.get("doc"));
+}
+
+# The generated record element type of a SINGLE-write model slot, or "". The
+# slot-emission pass declares it and the walker pass converts its elements back
+# to dicts; both ask here so they cannot disagree about which slots qualify.
+def _single_record_item(n: any, carries: any, types: any) -> str {
+    if str(n.get("from_legacy") or "") == "CALL" { return ""; }
+    if n.get("output") and (n.get("output") in types) { return ""; }
+    if _multi_writes(n, carries, types) { return ""; }
+    ws = _list(n.get("writes"));
+    if (not ws) or (str(ws[0]) not in list(carries)) { return ""; }
+    if str(_jac_type(carries[str(ws[0])].get("type"), types)[0]) != "list[any]" { return ""; }
+    return (_arch(n["id"], types) + "Item") if _record_fields_for(n, str(ws[0]), carries, types) else "";
+}
+
+# Declare the record obj for a slot's list carry; returns the element type name.
+def _emit_record_obj(out: list[any], nid: any, fields: list[str], types: any) -> str {
+    name = _arch(nid, types) + "Item";
+    out.append(f"obj {name} {{");
+    for f in fields { out.append(f"    has {f}: str = \"\";"); }
+    out.append("}");
+    return name;
+}
+
 def _assign_carry(tgt: any, expr: str, carries: any, types: any) -> str {
     if (not tgt) or (tgt not in list(carries)) { return "        " + expr + ";"; }
     tt = str(_jac_type(carries[tgt].get("type"), types)[0]);
     if tt == "str" { return f"        self.{_safe(str(tgt))} = str({expr});"; }
     if tt == "any" { return f"        self.{_safe(str(tgt))} = {expr};"; }
-    if tt.startswith("list") { return f"        self.{_safe(str(tgt))} = list({expr});"; }
+    # _as_list_carry, not list(): list() of a STRING is its characters, so a slot or
+    # tool that handed back its list as JSON text became ['[', '{', '"', ...] and
+    # the first consumer's .get() died (hackernews_chat_summary, caught live).
+    if tt.startswith("list") { return f"        self.{_safe(str(tgt))} = list(_as_list_carry({expr}));"; }
     # A verification gate's verdict is `bool`. Without this the check RUNS and its
     # answer is thrown away — the carry keeps its default, so nothing downstream
     # (a guard edge, the TERMINAL report) can ever see a failed check. `bool()` is
@@ -1228,6 +1304,43 @@ def _indent_py(body: str, pad: str) -> list[any] {
     return out;
 }
 
+def _py_parse_error(body: str) -> str {
+    import ast;
+    try {
+        ast.parse("def _f():\n" + textwrap.indent(str(body), "    "));
+    } except SyntaxError as e {
+        # line numbers are the body's own: the wrapper def above is line 1
+        ln = (int(e.lineno) - 1) if e.lineno else 0;
+        return ("line " + str(ln) + ": " if ln > 0 else "") + str(e.msg);
+    } except Exception as e2 {
+        return str(e2)[:120];
+    }
+    return "";
+}
+
+# Tools whose Python body did not parse, as gate diagnostics. Such a tool lowers
+# to a stub that raises SyntaxError, which is itself valid Python: `jac check`
+# passes, the compile reports FAITHFUL, and the skill dies the first time the
+# walker reaches the tool (hackernews_chat_summary v4: `from datetime import
+# datetime import datetime, timezone` in order_records, caught live). A gate
+# that reads this list fails the compile instead, with the line to fix.
+def unparseable_tools(osp: str) -> list[str] {
+    out: list[str] = [];
+    cur = "";
+    for ln in str(osp).splitlines() {
+        m: any = re.match(r"def _?([A-Za-z0-9_]+?)__impl\(", ln);
+        if m { cur = str(m.group(1)); continue; }
+        if "sigil: tool body failed to parse as Python" in ln {
+            detail = "";
+            md: any = re.search(r"failed to parse as Python \((.*?)\); the compiler refused", ln);
+            if md { detail = " (" + str(md.group(1)) + ")"; }
+            out.append("tool '" + (cur if cur else "?") + "': body is not valid Python" + detail
+                       + " — rewrite that tool's `body:` so it parses");
+        }
+    }
+    return out;
+}
+
 def _body_lines(body: str, params: list[any]) -> list[any] {
     out: list[any] = [];
     if _py_ok(body) {
@@ -1257,8 +1370,11 @@ def _body_lines(body: str, params: list[any]) -> list[any] {
         # source text as a value (observed live -- 172 chars of source passed to
         # open(), ENAMETOOLONG), and `jac check` passes because the stub is
         # itself valid Python. Fail loudly so the repair loop can see it.
+        # The parse error rides in the message so `unparseable_tools` can hand
+        # the compile gate (and its repair loop) the exact line to fix.
+        _perr = _py_parse_error(body);
         out.append("    # unparseable Python tool body -> refuse to ship a stub");
-        out.append("    raise SyntaxError(" + repr("sigil: tool body failed to parse as Python; the compiler refused to emit a string stub for it") + ")");
+        out.append("    raise SyntaxError(" + repr("sigil: tool body failed to parse as Python" + ((" (" + _perr + ")") if _perr else "") + "; the compiler refused to emit a string stub for it") + ")");
     } else {
         out.append("    # non-Python tool body (CSS/JSON/template) -> returned string");
         out.append("    return " + repr(body));
@@ -1791,13 +1907,19 @@ def _emit_slots(ir: any) -> str {
         # byLLM can't schematize Any in a slot return. Before falling back to str,
         # let the carry's CONSUMER decide: a tool that reads it as a dict must not
         # be handed a string.
+        _mw = _multi_writes(n, carries, types);
         if "any" in ret {
             hint = "";
-            if n.get("writes") { hint = _consumer_hint(ir, str(_list(n.get("writes"))[0])); }
-            ret = hint if hint else ret.replace("any", "str");
+            _w0 = "";
+            if n.get("writes") {
+                _w0 = str(_list(n.get("writes"))[0]);
+                hint = _consumer_hint(ir, _w0);
+            }
+            if _single_record_item(n, carries, types) {
+                ret = "list[" + _emit_record_obj(out, n["id"], _record_fields_for(n, _w0, carries, types), types) + "]";
+            } else { ret = hint if hint else ret.replace("any", "str"); }
         }
         ret = _schematizable(ret);
-        _mw = _multi_writes(n, carries, types);
         if _mw {
             _oname = _multi_out_type(n["id"], types);
             _fields: list = [];
@@ -1805,7 +1927,20 @@ def _emit_slots(ir: any) -> str {
                 _jt = _jac_type(carries[_w].get("type"), types);
                 _pt = str(_jt[0]);
                 _dv = str(_jt[1]);
-                if "any" in _pt { _pt = "str"; _dv = "\"\""; }
+                # Untyped fields follow the single-write slot's rules, never a
+                # blanket `str`: a list stays a list (records get an element obj),
+                # a dict stays a dict, and only a true `any` becomes text.
+                if _pt == "list[any]" {
+                    _wrf = _record_fields_for(n, str(_w), carries, types);
+                    _pt = ("list[" + _emit_record_obj(out, n["id"], _wrf, types) + "]") if _wrf else "list[str]";
+                    _dv = "[]";
+                } elif "any" in _pt and _pt.startswith("dict") {
+                    _pt = "dict[str, str]"; _dv = "{}";
+                } elif "any" in _pt {
+                    _wh = _consumer_hint(ir, str(_w));
+                    if _wh { _pt = _wh; _dv = "{}" if _wh.startswith("dict") else "[]"; }
+                    else { _pt = "str"; _dv = "\"\""; }
+                }
                 _pt = _schematizable(_pt);
                 if _pt.startswith("dict") { _dv = "{}"; }
                 if _pt.startswith("list") { _dv = "[]"; }
@@ -2355,6 +2490,14 @@ def _emit_walker(ir: any) -> list[any] {
                     if (str(_w) in list(code_owned)) and (_wt != "str") { continue; }
                     _fx = f"_field(_rw, {_q(str(_w))})";
                     if _wt == "str" { _fx = f"_strip_fences({_fx})"; }
+                    # same cleanup the single-write list slot gets: phantom
+                    # elements dropped, record objs/JSON strings back to dicts
+                    if _wt.startswith("list") {
+                        _fx = f"_record_items(_clean_strlist(_as_list_carry({_fx})))";
+                        if (_wt == "list[any]") and _record_fields_for(n, str(_w), carries, types) {
+                            _fx = f"_record_dicts({_fx}, {_q(_arch(nid, types) + 'Item')})";
+                        }
+                    }
                     body.append(_assign_carry(str(_w), _fx, carries, types));
                 }
             } elif tgt and (tgt in ckeys) {
@@ -2376,7 +2519,12 @@ def _emit_walker(ir: any) -> list[any] {
                 # TYPED list carry (G4-unified) rejects at jac check.
                 # …and a record the model handed back as a JSON-object STRING is
                 # turned back into the dict its consumers .get() from (_record_items).
-                if str(tt).startswith("list") { val = f"list(_record_items(_clean_strlist({call})))"; }
+                if str(tt).startswith("list") {
+                    val = f"_record_items(_clean_strlist(_as_list_carry({call})))";
+                    _ri = _single_record_item(n, carries, types);
+                    if _ri { val = f"_record_dicts({val}, {_q(_ri)})"; }
+                    val = f"list({val})";
+                }
                 # Bracket the model's turn so a run shows which slot ran, what it
                 # read, and what it produced — the same visibility tools now get.
                 body.append(_llm_trace_in(_slot_name(nid, carries), creads));

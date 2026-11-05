@@ -44,7 +44,7 @@ import from jaclang.byllm.lib { Tool }
 import from .sigil_core { library, tool_allowed }
 import from .approvals { check_exec, allowlist_add }
 import from .sigil_workspace { _trace, ask_approval }
-import from .sigil_runtime { commit_now }
+import from .sigil_runtime { commit_now, skill_run_dir }
 import from .agent { run_task }
 
 # ---------------------------------------------------------------------------
@@ -194,7 +194,24 @@ def _run_locked(sig: str, t: str) -> str {
         cl = str(ln).strip();
         if cl and (not cl.startswith("prompt-mode")) { _trace("skill", cl); }
     }
-    out = "skill '" + str(r.get("signature") or sig) + "' finished.\n" + str(r.get("result") or "")[:6000];
+    # Say plainly whether it worked. "finished." on a DONE-fail run read as a
+    # clean run with nothing to report, so the chat agent told the person it
+    # could not tell whether anything crashed (hackernews_chat_summary, caught
+    # live). The failure lines the solve walker wrote carry the reason; where a
+    # run's files land is stated because a skill's relative output folder lives
+    # under skill-runs/, not the workspace the chat agent lists.
+    tr = str(r.get("trace") or "");
+    name = str(r.get("signature") or sig);
+    run_note = "Files the run writes (relative paths in the skill) are under " + skill_run_dir() + ".";
+    if "DONE ok" in tr {
+        out = "skill '" + name + "' finished.\n" + run_note + "\n" + str(r.get("result") or "")[:6000];
+    } else {
+        why: list[str] = [str(ln).strip() for ln in tr.splitlines()
+                          if ("FAIL" in str(ln)) or str(ln).strip().startswith("mutate failed") or str(ln).strip().startswith("same failure")];
+        out = ("skill '" + name + "' FAILED: it did not complete, so there is no result to report.\n"
+               + ("\n".join(why) + "\n" if why else "")
+               + run_note + "\n" + str(r.get("result") or "")[:6000]);
+    }
     return (out + "\nWARNING: " + warn) if warn else out;
 }
 
