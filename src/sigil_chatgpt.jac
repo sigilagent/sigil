@@ -692,7 +692,18 @@ def consume(events) -> dict:
 
 def _stream(body: dict) -> dict:
     import httpx
-    timeout = httpx.Timeout(30.0, read=None)
+    import os as _os
+    # An idle limit on the stream, not an unbounded read. read=None let a reply
+    # whose connection died (the Mac slept, the network dropped) block forever:
+    # a scheduled tick sat on a dead socket for hours with nothing logged and
+    # every later job waiting behind it. This bounds the gap BETWEEN streamed
+    # bytes, not the whole reply, so a long answer that keeps streaming is fine.
+    # SIGIL_CHATGPT_IDLE_S, default 600 (reasoning can go quiet for minutes).
+    try:
+        idle = float(_os.environ.get("SIGIL_CHATGPT_IDLE_S") or "600")
+    except Exception:
+        idle = 600.0
+    timeout = httpx.Timeout(30.0, read=(idle if idle > 0 else None))
     for attempt in (0, 1):
         token = access_token(force_refresh=(attempt == 1))
         headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json",

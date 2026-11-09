@@ -457,16 +457,36 @@ def tick_isolated(timeout_s: int = 1800) -> dict[str, any] {
     # The tick blocks until the fired job finishes: one job runs at a time, and a
     # long solve delays the next tick rather than stacking runs on top of it.
     argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "cron", "tick"];
+    # The deadline is WALL-CLOCK time. subprocess.run's timeout counts on the
+    # monotonic clock, which on macOS stops while the machine sleeps: a tick
+    # hung on a dead connection across a sleep outlived its 1800s limit by hours
+    # (Nov 9), holding every later job. Poll in short slices and compare against
+    # time.time(), which does advance across a sleep.
     try {
-        p = subprocess.run(argv, cwd=project_root(), capture_output=True,
-                           text=True, timeout=timeout_s);
-    } except subprocess.TimeoutExpired as e {
-        return {"ok": False, "out": "", "err": "tick exceeded " + str(timeout_s) + "s"};
+        p = subprocess.Popen(argv, cwd=project_root(), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True);
     } except Exception as ex {
         return {"ok": False, "out": "", "err": str(ex)[:300]};
     }
-    return {"ok": p.returncode == 0, "out": str(p.stdout or ""),
-            "err": str(p.stderr or "")[-600:]};
+    deadline = time.time() + timeout_s;
+    out = "";
+    err = "";
+    while True {
+        try {
+            (out, err) = p.communicate(timeout=15);
+            break;
+        } except subprocess.TimeoutExpired as te {
+            if time.time() >= deadline {
+                p.kill();
+                try { p.communicate(timeout=30); } except Exception as e2 { }
+                return {"ok": False, "out": "", "err": "tick exceeded " + str(timeout_s) + "s (killed)"};
+            }
+        } except Exception as ex2 {
+            return {"ok": False, "out": "", "err": str(ex2)[:300]};
+        }
+    }
+    return {"ok": p.returncode == 0, "out": str(out or ""),
+            "err": str(err or "")[-600:]};
 }
 
 def _report_tick(res: dict[str, any], quiet: bool) -> None {
