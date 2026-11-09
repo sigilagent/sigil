@@ -375,13 +375,13 @@ def _plain(v, ind=0):
                 out.append(_plain(x, ind + 1))
             else:
                 out.append(pad + key + ": " + ("none" if x in (None, "", [], {}) else str(x)))
-        return "\n".join(out)
+        return "\\n".join(out)
     if isinstance(v, list):
         seen = []
         for x in v:
             if x not in seen:
                 seen.append(x)
-        return "\n".join(pad + "- " + (_plain(x, ind + 1).strip() if isinstance(x, (dict, list)) else str(x)) for x in seen)
+        return "\\n".join(pad + "- " + (_plain(x, ind + 1).strip() if isinstance(x, (dict, list)) else str(x)) for x in seen)
     return pad + str(v)
 if _text[:1] in "{[":
     try:
