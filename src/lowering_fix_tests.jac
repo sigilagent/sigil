@@ -1924,3 +1924,33 @@ test "an unparseable tool body is named as a gate error, not shipped as a stub" 
     assert "order_records" in bad[0] and "line 2" in bad[0], bad[0];
     assert unparseable_tools(transpile_ir(RECORDS_IR, "hn")) == [];
 }
+
+# ---------------------------------------------------------------------------
+# send_message: a skill that hands over its JSON run report reached the person's
+# phone as raw braces and quotes (hackernews_topic_log, caught live) and read as
+# an error. The builtin renders JSON as plain lines before sending.
+# ---------------------------------------------------------------------------
+::py::
+def _send_render(body, text):
+    head = body.split("try:\n    _rows")[0]
+    src = "def _f(text):\n" + "\n".join("    " + l for l in head.splitlines()) + "\n    return _text\n"
+    ns = {}
+    exec(src, ns)
+    return ns["_f"](text)
+::py::
+
+import from .compiler.mechanical.toolib { builtin }
+
+def send_render(text: str) -> str {
+    return str(_send_render(str(builtin("send_message")["body"]), text));
+}
+
+test "send_message renders a JSON report as plain lines" {
+    out = send_render("{\"search_status\": \"partial\", \"entries_appended\": 0, \"limitations\": [\"a\", \"a\", \"b\"], \"window\": {\"start\": \"s\"}}");
+    assert "{" not in out and "\"" not in out, out;
+    assert "search status: partial" in out and "entries appended: 0" in out, out;
+    assert out.count("- a") == 1 and "- b" in out, "repeated list items are dropped";
+    assert "window:\n  start: s" in out, out;
+    assert send_render("plain {text}") == "plain {text}";
+    assert send_render("{not json") == "{not json";
+}

@@ -50,3 +50,27 @@ test "fail_reason names the exception and the walker step it died in" {
     assert fail_reason({"ok": False, "report": "INCOMPLETE: no log", "error": ""}).startswith("INCOMPLETE");
     assert fail_reason({"ok": False, "report": "", "error": "timeout after 1800s"}) == "timeout after 1800s";
 }
+
+# --- automatic rewrites -------------------------------------------------------
+# A 30-minute cron job rewrote hackernews_topic_log on nearly every run (v46 ->
+# v130 in four days): a dropped connection triggered a mutate, and an honest
+# "nothing new" run graded low and triggered a relearn.
+test "a dropped connection or timeout is transient; a code error is not" {
+    assert transient_failure({"error": "litellm.APIConnectionError: chatgpt: the stream ended before the reply was complete"});
+    assert transient_failure({"error": "timeout after 1800s"});
+    assert transient_failure({"error": "openai.RateLimitError: Error code: 429"});
+    assert not transient_failure({"error": "AttributeError: 'str' object has no attribute 'get'"});
+    assert not transient_failure({"error": "", "report": "retrieved 502 candidates"});
+    assert not transient_failure({"error": "File \"x.jac\", line 502, in n_search\nKeyError: 'hits'"});
+}
+
+test "a fresh automatic rewrite is not rewritten again inside the cooldown" {
+    fresh = TaskGraph(signature="s", intent="i", agir="", module="", version=7, origin="relearn", born_ms=now_ms() - 60000);
+    assert rewrite_blocked(fresh) != "";
+    old = TaskGraph(signature="s", intent="i", agir="", module="", version=7, origin="mutation", born_ms=now_ms() - 25 * 3600000);
+    assert rewrite_blocked(old) == "";
+    compiled = TaskGraph(signature="s", intent="i", agir="", module="", version=1, origin="compiled-skill-raise2", born_ms=now_ms());
+    assert rewrite_blocked(compiled) == "", "a compile the person asked for may still be repaired";
+    legacy = TaskGraph(signature="s", intent="i", agir="", module="", version=9, origin="relearn");
+    assert rewrite_blocked(legacy) == "", "versions from before born_ms was tracked are not held";
+}

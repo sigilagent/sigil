@@ -236,6 +236,15 @@ def _fire(job: CronJob, t: int) -> dict[str, any] {
         res = run_task(job.task, "");
         ok = "DONE ok" in str(res["trace"]);
         summary = str(res["result"]);
+        if not ok {
+            # A failed run's result is usually empty, so the run record said
+            # nothing (59 of hackernews_agentic_ai's 78 runs failed without a
+            # word). Keep the trace lines that say why, ahead of any result.
+            fail_lines: list[str] = [str(ln).strip() for ln in str(res["trace"]).splitlines()
+                   if ("FAIL" in str(ln)) or ("not rewriting" in str(ln)) or ("transient failure" in str(ln))
+                      or str(ln).strip().startswith("mutate failed") or str(ln).strip().startswith("same failure")];
+            summary = ("\n".join(fail_lines) + ("\n" + summary if summary.strip() else "")) if fail_lines else summary;
+        }
     } except Exception as e {
         ok = False;
         summary = "job raised: " + str(e)[:400];

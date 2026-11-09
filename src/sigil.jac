@@ -42,7 +42,8 @@ import from .sigil_core {
     tool_group_set, tool_allowed, tools_policy_info, forget, teach, recollect,
     graph_snapshot, observability_tail, solve_known, solve_known_task,
     solve_task, compile_stage_label, compile_stage_line, compile_stage_secs,
-    set_solver, set_compiler, compiler_available, fail_reason
+    set_solver, set_compiler, compiler_available, fail_reason,
+    transient_failure, rewrite_blocked
 }
 
 sem name_signature = """Coin a short, stable, kebab-case signature naming the CLASS
@@ -106,7 +107,7 @@ def revise_agir(prior_agir: str, task: str, failure: str, ethos: str, contract: 
 def _persist(reg: Registry, sig: str, intent: str, agir: str, module: str, origin: str, version: int,
              skill_src: str = "") -> TaskGraph {
     tg = TaskGraph(signature=sig, intent=intent, agir=agir, module=module,
-                   version=version, origin=origin, skill_src=skill_src);
+                   version=version, origin=origin, skill_src=skill_src, born_ms=now_ms());
     reg +>:Crystallized:+> tg;
     return tg;
 }
@@ -553,27 +554,35 @@ walker solve {
         if not res["ok"] {
             why1 = fail_reason(res);
             self.trace += "small-model FAIL: " + why1 + "\n";
-            self.trace += "-> frontier mutate + retry\n";
             mutated = False;
-            try {
-                tg = mutate(reg, tg, self.task, str(res["error"]) if res["error"] else why1);
-                mutated = True;
-            } except Exception as me {
-                # a revision that does not compile keeps the prior version; say so
-                # instead of aborting the walker with nothing on the trace
-                self.trace += "mutate failed: " + str(me)[:240] + "\n";
-            }
-            if mutated {
-                res = run_compiled(tg, self.task, ctx, self.skill);
-                self.signature = tg.signature;
-                if not res["ok"] {
-                    why2 = fail_reason(res);
-                    self.trace += "retry FAIL: " + why2 + "\n";
-                    if why2 == why1 {
-                        # The revised AG-IR died exactly where the old one did:
-                        # the defect is in the code the compiler emitted, which a
-                        # mutation of the contract cannot reach.
-                        self.trace += "same failure after mutate: likely a compiler (lowering) defect, not the skill\n";
+            held = rewrite_blocked(tg);
+            if transient_failure(res) {
+                # the connection or provider failed, not the procedure
+                self.trace += "transient failure: keeping v" + str(tg.version) + " (no rewrite); the next run retries\n";
+            } elif held {
+                self.trace += "not rewriting: " + held + "\n";
+            } else {
+                self.trace += "-> frontier mutate + retry\n";
+                try {
+                    tg = mutate(reg, tg, self.task, str(res["error"]) if res["error"] else why1);
+                    mutated = True;
+                } except Exception as me {
+                    # a revision that does not compile keeps the prior version; say so
+                    # instead of aborting the walker with nothing on the trace
+                    self.trace += "mutate failed: " + str(me)[:240] + "\n";
+                }
+                if mutated {
+                    res = run_compiled(tg, self.task, ctx, self.skill);
+                    self.signature = tg.signature;
+                    if not res["ok"] {
+                        why2 = fail_reason(res);
+                        self.trace += "retry FAIL: " + why2 + "\n";
+                        if why2 == why1 {
+                            # The revised AG-IR died exactly where the old one did:
+                            # the defect is in the code the compiler emitted, which a
+                            # mutation of the contract cannot reach.
+                            self.trace += "same failure after mutate: likely a compiler (lowering) defect, not the skill\n";
+                        }
                     }
                 }
             }
@@ -590,7 +599,13 @@ walker solve {
                 tg.last_eval = ev.reason;
                 checkpoint("solve eval " + tg.signature);
                 self.trace += "eval -> " + str(ev.score) + "/100 (" + ev.reason + ")\n";
-                if ev.score < soul.eval_threshold {
+                _held = rewrite_blocked(tg) if ev.score < soul.eval_threshold else "";
+                if _held {
+                    # graded low, but this version is itself a fresh automatic
+                    # rewrite: another from-scratch recompile every run is how the
+                    # skill churned through 84 versions; the grade stays on record
+                    self.trace += "eval FAIL, not relearning: " + _held + "\n";
+                } elif ev.score < soul.eval_threshold {
                     self.trace += "eval FAIL -> relearn + retry\n";
                     prev = tg;
                     tg = _recompile(reg, prev, "", "relearn");

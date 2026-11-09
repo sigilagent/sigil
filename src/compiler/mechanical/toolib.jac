@@ -360,6 +360,36 @@ import subprocess as _sp
 _text = str(text or "").strip()
 if not _text:
     return "[send_message: nothing to send]"
+# A person reads this on a phone. A skill that hands over its machine report
+# (a JSON object) arrived as raw braces and quotes (hackernews_topic_log's run
+# report, caught live), which read as an error. Render JSON as plain lines:
+# "key: value", nested blocks indented, lists as bullets with repeats dropped.
+def _plain(v, ind=0):
+    pad = "  " * ind
+    if isinstance(v, dict):
+        out = []
+        for k, x in v.items():
+            key = str(k).replace("_", " ")
+            if isinstance(x, (dict, list)) and x:
+                out.append(pad + key + ":")
+                out.append(_plain(x, ind + 1))
+            else:
+                out.append(pad + key + ": " + ("none" if x in (None, "", [], {}) else str(x)))
+        return "\n".join(out)
+    if isinstance(v, list):
+        seen = []
+        for x in v:
+            if x not in seen:
+                seen.append(x)
+        return "\n".join(pad + "- " + (_plain(x, ind + 1).strip() if isinstance(x, (dict, list)) else str(x)) for x in seen)
+    return pad + str(v)
+if _text[:1] in "{[":
+    try:
+        _parsed = _js.loads(_text)
+    except Exception:
+        _parsed = None
+    if isinstance(_parsed, (dict, list)) and _parsed:
+        _text = _plain(_parsed).strip() or _text
 try:
     _rows = _js.loads(os.environ.get("SIGIL_CHANNELS") or "[]")
 except Exception:
