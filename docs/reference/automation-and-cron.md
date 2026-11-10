@@ -37,6 +37,11 @@ outcome as a `CronRun` (visible via `sigil cron runs <name>` and the `tasks` led
 A tick that lands after a missed window fires the job once and re-arms from now — a
 scheduler that was down overnight does not replay a night of backlog at breakfast.
 
+A job with a channel gets its result as soon as the run finishes. If the result
+grades low, Sigil recompiles the skill after sending it, so the next run uses
+the new version, instead of recompiling and rerunning before anything is sent.
+A tick that runs past 30 minutes is stopped along with everything it started.
+
 ## From chat
 
 Just ask — "every morning summarize my notes", "in 2 hours check the build", "on a cron

@@ -17,6 +17,7 @@ The due-time arithmetic is compiled NATIVE (`na def compute_next`) — a pure in
 hot path over timestamps, the kind of thing the native codespace is for.
 """
 
+import os;
 import time;
 import subprocess;
 import from .sigil_core { awaken, Soul }
@@ -232,9 +233,15 @@ def _fire(job: CronJob, t: int) -> dict[str, any] {
     fire_hooks("cron_fired", job.name);
     ok = False;
     summary = "";
+    relearn_sig = "";
     try {
-        res = run_task(job.task, "");
+        # Deliver first, improve after: a low grade on a scheduled run recompiles
+        # once the result is sent (_relearn_after), not in the middle of the run.
+        os.environ["SIGIL_DEFER_RELEARN"] = "1";
+        try { res = run_task(job.task, ""); }
+        finally { os.environ.pop("SIGIL_DEFER_RELEARN", None); }
         ok = "DONE ok" in str(res["trace"]);
+        if "relearn after delivery" in str(res["trace"]) { relearn_sig = str(res.get("signature") or ""); }
         summary = str(res["result"]);
         if not ok {
             # A failed run's result is usually empty, so the run record said
@@ -267,7 +274,24 @@ def _fire(job: CronJob, t: int) -> dict[str, any] {
               + ("ok" if res["ok"] else ("FAILED: " + str(res["error"])[:160])) + "); in-process save failed: " + why, flush=True);
     }
     if ok { _deliver(job, summary); }
+    if relearn_sig { _relearn_after(job.name, relearn_sig); }
     return {"name": job.name, "ok": ok, "summary": summary[:400]};
+}
+
+def _relearn_after(name: str, sig: str) -> None {
+    # The deferred half of the grounded-eval valve. A fresh process: this one
+    # has held its graph view for the whole run, and a 20-minute compile on a
+    # stale view ends in a WriteConflict that discards the new version. It runs
+    # in the tick's process group, so the tick deadline still bounds it.
+    argv = [_jac_bin(), "run", "--no-serve", entry_script(), "--", "relearn", sig];
+    try {
+        r = subprocess.run(argv, cwd=project_root(), capture_output=True, text=True);
+        last = [ln for ln in str(r.stdout or "").splitlines() if ln.strip()];
+        print("tick: " + name + " graded low; " + (str(last[-1])[:200] if last else ("relearn exited " + str(r.returncode))), flush=True);
+    } except Exception as e {
+        print("tick: " + name + " graded low; relearn failed: " + str(e)[:160], flush=True);
+    }
+    return None;
 }
 
 def _record_run(job: CronJob, t: int, ok: bool, summary: str) -> bool {
@@ -445,6 +469,13 @@ def _nap(seconds: int) -> None {
     return None;
 }
 
+def _kill_group(p: any) -> None {
+    # The tick and everything it started (skill runs, their helpers).
+    try { os.killpg(os.getpgid(p.pid), 9); }   # 9 = SIGKILL
+    except Exception as e { try { p.kill(); } except Exception as e2 { } }
+    return None;
+}
+
 def tick_isolated(timeout_s: int = 1800) -> dict[str, any] {
     # Run one tick in a FRESH process, and not as an optimization.
     #
@@ -463,8 +494,11 @@ def tick_isolated(timeout_s: int = 1800) -> dict[str, any] {
     # (Nov 9), holding every later job. Poll in short slices and compare against
     # time.time(), which does advance across a sleep.
     try {
+        # Its own process group, so the deadline can stop the whole run: the
+        # tick starts the skill's subprocess, and killing only the tick left
+        # that run going on its own for minutes after (Nov 10, 10:30).
         p = subprocess.Popen(argv, cwd=project_root(), stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True);
+                             stderr=subprocess.PIPE, text=True, start_new_session=True);
     } except Exception as ex {
         return {"ok": False, "out": "", "err": str(ex)[:300]};
     }
@@ -477,7 +511,7 @@ def tick_isolated(timeout_s: int = 1800) -> dict[str, any] {
             break;
         } except subprocess.TimeoutExpired as te {
             if time.time() >= deadline {
-                p.kill();
+                _kill_group(p);
                 try { p.communicate(timeout=30); } except Exception as e2 { }
                 return {"ok": False, "out": "", "err": "tick exceeded " + str(timeout_s) + "s (killed)"};
             }
