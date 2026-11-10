@@ -605,6 +605,13 @@ walker solve {
                     # rewrite: another from-scratch recompile every run is how the
                     # skill churned through 84 versions; the grade stays on record
                     self.trace += "eval FAIL, not relearning: " + _held + "\n";
+                } elif (ev.score < soul.eval_threshold) and (os.environ.get("SIGIL_DEFER_RELEARN") == "1") {
+                    # A scheduled run: nobody is waiting at a prompt, but the
+                    # result is due on a channel. A recompile here takes ~20 min
+                    # and the retry another run, which pushed the Nov 10 digest
+                    # past the tick deadline before anything was sent. Cron
+                    # delivers this result, then recompiles (cron._relearn_after).
+                    self.trace += "eval FAIL -> relearn after delivery (v" + str(tg.version) + ")\n";
                 } elif ev.score < soul.eval_threshold {
                     self.trace += "eval FAIL -> relearn + retry\n";
                     prev = tg;
