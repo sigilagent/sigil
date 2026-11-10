@@ -75,6 +75,12 @@ test "every builtin body parses, and declares the names it uses" {
                 bound.add(node.id);
             } elif isinstance(node, ast.ExceptHandler) and node.name {
                 bound.add(str(node.name));
+            } elif isinstance(node, ast.FunctionDef) {
+                # a local helper (send_message's JSON renderer): its name and
+                # its parameters are bound in the body
+                bound.add(str(node.name));
+            } elif isinstance(node, ast.arg) {
+                bound.add(str(node.arg));
             }
         }
         for node in ast.walk(tree) {

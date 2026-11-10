@@ -68,6 +68,14 @@ class ChatGPTError(RuntimeError):
     """A ChatGPT plan call or sign-in failed, phrased for the person at the keyboard."""
 
 
+class ChatGPTDropped(ChatGPTError):
+    """The request never produced a whole reply because the connection or the
+    server failed, not because of anything in the request. Nothing of a dropped
+    reply is used, so sending the same request again is safe."""
+
+    retry_after = 0.0
+
+
 # ---------------------------------------------------------------------------
 # Files
 # ---------------------------------------------------------------------------
@@ -615,6 +623,9 @@ def _fail(status: int, body) -> Exception:
         return _terminal("ChatGPT did not accept the sign-in (401) — run `sigil connect chatgpt`")
     if status == 403:
         return _terminal("ChatGPT refused this request (403): %s" % (msg or "a policy or region restriction"))
+    if status in _RESEND_STATUS or code in ("server_error", "rate_limit_exceeded"):
+        return ChatGPTDropped("chatgpt: the request failed (HTTP %s%s): %s"
+                              % (status, (", " + code) if code else "", (msg or "no reason given")[:300]))
     return ChatGPTError("chatgpt: the request failed (HTTP %s%s): %s"
                         % (status, (", " + code) if code else "", (msg or "no reason given")[:300]))
 
@@ -687,28 +698,113 @@ def consume(events) -> dict:
             raise _fail(0, {"error": r.get("error") or {}})
         elif kind == "error":
             raise _fail(int(ev.get("status") or 0), {"error": {"code": ev.get("code"), "message": ev.get("message")}})
-    raise ChatGPTError("chatgpt: the stream ended before the reply was complete — try again")
+    raise ChatGPTDropped("chatgpt: the stream ended before the reply was complete")
 
 
-def _stream(body: dict) -> dict:
+# HTTP statuses that say "not now", never "not this request".
+_RESEND_STATUS = (408, 409, 429, 500, 502, 503, 504)
+
+
+def resend_waits() -> list:
+    """Seconds to wait before each resend of a dropped request.
+
+    Spaced for a laptop waking from sleep: Wi-Fi and DNS take from a few seconds
+    to about a minute to come back, and a resend into a dead network fails at
+    once. The default 5, 15, 45, 90 rides out ~2.5 minutes of outage.
+    SIGIL_CHATGPT_RESENDS sets how many (0 = never resend)."""
+    base = [5.0, 15.0, 45.0, 90.0]
+    try:
+        n = int(os.environ.get("SIGIL_CHATGPT_RESENDS") or len(base))
+    except Exception:
+        n = len(base)
+    n = max(0, min(n, 10))
+    return [base[min(i, len(base) - 1)] for i in range(n)]
+
+
+def with_resends(send, waits=None, sleep=None, note=None):
+    """`send()`, sent again after each wait while it fails as ChatGPTDropped.
+
+    Only drops are resent: a refused sign-in, a usage limit or a bad request
+    raises straight through. A server Retry-After longer than the planned wait
+    is honoured (capped at five minutes). When every resend fails, the last
+    drop is raised with the count, still worded as a connection failure so the
+    solve loop does not rewrite a skill over it."""
+    plan = resend_waits() if waits is None else list(waits)
+    pause = sleep or time.sleep
+    i = 0
+    while True:
+        try:
+            return send()
+        except ChatGPTDropped as e:
+            if i >= len(plan):
+                if plan:
+                    raise ChatGPTDropped("%s (connection dropped; %d resends also failed)"
+                                         % (str(e), len(plan))) from e
+                raise
+            wait = max(plan[i], min(float(getattr(e, "retry_after", 0) or 0), 300.0))
+            i += 1
+            if note:
+                note(i, len(plan), wait, e)
+            pause(wait)
+
+
+def _note_resend(i: int, n: int, wait: float, err) -> None:
+    import sys
+    msg = "%s; resending in %ds (%d/%d)" % (str(err)[:160], int(wait), i, n)
+    print(msg, file=sys.stderr, flush=True)
+    # Any half reply already shown live is about to be replaced by the resend.
+    _emit("thinking", "\n[" + msg + "]\n")
+
+
+def _stream_once(body: dict, timeout) -> dict:
     import httpx
-    timeout = httpx.Timeout(30.0, read=None)
     for attempt in (0, 1):
         token = access_token(force_refresh=(attempt == 1))
         headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json",
                    "Accept": "text/event-stream"}
-        with httpx.stream("POST", RESPONSES_URL, json=body, headers=headers, timeout=timeout) as r:
-            if r.status_code == 401 and attempt == 0:
-                continue  # the token may have been revoked early: refresh once and retry
-            if r.status_code != 200:
-                r.read()
-                try:
-                    parsed = r.json()
-                except Exception:
-                    parsed = {"detail": r.text[:300]}
-                raise _fail(r.status_code, parsed)
-            return consume(_events(r))
+        try:
+            with httpx.stream("POST", RESPONSES_URL, json=body, headers=headers, timeout=timeout) as r:
+                if r.status_code == 401 and attempt == 0:
+                    continue  # the token may have been revoked early: refresh once and retry
+                if r.status_code != 200:
+                    r.read()
+                    try:
+                        parsed = r.json()
+                    except Exception:
+                        parsed = {"detail": r.text[:300]}
+                    err = _fail(r.status_code, parsed)
+                    if isinstance(err, ChatGPTDropped):
+                        try:
+                            err.retry_after = float(r.headers.get("retry-after") or 0)
+                        except Exception:
+                            pass
+                    raise err
+                return consume(_events(r))
+        except httpx.TransportError as e:
+            # Connect/read timeouts, resets, a peer that hung up mid-body, DNS
+            # failing while the network comes back from sleep: all drops.
+            raise ChatGPTDropped("chatgpt: the connection dropped (%s: %s)"
+                                 % (type(e).__name__, str(e)[:200] or "no detail")) from e
     raise _terminal("ChatGPT did not accept the sign-in (401) — run `sigil connect chatgpt`")
+
+
+def _stream(body: dict) -> dict:
+    import httpx
+    # An idle limit on the stream, not an unbounded read. read=None let a reply
+    # whose connection died (the Mac slept, the network dropped) block forever:
+    # a scheduled tick sat on a dead socket for hours with nothing logged and
+    # every later job waiting behind it. This bounds the gap BETWEEN streamed
+    # bytes, not the whole reply, so a long answer that keeps streaming is fine.
+    # SIGIL_CHATGPT_IDLE_S, default 600 (reasoning can go quiet for minutes).
+    try:
+        idle = float(os.environ.get("SIGIL_CHATGPT_IDLE_S") or "600")
+    except Exception:
+        idle = 600.0
+    timeout = httpx.Timeout(30.0, read=(idle if idle > 0 else None))
+    # A dropped reply is resent whole: plan usage streams `store: false`, so
+    # there is no server-side response to resume, and nothing of a half reply
+    # has been handed to the caller yet.
+    return with_resends(lambda: _stream_once(body, timeout), note=_note_resend)
 
 
 def _response(model: str, out: dict):

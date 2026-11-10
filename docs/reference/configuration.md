@@ -21,7 +21,7 @@ Current values are shown by `sigil soul` (or `/soul` in chat).
 | `verbose` | on/off | Show the model's output as it is generated. **Default on.** A compile is dozens of model calls and the words being written are the artifact; `--quiet` or `SIGIL_VERBOSE=0` turns it off for one run. See [skill-compilation](skill-compilation.md#watching-the-compile). |
 | `prompt_mode` | `full` \| `minimal` \| `none` | How much context (ethos + memory) wraps the compiler/run. |
 | `auto_eval` | on/off | Grounded-eval valve: judge each skill run and relearn if it fails. |
-| `eval_threshold` | 0–100 | A run scoring below this auto-triggers a relearn + retry. |
+| `eval_threshold` | 0–100 | A run scoring below this auto-triggers a relearn + retry, unless the skill was itself rewritten automatically within the last `SIGIL_REWRITE_COOLDOWN_H` hours (default 24; `0` turns the limit off). A run that failed on a dropped connection or timeout is never rewritten. |
 | `recall_mode` | `lexical` \| `vector` \| `hybrid` | How semantic memory is retrieved. See [memory-and-skills](memory-and-skills.md). |
 | `embed_model` | model name | Embedding model (litellm name) for vector/hybrid recall. |
 | `add_ethos` | text | Append an operating principle to the ethos. |

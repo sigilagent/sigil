@@ -117,6 +117,81 @@ test "consume: a usage-limit failure names the fix" {
     assert "chatgpt.com/settings/usage" in msg;
 }
 
+# A sender that drops `fails` times before answering, and a sleep that only
+# records how long it was asked to wait.
+obj FlakySend {
+    has fails: int = 0;
+    has calls: int = 0;
+    has kind: str = "drop";
+    def send() -> any {
+        self.calls += 1;
+        if self.calls <= self.fails {
+            if self.kind == "drop" { raise ChatGPTDropped("chatgpt: the stream ended before the reply was complete"); }
+            raise ChatGPTError("chatgpt: the request failed (HTTP 400): bad input");
+        }
+        return {"text": "ok"};
+    }
+}
+
+obj Waits {
+    has seen: list[float] = [];
+    def pause(s: float) -> None { self.seen.append(s); }
+}
+
+test "with_resends: a dropped reply is sent again and the answer is used" {
+    f = FlakySend(fails=2);
+    w = Waits();
+    out: any = with_resends(f.send, [5.0, 15.0, 45.0], w.pause);
+    assert out["text"] == "ok";
+    assert f.calls == 3;
+    assert w.seen == [5.0, 15.0];
+}
+
+test "with_resends: an error in the request itself is never resent" {
+    f = FlakySend(fails=1, kind="bad");
+    w = Waits();
+    raised = False;
+    try { with_resends(f.send, [5.0, 15.0], w.pause); }
+    except ChatGPTDropped as e { raised = False; }
+    except ChatGPTError as e { raised = True; }
+    assert raised;
+    assert f.calls == 1;
+    assert len(w.seen) == 0;
+}
+
+test "with_resends: when every resend drops, the error still reads as a dropped connection" {
+    f = FlakySend(fails=9);
+    w = Waits();
+    msg = "";
+    try { with_resends(f.send, [1.0, 2.0], w.pause); }
+    except ChatGPTDropped as e { msg = str(e); }
+    assert f.calls == 3;
+    assert "stream ended before the reply" in msg;
+    assert "2 resends also failed" in msg;
+}
+
+test "resend_waits: default rides out a wake from sleep; 0 turns resends off" {
+    os.environ.pop("SIGIL_CHATGPT_RESENDS", None);
+    assert resend_waits() == [5.0, 15.0, 45.0, 90.0];
+    os.environ["SIGIL_CHATGPT_RESENDS"] = "0";
+    assert resend_waits() == [];
+    os.environ.pop("SIGIL_CHATGPT_RESENDS", None);
+}
+
+test "consume: a server error mid-stream is a drop, a usage limit is not" {
+    dropped = False;
+    try { consume(iter([{"type": "error", "status": 503, "message": "overloaded"}])); }
+    except ChatGPTDropped as e { dropped = True; }
+    assert dropped;
+    limit_dropped = False;
+    try {
+        consume(iter([{"type": "response.failed",
+                       "response": {"error": {"code": "subscription_sharing_usage_limit_exceeded"}}}]));
+    } except ChatGPTDropped as e { limit_dropped = True; }
+      except Exception as e { limit_dropped = False; }
+    assert not limit_dropped;
+}
+
 test "build_authorize: a first sign-in registers Sigil" {
     _home();
     pair: any = build_authorize("http://127.0.0.1:5000/auth/callback");

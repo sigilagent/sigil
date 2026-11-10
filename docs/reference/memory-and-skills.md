@@ -59,5 +59,9 @@ sigil forget <sig>            # remove a skill entirely (all versions + files)
 ```
 
 The `auto_eval` valve (with `eval_threshold`) judges each skill run and can automatically
-relearn a degraded procedure. Isolation: each compiled module runs in a separate
+relearn a degraded procedure. A failed run can likewise be mutated into a new version.
+Both are rate-limited: a version that was itself made automatically is not rewritten
+again for `SIGIL_REWRITE_COOLDOWN_H` hours (default 24), and a run that failed on a
+dropped connection, timeout or rate limit keeps its version. A run that did the work
+and honestly found nothing new is graded as a success, not as an empty result. Isolation: each compiled module runs in a separate
 subprocess, so a run's throwaway task-graph never touches Sigil's own persistent graph.

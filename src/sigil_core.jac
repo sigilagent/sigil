@@ -175,6 +175,7 @@ node TaskGraph {
     has successes: int = 0;
     has last_score: int = -1;       # last grounded-eval score (0-100); -1 = never evaluated
     has last_eval: str = "";        # last eval verdict (one-line reason)
+    has born_ms: int = 0;           # when this version was made (epoch-ms; 0 = before this was tracked)
 }
 
 @archetype_alias("src.sigil.Attempt")
@@ -529,7 +530,13 @@ produced, decide whether the result correctly and completely accomplishes the ta
 Be harsh: score LOW (<40) if the result is empty, merely echoes/repeats the task or its
 input, ignores the instruction, is truncated, or is only partially right. Score HIGH
 (>80) only when it fully and correctly satisfies the task. Judge the ARTIFACT, not the
-intent.""";
+intent.
+A result that shows the work was DONE and honestly found nothing new is a CORRECT
+result, not an empty one: a recurring search that ran, reports what it covered, and
+says every match was already logged (or none matched) accomplished its task. Score it
+on whether the work and its counts are shown, never on how many items were added. Do
+not penalize disclosed source limitations (non-exhaustive API counts, unreachable
+pages) when the result reports them honestly.""";
 def judge_result(task: str, result: str) -> EvalVerdict by router();
 
 
@@ -610,6 +617,42 @@ def fail_reason(res: dict[str, any]) -> str {
     return exc[:240] + at_step;
 }
 
+# A failure that says nothing about the skill: the model connection dropped, a
+# call timed out, a provider was rate-limiting. Rewriting the skill over one of
+# these (mutate) replaces a working procedure with a fresh model-authored one
+# for no reason; the next scheduled run simply tries again.
+def transient_failure(res: dict[str, any]) -> bool {
+    import re;
+    # the error text only: a report saying "502 candidates" is not an HTTP 502
+    txt = str(res.get("error") or "");
+    return re.search(r"APIConnectionError|stream ended before the reply|connection dropped|timed? ?out|timeout after|Connection reset|ConnectionError|RateLimit|rate limit|(?:HTTP|Error code:?|status(?:_code)?[=: ]+)\s*(?:429|50[234])\b|ServiceUnavailable|Overloaded|WriteConflict|could not serialize", txt, re.I) is not None;
+}
+
+# How long a rewritten skill version is kept before another automatic rewrite
+# (mutate on a failed run, relearn on a low grade) may replace it. Without it a
+# job every 30 minutes rewrote hackernews_topic_log on nearly every run — v46 to
+# v130 in four days (74 mutations, 54 relearns), each a different program with its
+# own report format, query style and bugs. SIGIL_REWRITE_COOLDOWN_H, default 24;
+# 0 turns the limit off.
+def rewrite_cooldown_ms() -> int {
+    v = str(os.environ.get("SIGIL_REWRITE_COOLDOWN_H") or "24").strip();
+    try { h = float(v); } except Exception as e { h = 24.0; }
+    return int(max(h, 0.0) * 3600000);
+}
+
+# "" when the skill may be rewritten automatically now, else why not.
+def rewrite_blocked(tg: TaskGraph) -> str {
+    cd = rewrite_cooldown_ms();
+    if cd <= 0 { return ""; }
+    if str(tg.origin) not in ["mutation", "relearn"] { return ""; }
+    if int(tg.born_ms) <= 0 { return ""; }
+    age = now_ms() - int(tg.born_ms);
+    if age >= cd { return ""; }
+    return ("v" + str(tg.version) + " was itself an automatic " + str(tg.origin) + " "
+            + str(int(age / 60000)) + " min ago; not rewriting again for "
+            + str(int((cd - age) / 60000)) + " min (SIGIL_REWRITE_COOLDOWN_H)");
+}
+
 def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str, any] {
     # Small model executes the compiled OSP. The compiled PROCEDURE is
     # class-general; instance-specific semantic memory is injected here, at run
@@ -638,7 +681,9 @@ def run_compiled(tg: TaskGraph, task: str, context: str, skill: str) -> dict[str
     res = execute_module(tg.module, run_input, SMALL_NAME, skill, WORKDIR, 1800, mcp_json(), tg.signature, shelf, chans);
     tg.runs += 1;
     if res["ok"] { tg.successes += 1; }
-    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME, summary=str(res["report"])[:400], at_ms=now_ms());
+    # a failed run's record says why, not just an empty report
+    a = Attempt(task=task, ok=bool(res["ok"]), model=SMALL_NAME,
+                summary=(str(res["report"])[:400] if res["ok"] else ("FAIL: " + fail_reason(res))[:400]), at_ms=now_ms());
     tg +>:Ran:+> a;
     checkpoint("skill run " + tg.signature);
     return res;
