@@ -625,7 +625,7 @@ def transient_failure(res: dict[str, any]) -> bool {
     import re;
     # the error text only: a report saying "502 candidates" is not an HTTP 502
     txt = str(res.get("error") or "");
-    return re.search(r"APIConnectionError|stream ended before the reply|timed? ?out|timeout after|Connection reset|ConnectionError|RateLimit|rate limit|(?:HTTP|Error code:?|status(?:_code)?[=: ]+)\s*(?:429|50[234])\b|ServiceUnavailable|Overloaded|WriteConflict|could not serialize", txt, re.I) is not None;
+    return re.search(r"APIConnectionError|stream ended before the reply|connection dropped|timed? ?out|timeout after|Connection reset|ConnectionError|RateLimit|rate limit|(?:HTTP|Error code:?|status(?:_code)?[=: ]+)\s*(?:429|50[234])\b|ServiceUnavailable|Overloaded|WriteConflict|could not serialize", txt, re.I) is not None;
 }
 
 # How long a rewritten skill version is kept before another automatic rewrite

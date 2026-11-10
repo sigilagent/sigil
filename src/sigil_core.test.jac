@@ -58,6 +58,7 @@ test "fail_reason names the exception and the walker step it died in" {
 test "a dropped connection or timeout is transient; a code error is not" {
     assert transient_failure({"error": "litellm.APIConnectionError: chatgpt: the stream ended before the reply was complete"});
     assert transient_failure({"error": "timeout after 1800s"});
+    assert transient_failure({"error": "chatgpt: the connection dropped (RemoteProtocolError: peer closed connection) (connection dropped; 4 resends also failed)"});
     assert transient_failure({"error": "openai.RateLimitError: Error code: 429"});
     assert not transient_failure({"error": "AttributeError: 'str' object has no attribute 'get'"});
     assert not transient_failure({"error": "", "report": "retrieved 502 candidates"});

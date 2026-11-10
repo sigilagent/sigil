@@ -71,6 +71,13 @@ accepts.
 Set `SIGIL_CHATGPT_EFFORT` (`low`, `medium` or `high`) to pass a reasoning effort
 with every call.
 
+If a call's connection drops before the reply is complete (the computer slept,
+the network went away, the server answered 429 or 5xx), Sigil sends the same
+request again after 5, 15, 45 and 90 seconds, which covers the time a laptop's
+network takes to come back after waking. A reply that goes silent for
+`SIGIL_CHATGPT_IDLE_S` seconds (default 600) counts as dropped. A refused sign-in,
+a usage limit or a bad request is never resent.
+
 ### Claude Code: your Claude subscription
 
 ```bash
@@ -321,6 +328,8 @@ ejected program a normal provider name (`SIGIL_MODEL=openai/gpt-5`,
 |---|---|---|
 | `SIGIL_REQUIRE_CONNECTION` | on | `0` turns off the first-run gate |
 | `SIGIL_CHATGPT_EFFORT` | unset | reasoning effort sent with every ChatGPT call |
+| `SIGIL_CHATGPT_RESENDS` | `4` | how many times a dropped ChatGPT call is sent again (`0` = never) |
+| `SIGIL_CHATGPT_IDLE_S` | `600` | seconds of silence before a ChatGPT reply counts as dropped (`0` = wait forever) |
 | `OLLAMA_HOST` | `127.0.0.1:11434` | where Sigil looks for Ollama |
 | `OLLAMA_API_KEY` | unset | the Ollama Cloud API key (`sigil connect ollama-cloud` saves it) |
 | `SIGIL_CLAUDE_BIN` | `claude` | the Claude Code binary |
