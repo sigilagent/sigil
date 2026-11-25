@@ -33,6 +33,7 @@ import from .faith { faithfulness_report, FaithReport, proof_lines, fold_untrace
 import from .gates { compile_gate }
 import from .repair { repair_compile_loop, pin_repair_llm }
 import from .autofix { canonicalize_ir, autofix_ir }
+import from .effect_gate { effect_rung, effect_after_repair, pin_effect_llm }
 # The same progress seam the legacy lift uses: compile_skill installs the CLI's
 # (or chat's) renderer via set_lift_progress BEFORE dispatching here, so raise2
 # narrates through the identical hook. Without these events the DEFAULT compile
@@ -58,6 +59,7 @@ def pin_raise2_llms(m: any) -> None {
     pin_buildout_llm(m);
     pin_adjudge_llm(m);
     pin_repair_llm(m);
+    pin_effect_llm(m);
 }
 
 
@@ -159,7 +161,7 @@ def raise2(skill: str, name: str, max_repair: int = 2, skill_dir: str = "", ask:
         }
     }
     rr = raise_from_spec(skill, name, sr.spec, max_repair, skill_dir=skill_dir);
-    rr.warnings = warnings;
+    rr.warnings = warnings + rr.warnings;
     rr.clarify = sr.clarify;
     return rr;
 }
@@ -325,6 +327,21 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
         repairs.append("autofix: authored YAML parsed only via the relaxer — re-emitted as strict YAML");
     }
 
+    # Effect rung (G6_EFFECT), on the final document and before the gate: a tool
+    # labeled below what its bound code does goes to the compile model for repair,
+    # with its own max_repair allowance, and is relabeled ACT if the model does not
+    # fix it (effect_gate.jac), so lowering and every later reader see the write.
+    # Nothing is adopted that stops lowering or costs the proof. What nobody can
+    # settle is listed, not warned about (a strict compile fails on any warning).
+    er = effect_rung(ir, skill_dir, name, spec, max_repair);
+    effect_warnings: list[str] = [str(w) for w in list(er["warnings"])];
+    for u in list(er["report"]) { repairs.append(str(u)); }
+    for n in list(er["notes"]) { repairs.append(str(n)); }
+    if str(er["ir_text"]) != ir {
+        ir = str(er["ir_text"]);
+        fr = faithfulness_report(spec, ir);
+    }
+
     # Coherence gate LAST — faithfulness first, compilability second (the inverse of
     # today's _finalize, which compiles before it checks coverage).
     _t = time.time();
@@ -346,6 +363,17 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
             if frr.ok {
                 ir = ro.ir_text; fr = frr; v = ro.verdict;
                 repairs.append("compile repair: adopted (still faithful)");
+                # The effect rung checked the IR before this repair: check the repaired one
+                # again when a tool or an opcode changed (no repair attempts this time), and
+                # keep only the effect warnings that hold for it.
+                ea = effect_after_repair(er, ir, skill_dir, name, spec);
+                if ea is not None {
+                    for u in list(ea["repairs"]) { repairs.append(str(u)); }
+                    effect_warnings = [str(w) for w in list(ea["warnings"])];
+                    if str(ea["ir_text"]) != ir {
+                        ir = str(ea["ir_text"]); v = ea["verdict"]; fr = faithfulness_report(spec, ir);
+                    }
+                }
             } else {
                 repairs.append("compile repair: compiled but lost faithfulness — keeping prior");
             }
@@ -358,7 +386,8 @@ def raise_from_spec(skill: str, name: str, spec: RuleSet, max_repair: int = 2,
     else { status = "faithful"; }
     return RaiseResult(
         ok=(fr.ok and v.ok), status=status, ir_text=ir, module_src=v.module_src,
-        proof=fr, rounds=rounds, repairs=repairs, compile_errors=v.errors
+        proof=fr, rounds=rounds, repairs=repairs, compile_errors=v.errors,
+        warnings=effect_warnings
     );
 }
 
